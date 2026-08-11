@@ -43,7 +43,7 @@ namespace CommandCenter.Services
         private volatile int _busy;      // 忙碌标志：0=空闲，1=处理中（Interlocked 原子，跨线程安全）
         private volatile bool _running;  // 总开关
         private int _seqNo;              // 全局检测序号
-        private int _nextWindowIndex;    // 下一个要刷新的窗口（1..rows*cols 环形）
+        private int _nextWindowIndex = 1;  // 下一个要刷新的窗口（1..rows*cols 环形），初始 1 保证"第一个拍照位=点位1"
         private readonly int _windowCount; // 显示窗口总数 = rows*cols
 
         // 一次检测的所有相机快照（触发成功到收尾之间会被 FTP 线程/超时线程读取）

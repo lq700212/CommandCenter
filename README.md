@@ -20,7 +20,7 @@ CommandCenter/
 │                    ※ MainForm/SettingsForm 静态布局（标题栏、状态栏、矩阵容器、设置表控件）
 │                      在对应 .Designer.cs 里可视化维护；动态部分（相机灯、窗口矩阵内容）
 │                      在业务文件里运行时生成
-├── Controls/        自绘/辅助控件（CameraDisplayControl / OkNgBadge / TipMarker 悬停提示问号标记）
+├── Controls/        自绘/辅助控件（CameraDisplayControl / OkNgBadge）
 ├── Services/        通讯与业务编排（PlcService / KeyenceIV4Camera / ImageStore /
 │                    ProductionCoordinator / RecipeManager / ScannerService）
 ├── Models/          配置模型（AppConfig / RecipeConfig / WindowData）

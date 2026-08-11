@@ -7,7 +7,7 @@ namespace CommandCenter.Controls
     /// <summary>
     /// 相机显示控件：负责显示一路相机/一个检测点的画面与结果。
     /// ┌────────────────────────────────────┐
-    /// │  编号         点位 2                    │  ← 左上：窗口编号；右上：该窗口的存图点位
+    /// │  编号                                 │  ← 左上：窗口编号
     /// │                                        │
     /// │             [ 图像显示区 ]            │  ← 中间：PictureBox，Zoom 居中显示照片
     /// │                                        │
@@ -18,8 +18,9 @@ namespace CommandCenter.Controls
     ///   - OK/NG 徽标用自绘控件 OkNgBadge，边框与文字同色：
     ///       OK = 绿色，NG = 红色（现场习惯，OK 即绿色、NG 即红色）；
     ///   - 控件默认浅蓝底（空态），收到图片后自动切图片显示；
-    ///   - 右上角"点位 N"是该窗口的存图点位（可自定义，见 DisplayConfig.WindowStationMap），
-    ///     现场据此知道这个窗口的图将来存成"几.png"。
+    ///   - 本控件不显示存图点位（避免主界面信息冗余）；点位归属由
+    ///     ProductionCoordinator 按"窗口→点位"映射计算，只通过设置界面的
+    ///     WindowPointForm 查询/比对（见 DisplayConfig.WindowStationMap）。
     /// </summary>
     public class CameraDisplayControl : UserControl
     {
@@ -29,9 +30,6 @@ namespace CommandCenter.Controls
         /// <summary>窗口编号（从 1 开始，辅助现场定位第几路）</summary>
         private readonly Label _windowIndexLabel;
 
-        /// <summary>右上角存图点位标签（如 "点位 2"，显示该窗口存图文件名里的点位号）</summary>
-        private readonly Label _stationLabel;
-
         /// <summary>右下角 OK/NG 徽标</summary>
         private readonly OkNgBadge _okNgBadge;
 
@@ -40,9 +38,6 @@ namespace CommandCenter.Controls
 
         /// <summary>窗口编号（1 起）</summary>
         private int _windowIndex;
-
-        /// <summary>当前窗口的存图点位（默认与窗口编号一致）</summary>
-        private int _stationNo = 1;
 
         /// <summary>
         /// 构造：创建图像区、编号标签、OK/NG 徽标并摆好位置。
@@ -76,19 +71,6 @@ namespace CommandCenter.Controls
             };
             Controls.Add(_windowIndexLabel);
 
-            // ②b 存图点位标签：右上角悬浮（深底亮灰字，与左上角编号区分；显示此窗口存图文件名里的点位号）
-            _stationLabel = new Label
-            {
-                AutoSize = true,
-                ForeColor = Color.FromArgb(235, 235, 235),
-                BackColor = Color.FromArgb(45, 45, 45, 165),
-                Font = new Font("Microsoft YaHei", 9F, FontStyle.Bold),
-                Text = "点位 1",
-                Location = new Point(Width - 66, 4)
-            };
-            _stationLabel.BringToFront();
-            Controls.Add(_stationLabel);
-
             // ③ OK/NG 徽标：右下角，Anchor 保证随控件缩放自动贴右下
             _okNgBadge = new OkNgBadge
             {
@@ -100,14 +82,12 @@ namespace CommandCenter.Controls
             _okNgBadge.BringToFront();
             Controls.Add(_okNgBadge);
 
-            // 控件尺寸变化时，刷新徽标右下角 / 点位标签右上角位置
+            // 控件尺寸变化时，刷新徽标右下角位置
             Resize += (s, e) =>
             {
                 _okNgBadge.Location = new Point(Math.Max(0, Width - _okNgBadge.Width - 6),
                                                 Math.Max(0, Height - _okNgBadge.Height - 6));
-                _stationLabel.Location = new Point(Math.Max(0, Width - _stationLabel.Width - 6), 4);
                 _windowIndexLabel.BringToFront();
-                _stationLabel.BringToFront();
                 _okNgBadge.BringToFront();
             };
         }
@@ -120,18 +100,6 @@ namespace CommandCenter.Controls
         {
             _windowIndex = index;
             _windowIndexLabel.Text = index.ToString();
-        }
-
-        /// <summary>
-        /// 设置该窗口的存图点位并显示到右上角（"点位 N"）。
-        /// 点位可自定义（见 DisplayConfig.WindowStationMap），默认与窗口编号一致。
-        /// </summary>
-        /// <param name="stationNo">存图点位号（进文件名 {点位}）</param>
-        public void SetStationNo(int stationNo)
-        {
-            _stationNo = stationNo;
-            _stationLabel.Text = "点位 " + stationNo;
-            _stationLabel.Location = new Point(Math.Max(0, Width - _stationLabel.Width - 6), 4);
         }
 
         /// <summary>
@@ -162,9 +130,6 @@ namespace CommandCenter.Controls
 
         /// <summary>当前窗口编号</summary>
         public int WindowIndex => _windowIndex;
-
-        /// <summary>当前窗口的存图点位（DisplayConfig.WindowStationMap 对应值，默认=窗口编号）</summary>
-        public int StationNo => _stationNo;
 
         /// <summary>
         /// 资源释放：释放控件持有的图片句柄，避免句柄泄漏。

@@ -15,13 +15,14 @@ namespace CommandCenter.Views
     ///   │ 显示窗口行:[nudRows] 列:[nudCols]                   │
     ///   │ 图片保存根目录: [txtSaveDir]                         │
     ///   │ 目录结构: [btnEditDirs 配置目录结构…]               │
+    ///   │    （上下各留 12px 空隙，避免与文件名模板行挤在一起）│
     ///   │ 文件名模板:     [txtFileNameTpl]                    │
     ///   │ 窗口点位: [btnEditPoints 窗口/点位配置…]            │
     ///   │ 相机列表:                                          │
     ///   │   ┌──────────────────────────────────────────────┐ │
     ///   │   │ gridCameras（DataGridView）                    │ │
     ///   │   └──────────────────────────────────────────────┘ │
-    ///   │   [btnAddCam] [btnDelCam]      [btnSave] [btnCancel]│
+    ///   │   [btnAddCam] [btnDelCam]       [btnSave] [btnCancel]│
     ///   └────────────────────────────────────────────────────┘
     /// 说明：
     ///   - 控件说明不占界面：原常驻灰字标签（lblDirPreview/lblHelp/lblPointsHelp）已删除，
@@ -193,7 +194,7 @@ namespace CommandCenter.Views
             // lblFile
             //
             this.lblFile.AutoSize = true;
-            this.lblFile.Location = new System.Drawing.Point(20, 172);
+            this.lblFile.Location = new System.Drawing.Point(20, 184);
             this.lblFile.Name = "lblFile";
             this.lblFile.Size = new System.Drawing.Size(96, 19);
             this.lblFile.TabIndex = 12;
@@ -203,7 +204,7 @@ namespace CommandCenter.Views
             // 图片文件名模板。原右侧的占位符常驻标签（lblHelp）已删，说明并入悬停 ToolTip；
             // 因此输入框一路加宽到窗体右缘，与"图片保存根目录"对齐，更整齐。
             //
-            this.txtFileNameTpl.Location = new System.Drawing.Point(130, 169);
+            this.txtFileNameTpl.Location = new System.Drawing.Point(130, 181);
             this.txtFileNameTpl.Name = "txtFileNameTpl";
             this.txtFileNameTpl.Size = new System.Drawing.Size(570, 25);
             this.txtFileNameTpl.TabIndex = 13;
@@ -213,7 +214,7 @@ namespace CommandCenter.Views
             // 窗口→存图点位 配置标题（点位默认=窗口编号，可在可视化矩阵里自定义）
             //
             this.lblPoints.AutoSize = true;
-            this.lblPoints.Location = new System.Drawing.Point(20, 208);
+            this.lblPoints.Location = new System.Drawing.Point(20, 220);
             this.lblPoints.Name = "lblPoints";
             this.lblPoints.Size = new System.Drawing.Size(96, 19);
             this.lblPoints.TabIndex = 15;
@@ -224,7 +225,7 @@ namespace CommandCenter.Views
             // 交换窗口位置；默认点位=窗口编号，改动随本次"保存"一起写盘。
             // 操作方式说明并入悬停 ToolTip（原 lblPointsHelp 已删）。
             //
-            this.btnEditPoints.Location = new System.Drawing.Point(130, 204);
+            this.btnEditPoints.Location = new System.Drawing.Point(130, 216);
             this.btnEditPoints.Name = "btnEditPoints";
             this.btnEditPoints.Size = new System.Drawing.Size(150, 30);
             this.btnEditPoints.TabIndex = 16;
@@ -236,7 +237,7 @@ namespace CommandCenter.Views
             //
             this.lblCams.AutoSize = true;
             this.lblCams.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
-            this.lblCams.Location = new System.Drawing.Point(20, 250);
+            this.lblCams.Location = new System.Drawing.Point(20, 262);
             this.lblCams.Name = "lblCams";
             this.lblCams.Size = new System.Drawing.Size(84, 19);
             this.lblCams.TabIndex = 18;
@@ -254,7 +255,7 @@ namespace CommandCenter.Views
             this.gridCameras.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.gridCameras.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.gridCameras.EditMode = System.Windows.Forms.DataGridViewEditMode.EditOnEnter;
-            this.gridCameras.Location = new System.Drawing.Point(20, 276);
+            this.gridCameras.Location = new System.Drawing.Point(20, 288);
             this.gridCameras.Name = "gridCameras";
             this.gridCameras.RowHeadersVisible = false;
             // 整行选择：点任意单元格都整行高亮 → SelectedRows 才有值，"删除选中"才好使
@@ -265,7 +266,7 @@ namespace CommandCenter.Views
             // btnAddCam
             // 添加一台默认相机行（默认值 192.168.1.1 / 8500 / 点位1 / FTP留空用全局）
             //
-            this.btnAddCam.Location = new System.Drawing.Point(20, 446);
+            this.btnAddCam.Location = new System.Drawing.Point(20, 458);
             this.btnAddCam.Name = "btnAddCam";
             this.btnAddCam.Size = new System.Drawing.Size(100, 30);
             this.btnAddCam.TabIndex = 20;
@@ -275,7 +276,7 @@ namespace CommandCenter.Views
             // btnDelCam
             // 删除当前选中的相机行
             //
-            this.btnDelCam.Location = new System.Drawing.Point(130, 446);
+            this.btnDelCam.Location = new System.Drawing.Point(150, 458);
             this.btnDelCam.Name = "btnDelCam";
             this.btnDelCam.Size = new System.Drawing.Size(100, 30);
             this.btnDelCam.TabIndex = 21;
@@ -286,7 +287,7 @@ namespace CommandCenter.Views
             // 保存：把界面值回写内存配置并返回 OK（上层写盘 + 提示重启）
             //
             this.btnSave.DialogResult = System.Windows.Forms.DialogResult.OK;
-            this.btnSave.Location = new System.Drawing.Point(300, 446);
+            this.btnSave.Location = new System.Drawing.Point(490, 458);
             this.btnSave.Name = "btnSave";
             this.btnSave.Size = new System.Drawing.Size(90, 32);
             this.btnSave.TabIndex = 22;
@@ -294,10 +295,12 @@ namespace CommandCenter.Views
             this.btnSave.UseVisualStyleBackColor = true;
             //
             // btnCancel
-            // 取消：直接关闭，不写盘；回车/ESC 快捷键见 AcceptButton/CancelButton
+            // 取消：直接关闭，不写盘；回车/ESC 快捷键见 AcceptButton/CancelButton。
+            // 位置右边缘与上方控件（根目录框/模板框/相机网格，右边缘均=700）对齐，
+            // 与"保存"之间留 30px 间隙（与"添加一台/删除选中"一致），悬停有说明即可。
             //
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(400, 446);
+            this.btnCancel.Location = new System.Drawing.Point(610, 458);
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(90, 32);
             this.btnCancel.TabIndex = 23;
@@ -310,7 +313,7 @@ namespace CommandCenter.Views
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.AcceptButton = this.btnSave;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(720, 586);
+            this.ClientSize = new System.Drawing.Size(720, 598);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnSave);
             this.Controls.Add(this.btnDelCam);

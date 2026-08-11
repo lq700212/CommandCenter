@@ -11,8 +11,9 @@ namespace CommandCenter.Views
     /// 仍在 MainForm.cs 中生成，不放进这里。
     /// 【重要】整体顺序请参考 MainForm.cs 类注释里的 ASCII 布局图。
     ///   ┌──────────────────────────────────────────────────────────────┐
-    ///   │ 产品型号:[cmbRecipe▾] 序列号:[lblSerial] | 总数:[lblTotal]   │
-    ///   │ OK:[lblOk] NG:[lblNg] | [btnSettings系统设置]   ●[lblPlcStatus] │
+    ///   │ 产品型号:[cmbRecipe▾] 序列号:[lblSerialTitle][lblSerial框]    │
+    ///   │  | 总数:[lblTotal] OK:[lblOk] NG:[lblNg]                     │
+    ///   │          | [btnSettings系统设置]    ●[lblPlcStatus]          │
     ///   ├──────────────────────────────────────────────────────────────┤
     ///   │                 gridCameraWindows（TableLayoutPanel 等分）      │
     ///   ├──────────────────────────────────────────────────────────────┤
@@ -57,6 +58,7 @@ namespace CommandCenter.Views
             this.lblTotal = new System.Windows.Forms.Label();
             this.lblSep1 = new System.Windows.Forms.Label();
             this.lblSerial = new System.Windows.Forms.Label();
+            this.lblSerialTitle = new System.Windows.Forms.Label();
             this.cmbRecipe = new System.Windows.Forms.ComboBox();
             this.lblProductPrefix = new System.Windows.Forms.Label();
             this.pnlStatusBar = new System.Windows.Forms.Panel();
@@ -80,6 +82,7 @@ namespace CommandCenter.Views
             this.pnlTitleBar.Controls.Add(this.lblOk);
             this.pnlTitleBar.Controls.Add(this.lblTotal);
             this.pnlTitleBar.Controls.Add(this.lblSep1);
+            this.pnlTitleBar.Controls.Add(this.lblSerialTitle);
             this.pnlTitleBar.Controls.Add(this.lblSerial);
             this.pnlTitleBar.Controls.Add(this.cmbRecipe);
             this.pnlTitleBar.Controls.Add(this.lblProductPrefix);
@@ -185,16 +188,34 @@ namespace CommandCenter.Views
             this.lblSep1.TabIndex = 4;
             this.lblSep1.Text = "|";
             // 
-            // lblSerial
+            // lblSerialTitle
+            // 序列号标题：独立于显示框，作为"序列号:"框的标题文字显示在框外（左侧）。
+            // 与其它信息标签同字号同色，垂直居中位置由 RelayoutTitleBar 统一计算。
+            //
+            this.lblSerialTitle.AutoSize = true;
+            this.lblSerialTitle.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
+            this.lblSerialTitle.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
+            this.lblSerialTitle.Location = new System.Drawing.Point(252, 12);
+            this.lblSerialTitle.Name = "lblSerialTitle";
+            this.lblSerialTitle.Size = new System.Drawing.Size(61, 19);
+            this.lblSerialTitle.TabIndex = 24;
+            this.lblSerialTitle.Text = "序列号:";
             // 
-            this.lblSerial.AutoSize = true;
+            // lblSerial
+            // 序列号显示框：固定宽度、不随内容伸缩（AutoSize=false），加单线边框像一个"空框"。
+            // 框内只放序列号值（"序列号:"标题由 lblSerialTitle 显示在框外左侧），
+            // 没有序列号则框内留空；宽度固定避免前后字段跳动。
+            //
+            this.lblSerial.AutoSize = false;
+            this.lblSerial.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.lblSerial.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
             this.lblSerial.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
             this.lblSerial.Location = new System.Drawing.Point(341, 12);
             this.lblSerial.Name = "lblSerial";
-            this.lblSerial.Size = new System.Drawing.Size(107, 19);
+            this.lblSerial.Size = new System.Drawing.Size(220, 24);
             this.lblSerial.TabIndex = 3;
-            this.lblSerial.Text = "序列号: 待扫码";
+            this.lblSerial.Text = "";
+            this.lblSerial.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             // 
             // cmbRecipe
             // 
@@ -281,6 +302,7 @@ namespace CommandCenter.Views
         private Panel pnlTitleBar;
         private Label lblProductPrefix;
         private ComboBox cmbRecipe;
+        private Label lblSerialTitle;
         private Label lblSerial;
         private Label lblSep1;
         private Label lblTotal;

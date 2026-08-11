@@ -16,7 +16,7 @@ namespace CommandCenter.Views
     /// 命令中心主窗体。
     /// 【界面布局】
     /// ┌───────────────────────────────────────────────────────────────────┐
-    /// │ 产品型号:[1]产品A▾ | 序列号:XXXX | 总数:0 | OK:0 | NG:0 | [系统设置] │
+    /// │ 产品型号:[1]产品A▾ | 序列号:[框] | 总数:0 | OK:0 | NG:0 | [系统设置] │
     /// │                                                        ●PLC ●相机2 ●相机1 │
     /// ├───────────────────────────────────────────────────────────────────┤
     /// │  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐                  │
@@ -81,7 +81,6 @@ namespace CommandCenter.Views
             _imageStore = new ImageStore(_config.Image);
             _coordinator = new ProductionCoordinator(_plc, _cameras, cams, _imageStore, _config.Display,
                 _config.Display.WindowStationMap);
-            _coordinator.LatestSerialNumber = "待扫码";
 
             // 连接健康监控：后台心跳 + 断连自动重连 + 边沿日志（不影响任何 UI 刷新）
             _monitor = new ConnectionMonitor(_plc, _cameras);
@@ -101,7 +100,11 @@ namespace CommandCenter.Views
             // ① 产品型号 = 配方（V1.1.2 现场业务对应）：前缀文案走配置，开关控制整段显示
             lblProductPrefix.Text = _config.Display.ProductModelPrefix + ":";
             lblProductPrefix.Visible = _config.Display.ShowProductModel;
-            lblSerial.Text = "序列号: " + _coordinator.LatestSerialNumber;
+            // 序列号：标题"序列号:"在显示框外（lblSerialTitle），框内只放值；
+            // 有值显示值，没有则框内留空（不写"待扫码"），标题+框整体由开关控制显隐
+            lblSerialTitle.Text = "序列号:";
+            lblSerialTitle.Visible = _config.Display.ShowSerialNumber;
+            lblSerial.Text = _coordinator.LatestSerialNumber;
             lblSerial.Visible = _config.Display.ShowSerialNumber;
             lblTotal.Visible = _config.Display.ShowTotalCount;
             lblOk.Visible = _config.Display.ShowOkCount;
@@ -153,20 +156,25 @@ namespace CommandCenter.Views
         /// <summary>
         /// 标题栏紧凑重排：按固定顺序把"可见"的字段从左往右 x 进位摆放，
         /// 隐藏的字段（ShowXxx=false）跳过不占位，避免中间空缺或重叠。
+        /// 所有控件垂直居中：标题栏高 48，y = (48 - 控件高度)/2，视觉上全部居中对齐。
         /// 设计器里的坐标只作为"全部可见"时的初始参照，最终以这里算出的为准。
         /// </summary>
         private void RelayoutTitleBar()
         {
-            // 排布顺序固定：产品前缀 → 配方下拉框 → 序列号 → | → 总数 → OK → NG → | → 系统设置按钮
-            Control[] seq = { lblProductPrefix, cmbRecipe, lblSerial, lblSep1,
+            const int barHeight = 48; // 标题栏固定高度（见 Designer 的 pnlTitleBar.Size）
+
+            // 排布顺序固定：产品前缀 → 配方下拉框 → 序列号标题 → 序列号框 → | → 总数 → OK → NG → | → 系统设置按钮
+            Control[] seq = { lblProductPrefix, cmbRecipe, lblSerialTitle, lblSerial, lblSep1,
                               lblTotal, lblOk, lblNg, lblSep2, btnSettings };
             int x = 12; // 与设计器 Padding(12,0,12,0) 左内边距保持一致
             foreach (var c in seq)
             {
                 if (!c.Visible) continue;
-                if (c is Button)    { c.Location = new Point(x, 9); x += c.Width + 12; }
-                else if (c is ComboBox) { c.Location = new Point(x, 10); x += c.Width + 12; }
-                else                { c.Location = new Point(x, 12); x += ((Label)c).PreferredWidth + 18; }
+                int y = (barHeight - c.Height) / 2; // 垂直居中（各控件高度不同：按钮30/下拉27/标签19/显示框24）
+                if (c is Button)    { c.Location = new Point(x, y); x += c.Width + 12; }
+                else if (c is ComboBox) { c.Location = new Point(x, y); x += c.Width + 12; }
+                else if (c == lblSerial) { c.Location = new Point(x, y); x += c.Width + 18; } // 固定宽度显示框
+                else                { c.Location = new Point(x, y); x += ((Label)c).PreferredWidth + 18; }
             }
         }
 
@@ -285,9 +293,8 @@ namespace CommandCenter.Views
                         Dock = DockStyle.Fill
                     };
                     w.SetWindowIndex(idx + 1);
-                    // 右上角显示该窗口的存图点位（默认=窗口编号，可自定义）；映射缺/越界时兜底窗口编号
-                    var map = _config.Display.WindowStationMap;
-                    w.SetStationNo(map != null && idx < map.Count && map[idx] > 0 ? map[idx] : idx + 1);
+                    // 主界面窗口不再显示存图点位标识（点位只通过设置界面 WindowPointForm 查询比对）；
+                    // 点位归属由 ProductionCoordinator 按 WindowStationMap 映射计算，窗口编号即拍照顺序。
                     _windows[idx] = w;
                     grid.Controls.Add(w, c, r);
                     idx++;

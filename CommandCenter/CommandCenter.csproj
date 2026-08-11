@@ -94,8 +94,6 @@
     <Compile Include="Controls\OkNgBadge.cs">
       <SubType>Component</SubType>
     </Compile>
-    <!-- TipMarker：给带 ToolTip 的控件自动补"?"问号标记（提醒悬停有说明），Windows 帮助惯例 -->
-    <Compile Include="Controls\TipMarker.cs" />
     <Compile Include="Models\AppConfig.cs" />
     <Compile Include="Models\RecipeConfig.cs" />
     <Compile Include="Models\WindowData.cs" />
