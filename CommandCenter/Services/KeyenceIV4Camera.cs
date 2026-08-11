@@ -111,6 +111,15 @@ namespace CommandCenter.Services
         /// <summary>
         /// 发送一行 ASCII 指令（自动补 CR 结尾），并读取一条"以 CR/LF 结尾"的响应行。
         /// 返回去掉行尾符的正文；无响应/超时返回 null。
+        ///
+        /// 【V1.7.2 修复的两个现场级 bug】
+        /// ① CRLF 残留：IV4 响应以 CRLF 结尾（见 docs/通讯接入.md "CR 或 CRLF 结束，程序两者兼容"）。
+        ///    旧实现读到 '\r' 就停，把 '\n' 留在流里，下一次动作先读到残留 '\n' 判"无响应"，
+        ///    表现为"第一次触发正常、第二次判定失败"交替出现。现在行首遇 CR/LF/NUL 一律跳过
+        ///    （同时容忍相机响应前发送的空行），残留行尾不会污染下一次读取。
+        /// ② 假活连接复用：读超时/断流（Read 抛异常或返回 0）时，TCP 层的 Connected 属性
+        ///    仍可能为 true，旧实现不清理连接 → 下一次 EnsureConnected 复用坏流，永远失败且不重连。
+        ///    现在超时/断流一律 MarkDisconnected，下次动作强制重建连接。
         /// </summary>
         private string SendCommandAndReadLine(string command, int readTimeoutMs)
         {
@@ -124,16 +133,18 @@ namespace CommandCenter.Services
 
             try { _stream.ReadTimeout = readTimeoutMs; } catch { }
 
-            // 逐字节拼一行，遇 CR/LF 停止；每次 Read 到期由 ReadTimeout 抛异常兜底
+            // 逐字节拼一行；Read 到期由 ReadTimeout 抛异常兜底
             var sb = new StringBuilder();
             var one = new byte[1];
             while (sb.Length < 1024)
             {
                 int n;
                 try { n = _stream.Read(one, 0, 1); }
-                catch { break; }
-                if (n <= 0) break;
+                catch { MarkDisconnected(); break; }       // 超时/断流：连接不可信，标记待重建
+                if (n <= 0) { MarkDisconnected(); break; } // 对端关闭：同上
                 char c = (char)one[0];
+                if (sb.Length == 0 && (c == '\r' || c == '\n' || c == '\0'))
+                    continue;                              // 前导空行/上一帧残留行尾：跳过
                 if (c == '\r' || c == '\n' || c == '\0') break;
                 sb.Append(c);
             }
@@ -262,6 +273,11 @@ namespace CommandCenter.Services
         /// <summary>
         /// 解析 T2/RT 的响应为判定结果。
         /// 期望形如 "RT,00010200"（标准）或 "RT,0001,12.3,..."（详细，取逗号前 8 位）。
+        ///
+        /// 【V1.7.2 修复】
+        /// ① 判定内容为空（"RT," / "RT,,..."）时直接判失败——此前空 flags 会因 foreach 不执行
+        ///    而误判 OK，若现场相机未配判定工具会把不良直接放行，后果严重；
+        /// ② flags 做 Trim：兼容"RT, 00000000"（逗号后带空格）的响应，避免把空格当非合格位误判 NG。
         /// </summary>
         private TriggerReadOutcome ParseResult(string raw)
         {
@@ -274,7 +290,11 @@ namespace CommandCenter.Services
                 return TriggerReadOutcome.Fail("响应格式异常：" + line);
 
             string payload = line.Substring(3).Trim();
-            string flags = payload.Split(',')[0]; // 标准：整段即 8 位；详细：取首个逗号前字段
+            string flags = payload.Split(',')[0].Trim(); // 标准：整段即 8 位；详细：取首个逗号前字段
+
+            // 无判定内容：通讯成功但没有结论，按失败处理（绝不默认 OK）
+            if (flags.Length == 0)
+                return TriggerReadOutcome.Fail("判定内容为空：" + line);
 
             // 逐位判定：全部为合格位才算 OK，任一其他字符（含'1'/'4'/'-'/未知）一律保守 NG
             var badChars = new List<char>();

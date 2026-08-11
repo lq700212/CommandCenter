@@ -62,7 +62,7 @@ namespace CommandCenter.Services
             {
                 try
                 {
-                    if (_tcp != null && _tcp.Connected)
+                    if (_tcp != null && _tcp.Connected && _master != null)
                         return true;
 
                     _tcp?.Close();
@@ -150,6 +150,22 @@ namespace CommandCenter.Services
         }
 
         /// <summary>
+        /// 清掉失效的连接引用，强制下次 EnsureConnected 完整重建。
+        /// 【必须在 lock(_lock) 内调用】所有读写方法已持锁；EnsureConnected 亦可重入，不死锁。
+        /// 【为什么必须清（V1.7.2 修复）】Modbus 通讯失败（超时/断流/协议错位）后，TcpClient.Connected
+        ///   只是"缓存的状态"、仍可能为 true。若只 SetConnected(false) 不清 _tcp/_master，
+        ///   下次 EnsureConnected 会直接复用坏 master → 反复失败且永不重建，现场表现为
+        ///   "连上了但一直读不到正确值"。
+        /// </summary>
+        private void ResetConnection()
+        {
+            try { _master?.Dispose(); } catch { }
+            _master = null;
+            try { _tcp?.Close(); } catch { }
+            _tcp = null;
+        }
+
+        /// <summary>
         /// 读取到位信号寄存器（D 地址）。
         /// 返回 true 表示 PLC 告知"相机运动到位"。读到后应尽快调用 ClearMoveDone() 复位。
         /// </summary>
@@ -217,6 +233,7 @@ namespace CommandCenter.Services
             catch (Exception ex)
             {
                 SetConnected(false);
+                ResetConnection(); // 连接已不可信：清引用，下次 EnsureConnected 强制重建
                 LogHelper.Warn($"读 PLC 寄存器 D{address} 失败：{ex.Message}");
                 return false;
             }
@@ -233,6 +250,7 @@ namespace CommandCenter.Services
             catch (Exception ex)
             {
                 SetConnected(false);
+                ResetConnection();
                 LogHelper.Warn($"写 PLC 寄存器 D{address} 失败：{ex.Message}");
             }
         }
@@ -249,6 +267,7 @@ namespace CommandCenter.Services
             catch (Exception ex)
             {
                 SetConnected(false);
+                ResetConnection();
                 LogHelper.Warn($"批量写 PLC 寄存器 D{address} 失败：{ex.Message}");
                 return false;
             }

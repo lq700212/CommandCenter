@@ -256,6 +256,16 @@ namespace CommandCenter.Services
                     return;
                 }
 
+                // V1.7.2 修复：Tcp 取图模式的图在触发时就同步读回（IsSnapped 已置位），
+                // 若所有"需要等图的相机"都到图或已失败，就无需再等 ImageWaitMs 超时，
+                // 立即收尾。此前这里只判断"全部触发失败"，Tcp 模式会白白等满超时
+                // （甚至把 Done 信号拖后），现场表现为"拍完照半天才上报完成"。
+                if (_pends.All(x => !x.TriggerOk || x.IsSnapped))
+                {
+                    FinishAll(null);
+                    return;
+                }
+
                 SetState("已触发，等待图像...");
 
                 // 等图总超时 = 各相机 ImageWaitMs 的最大值，先到的图先落 pending，到齐即收尾
@@ -465,9 +475,20 @@ namespace CommandCenter.Services
             catch (Exception) { } // 兼容其他释放期异常，一律忽略
         }
 
+        private readonly object _stateLock = new object();
+        private string _lastState = "";
+
+        /// <summary>发流程状态（日志 + 事件）。相同的状态不重复发（V1.7.2 修复）：
+        /// 忙时到位轮询每 200ms 抢占失败都会调本方法，若每次都记一条"已触发，等待相机取像..."
+        /// 会把日志刷爆；按文本去重后只在状态真正切换时各记一条。</summary>
         private void SetState(string text)
         {
-            LogHelper.Info("流程状态：" + text);
+            lock (_stateLock)
+            {
+                if (_lastState == text) return;
+                _lastState = text;
+                LogHelper.Info("流程状态：" + text);
+            }
             StateChanged?.Invoke(text);
         }
 

@@ -150,12 +150,6 @@ namespace CommandCenter.Services
                 return null;
             }
         }
-        /// </summary>
-        private static string JoinDirSegments(string rendered)
-        {
-            var segs = rendered.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
-            return segs.Aggregate("", (acc, s) => Path.Combine(acc, SanitizeForPath(s)));
-        }
 
         /// <summary>把非法文件名字符替换成下划线，避免序列号等动态内容把路径搞坏。</summary>
         private static string SanitizeForPath(string s)
