@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -48,6 +49,16 @@ namespace CommandCenter.Utils
                         }
                         if (cfg.Cameras.Count == 0)
                             cfg.Cameras.Add(new Models.CameraConfig()); // 全缺：补一台默认
+                    }
+
+                    // 兼容迁移：旧配置只有字符串模板 subDirTemplate（如 {年}/{月}/{日}/{SN}/{OKNG}），
+                    // 新版用 SubDirs 层级列表；SubDirs 为空时把旧模板拆成层级列表，现场升级不用重配。
+                    if (cfg.Image != null && (cfg.Image.SubDirs == null || cfg.Image.SubDirs.Count == 0)
+                        && !string.IsNullOrWhiteSpace(cfg.Image.SubDirTemplate))
+                    {
+                        cfg.Image.SubDirs = cfg.Image.SubDirTemplate
+                            .Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
+                            .ToList();
                     }
                     return cfg;
                 }

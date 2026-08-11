@@ -14,7 +14,7 @@ namespace CommandCenter.Views
     ///   │ PLC IP:   [txtPlcIp]   端口:[nudPlcPort]           │
     ///   │ 显示窗口行:[nudRows] 列:[nudCols]                   │
     ///   │ 图片保存根目录: [txtSaveDir]                         │
-    ///   │ 目录结构模板:   [txtSubDirTpl]                      │
+    ///   │ 目录结构: [btnEditDirs 配置目录结构…] [lblDirPreview] │
     ///   │ 文件名模板:     [txtFileNameTpl]  (lblHelp 灰字提示) │
     ///   │ 相机列表:                                          │
     ///   │   ┌──────────────────────────────────────────────┐ │
@@ -59,8 +59,8 @@ namespace CommandCenter.Views
             this.nudCols = new System.Windows.Forms.NumericUpDown();
             this.lblDir = new System.Windows.Forms.Label();
             this.txtSaveDir = new System.Windows.Forms.TextBox();
-            this.lblTpl = new System.Windows.Forms.Label();
-            this.txtSubDirTpl = new System.Windows.Forms.TextBox();
+            this.btnEditDirs = new System.Windows.Forms.Button();
+            this.lblDirPreview = new System.Windows.Forms.Label();
             this.lblFile = new System.Windows.Forms.Label();
             this.txtFileNameTpl = new System.Windows.Forms.TextBox();
             this.lblHelp = new System.Windows.Forms.Label();
@@ -172,23 +172,26 @@ namespace CommandCenter.Views
             this.txtSaveDir.TabIndex = 9;
             this.txtSaveDir.Text = "D:\\CommandCenter\\Images";
             //
-            // lblTpl
+            // btnEditDirs
+            // 打开"图片存储目录结构配置"对话框（DirTreeEditForm），可视化编辑目录层级与文件名规则
             //
-            this.lblTpl.AutoSize = true;
-            this.lblTpl.Location = new System.Drawing.Point(20, 145);
-            this.lblTpl.Name = "lblTpl";
-            this.lblTpl.Size = new System.Drawing.Size(96, 19);
-            this.lblTpl.TabIndex = 10;
-            this.lblTpl.Text = "目录结构模板:";
+            this.btnEditDirs.Location = new System.Drawing.Point(130, 139);
+            this.btnEditDirs.Name = "btnEditDirs";
+            this.btnEditDirs.Size = new System.Drawing.Size(160, 30);
+            this.btnEditDirs.TabIndex = 11;
+            this.btnEditDirs.Text = "配置目录结构...";
+            this.btnEditDirs.UseVisualStyleBackColor = true;
             //
-            // txtSubDirTpl
-            // 存图子目录模板（用 / 分层，占位符见 lblHelp），宽 570 与根目录对齐
+            // lblDirPreview
+            // 只读展示当前目录结构（层级名/规则用 / 拼接），点按钮进可视化对话框改
             //
-            this.txtSubDirTpl.Location = new System.Drawing.Point(130, 142);
-            this.txtSubDirTpl.Name = "txtSubDirTpl";
-            this.txtSubDirTpl.Size = new System.Drawing.Size(570, 25);
-            this.txtSubDirTpl.TabIndex = 11;
-            this.txtSubDirTpl.Text = "{年}/{月}/{日}/{SN}/{OKNG}";
+            this.lblDirPreview.AutoSize = true;
+            this.lblDirPreview.ForeColor = System.Drawing.Color.Gray;
+            this.lblDirPreview.Location = new System.Drawing.Point(300, 145);
+            this.lblDirPreview.Name = "lblDirPreview";
+            this.lblDirPreview.Size = new System.Drawing.Size(300, 19);
+            this.lblDirPreview.TabIndex = 11;
+            this.lblDirPreview.Text = "{年月日}/{SN}/{OKNG}";
             //
             // lblFile
             //
@@ -308,8 +311,8 @@ namespace CommandCenter.Views
             this.Controls.Add(this.lblHelp);
             this.Controls.Add(this.txtFileNameTpl);
             this.Controls.Add(this.lblFile);
-            this.Controls.Add(this.txtSubDirTpl);
-            this.Controls.Add(this.lblTpl);
+            this.Controls.Add(this.lblDirPreview);
+            this.Controls.Add(this.btnEditDirs);
             this.Controls.Add(this.txtSaveDir);
             this.Controls.Add(this.lblDir);
             this.Controls.Add(this.nudCols);
@@ -348,8 +351,8 @@ namespace CommandCenter.Views
         private NumericUpDown nudCols;
         private Label lblDir;
         private TextBox txtSaveDir;
-        private Label lblTpl;
-        private TextBox txtSubDirTpl;
+        private Button btnEditDirs;
+        private Label lblDirPreview;
         private Label lblFile;
         private TextBox txtFileNameTpl;
         private Label lblHelp;

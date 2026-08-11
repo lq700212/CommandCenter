@@ -13,8 +13,8 @@ namespace CommandCenter.Views
     /// │ PLC IP:  [192.168.1.10]  端口:[502]                         │
     /// │ 显示窗口: 行[4] 列[7]                                       │
     /// │ 图片保存根目录: [D:\CommandCenter\Images]                   │
-    /// │ 目录结构模板:   [{年}/{月}/{日}/{SN}/{OKNG}]                │
-    /// │ 文件名模板:     [{点位}]   （占位符提示见界面）              │
+    /// │ 目录结构: [配置目录结构...] {年月日}/{SN}/{OKNG}             │
+    /// │ 文件名模板:   [{点位}]   （占位符提示见界面）              │
     /// │ 相机列表: ┌────────┬────┬────┬──────────────────────┐       │
     /// │            │ 相机IP │端口│点位│ FTP上传目录          │       │
     /// │            ├────────┼────┼────┼──────────────────────┤       │
@@ -27,6 +27,8 @@ namespace CommandCenter.Views
     /// 本文件只负责"数据 ↔ 控件"：构造时把 AppConfig 填进界面（LoadFromConfig），
     /// 点保存回写（OnSave，仅改内存对象，返回 DialogResult.OK，上层写盘并提示重启）。
     /// 相机行数即相机台数：多台直接加行，各配各的 IP / 点位号 / FTP 目录。
+    /// "配置目录结构..."按钮打开 DirTreeEditForm，可视化编辑目录层级与文件名规则，
+    /// 返回后刷新右侧预览文本（lblDirPreview）。
     /// </summary>
     public partial class SettingsForm : Form
     {
@@ -50,13 +52,26 @@ namespace CommandCenter.Views
             // 显示窗口行列
             nudRows.Value = _cfg.Display.Rows;
             nudCols.Value = _cfg.Display.Columns;
-            // 图片保存与目录/文件名模板
+            // 图片保存根目录、目录结构与文件名模板（目录结构用只读预览，实际编辑进可视化对话框）
             txtSaveDir.Text = _cfg.Image.SaveRootDir;
-            txtSubDirTpl.Text = _cfg.Image.SubDirTemplate;
+            RefreshDirPreview();
             txtFileNameTpl.Text = _cfg.Image.FileNameTemplate;
             // 相机表格：先建列，再逐行填数据
             SetupCameraGridColumns();
             LoadCameraRows();
+        }
+
+        /// <summary>
+        /// 刷新"目录结构"右侧的只读预览：显示当前层级列表（用 / 拼接），
+        /// 供现场一眼看出当前配置的目录结构；列表为空时回退旧字符串模板。
+        /// </summary>
+        private void RefreshDirPreview()
+        {
+            var dirs = _cfg.Image.SubDirs;
+            if (dirs != null && dirs.Count > 0)
+                lblDirPreview.Text = string.Join("/", dirs);
+            else
+                lblDirPreview.Text = _cfg.Image.SubDirTemplate;
         }
 
         /// <summary>给相机表格建好 4 列结构（列固定，运行时加一次即可，不用进设计器序列化）。</summary>
@@ -109,6 +124,15 @@ namespace CommandCenter.Views
             };
             // 保存：把界面值回写内存配置，返回 DialogResult.OK（上层负责写盘与提示）
             btnSave.Click += OnSave;
+            // 打开目录结构可视化配置对话框；改的是同一 _cfg.Image 实例，返回后刷新预览
+            btnEditDirs.Click += (s, e) =>
+            {
+                using (var dlg = new DirTreeEditForm(_cfg.Image))
+                {
+                    if (dlg.ShowDialog(this) == DialogResult.OK)
+                        RefreshDirPreview();
+                }
+            };
         }
 
         /// <summary>把界面值回写内存配置（注意：窗口行列/相机台数改动需重启生效）。</summary>
@@ -119,8 +143,9 @@ namespace CommandCenter.Views
             _cfg.Display.Rows = (int)nudRows.Value;
             _cfg.Display.Columns = (int)nudCols.Value;
             _cfg.Image.SaveRootDir = txtSaveDir.Text.Trim();
-            _cfg.Image.SubDirTemplate = txtSubDirTpl.Text.Trim();
             _cfg.Image.FileNameTemplate = txtFileNameTpl.Text.Trim();
+            // 目录结构由 DirTreeEditForm 直接写入 _cfg.Image.SubDirs/SubDirTemplate，这里不用回写；
+            // 若未打开过对话框，SubDirs 保持原值（可能为空），运行时 ImageStore 会回退旧模板。
 
             // 相机：逐行回写；IP 空的行视为"未填写"自动剔除；剔除后一台都不剩则补一台默认
             var cams = new List<CameraConfig>();

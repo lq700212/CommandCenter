@@ -18,11 +18,13 @@ namespace CommandCenter.Services
     ///   因此 ImageStore 为每台相机各建一个 FileSystemWatcher，新图事件带相机索引，
     ///   主流程据此区分"这张图来自哪台相机、对应哪个点位"。
     ///
-    /// 【存图规则（可配置模板，见 ImageConfig）】
-    ///   目录结构默认：保存根目录 / {年}/{月}/{日}/{SN}/{OKNG}
+    /// 【存图规则（可配置，见 ImageConfig）】
+    ///   目录结构默认：保存根目录 / {年月日} / {SN} / {OKNG}
     ///   文件名默认：{点位}.png
-    ///   模板支持占位符 {年} {月} {日} {SN} {OKNG} {点位} {时间}，其余文字原样保留。
-    ///   模板留空则退回旧规则（yyyyMMdd 日期目录 + IMG_时间戳_W窗口_结果.png）。
+    ///   占位符：{年月日} {年} {月} {日} {SN} {OKNG} {点位} {时间}，其余文字原样保留。
+    ///   目录层级由 ImageConfig.SubDirs 列表逐级驱动（每级一个名字/生成规则），
+    ///   逐级渲染后建目录；SubDirs 为空时回退旧 SubDirTemplate 字符串模板。
+    ///   模板全部留空则退回旧规则（yyyyMMdd 日期目录 + IMG_时间戳_结果.png）。
     ///
     /// 【线程安全】FileSystemWatcher 回调运行在监听线程，事件一定要跨线程同步到 UI（Invoke）。
     /// </summary>
@@ -80,27 +82,43 @@ namespace CommandCenter.Services
 
         /// <summary>
         /// 把一张 Bitmap 保存到本地。返回保存后的完整路径；失败返回 null。
-        /// 目录与文件名按 ImageConfig 模板渲染（详见类注释），模板为空时退回旧命名规则。
+        /// 目录按 ImageConfig.SubDirs 逐级渲染建目录（详见类注释），文件名按 FileNameTemplate 模板；
+        /// SubDirs 为空时回退旧 SubDirTemplate 字符串模板，两者皆空时退回旧命名规则。
         /// </summary>
         /// <param name="image">要保存的图片</param>
         /// <param name="stationNo">拍照点位号（CameraConfig.StationNo，进文件名 {点位}）</param>
-        /// <param name="isOk">本次结果（OK/NG 进目录）</param>
+        /// <param name="isOk">本次结果（OK/NG 进目录 {OKNG}）</param>
         /// <param name="serial">产品序列号（进 {SN} 目录；可能来自扫码枪/手动输入）</param>
         public string SaveImage(Image image, int stationNo, bool isOk, string serial)
         {
             try
             {
                 DateTime now = DateTime.Now;
-                string renderedDir = RenderTemplate(_cfg.SubDirTemplate, now, serial, isOk, stationNo);
                 string renderedFile = RenderTemplate(_cfg.FileNameTemplate, now, serial, isOk, stationNo);
 
-                // 新模板模式：有目录模板就完全用它；没有则退回"按日 + 旧 IMG 前缀命名"兼容现场旧习惯
+                // 目录：优先用 SubDirs 列表逐级渲染；为空则回退旧 SubDirTemplate 字符串模板
                 string dir;
-                if (String.IsNullOrWhiteSpace(renderedDir))
+                var levels = (_cfg.SubDirs != null && _cfg.SubDirs.Count > 0)
+                    ? _cfg.SubDirs
+                    : SplitTemplateToLevels(_cfg.SubDirTemplate);
+                if (levels.Count == 0)
+                {
+                    // 新老模板都空：退回"按日 + 旧 IMG 前缀命名"兼容现场旧习惯
                     dir = _cfg.SubDirByDate ? Path.Combine(_cfg.SaveRootDir, now.ToString("yyyyMMdd"))
                                             : _cfg.SaveRootDir;
+                }
                 else
-                    dir = Path.Combine(_cfg.SaveRootDir, JoinDirSegments(renderedDir));
+                {
+                    // 逐级渲染并建目录：每级名字由模板/固定文字渲染得到，逐级拼到根目录下
+                    var segs = new List<string>();
+                    foreach (var lvl in levels)
+                    {
+                        string rendered = RenderTemplate(lvl, now, serial, isOk, stationNo);
+                        if (!string.IsNullOrWhiteSpace(rendered))
+                            segs.AddRange(rendered.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries));
+                    }
+                    dir = Path.Combine(_cfg.SaveRootDir, JoinDirSegments(string.Join("/", segs)));
+                }
                 Directory.CreateDirectory(dir);
 
                 string name;
@@ -119,6 +137,16 @@ namespace CommandCenter.Services
                 LogHelper.Error("照片保存失败", ex);
                 return null;
             }
+        }
+
+        /// <summary>
+        /// 把旧版字符串模板（用 / 或 \ 分隔层级）拆成层级列表，供回退逻辑用。
+        /// 空模板返回空列表。
+        /// </summary>
+        private static List<string> SplitTemplateToLevels(string template)
+        {
+            if (string.IsNullOrWhiteSpace(template)) return new List<string>();
+            return template.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries).ToList();
         }
 
         /// <summary>
@@ -144,12 +172,15 @@ namespace CommandCenter.Services
 
         /// <summary>
         /// 渲染模板：替换全部占位符。未识别的 {xxx} 原样保留（由现场自己控制，写错也只是变成路径字符）。
+        /// {年月日} 是一个整体目录名（如"2026年08月11日"），不是年/月/日三级目录。
+        /// 设为 internal：目录结构配置对话框（DirTreeEditForm）也要用同样的渲染规则做实时预览。
         /// </summary>
-        private static string RenderTemplate(string template, DateTime now,
+        internal static string RenderTemplate(string template, DateTime now,
                                              string serial, bool isOk, int stationNo)
         {
             if (string.IsNullOrWhiteSpace(template)) return "";
             return template
+                .Replace("{年月日}", now.ToString("yyyy年MM月dd日"))
                 .Replace("{年}", now.ToString("yyyy"))
                 .Replace("{月}", now.ToString("MM"))
                 .Replace("{日}", now.ToString("dd"))

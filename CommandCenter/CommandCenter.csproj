@@ -74,6 +74,13 @@
     <Compile Include="Views\SettingsForm.Designer.cs">
       <DependentUpon>SettingsForm.cs</DependentUpon>
     </Compile>
+    <!-- DirTreeEditForm：图片存储目录结构可视化配置对话框（逐级编辑目录名/规则 + 文件名规则 + 实时预览） -->
+    <Compile Include="Views\DirTreeEditForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Views\DirTreeEditForm.Designer.cs">
+      <DependentUpon>DirTreeEditForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="Controls\CameraDisplayControl.cs">
       <SubType>UserControl</SubType>
     </Compile>

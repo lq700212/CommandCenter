@@ -208,8 +208,11 @@ namespace CommandCenter.Models
     }
 
     /// <summary>
-    /// 图像保存配置：存图目录与文件名用【模板】自由组合，满足现场"想怎么归档就怎么归档"。
-    /// 默认结构（现场要求）：根目录 / 年 / 月 / 日 / SN号 / OK|NG / 点位号.png
+    /// 图像保存配置：存图目录按【逐级目录列表】归档，文件名按【模板】生成。
+    /// 默认结构（现场要求）：
+    ///   根目录 / 年月日(2026年08月11日) / SN号 / OK|NG / 点位号 / 文件
+    /// 可视化配置入口在设置窗体的"配置目录结构…"，把每级目录名或生成规则编辑成列表。
+    /// 注：年月日是【一个】目录名，不是年/月/日三级目录。
     /// </summary>
     public class ImageConfig
     {
@@ -217,19 +220,28 @@ namespace CommandCenter.Models
         public string SaveRootDir { get; set; } = @"D:\CommandCenter\Images";
 
         /// <summary>
-        /// 目录结构模板（用 / 分隔层级；每级一个占位符或固定文字）。
-        /// 支持的占位符（其余文字原样保留）：
-        ///   {年}/{月}/{日}  日期三级目录（2026/08/10）
-        ///   {SN}            该件产品的序列号（扫码枪输入）
-        ///   {OKNG}          OK 或 NG（现场习惯目录分开放）
-        ///   例：默认 "{年}/{月}/{日}/{SN}/{OKNG}" → 2026/08/10/SN-0001/OK
+        /// 目录层级列表（可视化配置的主数据）：每个元素是一级目录名或生成规则，
+        /// 按顺序逐级建目录。支持占位符（见下方占位符说明），固定文字原样保留。
+        /// 默认（现场要求）：["{年月日}","{SN}","{OKNG}"] → 根/2026年08月11日/SN-0001/OK/
+        /// 说明：
+        ///   {年月日} 是一个整体目录名，展开成"2026年08月11日"（不是年/月/日三级）；
+        ///   {OKNG}   按本次判定展开成 OK 或 NG 两个并列目录之一，满足现场分开放习惯；
+        ///   点位号进文件名（见 FileNameTemplate），不作为目录层级。
+        /// 兼容旧配置：SubDirTemplate 非空且本列表为空时自动从旧模板拆解迁移（见 ConfigStore.Load）。
         /// </summary>
-        public string SubDirTemplate { get; set; } = "{年}/{月}/{日}/{SN}/{OKNG}";
+        public List<string> SubDirs { get; set; } = new List<string>();
 
         /// <summary>
-        /// 文件名模板（不含扩展名，统一存 .png）。占位符同上，外加：
-        ///   {点位}   拍照点位号（CameraConfig.StationNo）
-        ///   {时间}   精确到毫秒的时间戳 yyyyMMdd_HHmmss_fff（防重名用）
+        /// 目录结构模板（旧版字符串形式，用 / 分隔层级，供兼容与界面展示）。
+        /// 实际建目录以 SubDirs 列表为准；保存时由 SubDirs 用 / 拼接回本字段，方便老版本/人工对照。
+        /// </summary>
+        public string SubDirTemplate { get; set; } = "{年月日}/{SN}/{OKNG}";
+
+        /// <summary>
+        /// 文件名模板（不含扩展名，统一存 .png）。支持的占位符（其余文字原样保留）：
+        ///   {点位}   拍照点位号（CameraConfig.StationNo），默认即点位号
+        ///   {时间}   精确到毫秒的时间戳 yyyyMMdd_HHmmss_fff（多张同点位防重名用）
+        ///   {SN}     序列号（若文件名也要带 SN 可加）
         ///   例：默认 "{点位}" → 1.png
         /// </summary>
         public string FileNameTemplate { get; set; } = "{点位}";
