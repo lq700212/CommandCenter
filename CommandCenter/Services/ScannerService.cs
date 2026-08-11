@@ -6,6 +6,24 @@ using CommandCenter.Models;
 namespace CommandCenter.Services
 {
     /// <summary>
+    /// 扫码枪统一接口（V1.8.0）：串口（ScannerService）与以太网 TCP/IP 无协议
+    /// （ScannerTcpService）两种实现都暴露同一声明，主窗体只依赖接口，按
+    /// ScanConfig.Mode 决定实例化哪个，将来换扫码枪实现不影响上层。
+    /// </summary>
+    public interface IScanner : IDisposable
+    {
+        /// <summary>扫到一条完整条码的事件（参数为条码文本，在工作线程触发，UI 需 Invoke）</summary>
+        event EventHandler<string> SerialNumberScanned;
+
+        /// <summary>设备是否已连接/已打开</summary>
+        bool IsOpen { get; }
+
+        /// <summary>启动（打开串口 / 发起 TCP 连接与后台读取）。返回 false 表示启动失败
+        /// （串口打不开等），不影响主流程（可手动输入序列号）；TCP 实现立即返回 true（连接在后台）。</summary>
+        bool Open();
+    }
+
+    /// <summary>
     /// 扫码枪服务：封装串口扫码枪数据接收。
     ///
     /// 【说明】
@@ -13,7 +31,7 @@ namespace CommandCenter.Services
     ///   本类监听 DataReceived 事件，按行切分并抛出 SerialNumberScanned 事件。
     ///   未来改用键盘仿真扫码枪时，保持同名事件即可替换实现。
     /// </summary>
-    public class ScannerService : IDisposable
+    public class ScannerService : IScanner
     {
         private readonly ScanConfig _cfg;
         private SerialPort _port;

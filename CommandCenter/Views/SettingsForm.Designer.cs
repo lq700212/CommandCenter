@@ -7,7 +7,7 @@ namespace CommandCenter.Views
     /// SettingsForm 的 Visual Studio 窗体设计器分部文件（自动生成风格，可手动维护）。
     /// 把"静态、数量与位置固定"的控件全部放进设计器，便于可视化拖拽：
     ///   PLC IP/端口、显示窗口行列、图片保存相关三个输入框、相机列表 DataGridView、
-    ///   添加/删除相机、保存/取消 按钮。
+    ///   添加/删除相机、扫码枪列表 DataGridView（V1.8.1）、添加/删除扫码枪、保存/取消 按钮。
     /// 这些控件都是固定布局（无运行时紧凑重排需求），设计器坐标即最终坐标。
     /// 【重要】整体顺序请参考 SettingsForm.cs 类注释里的 ASCII 布局图。
     ///   ┌────────────────────────────────────────────────────┐
@@ -23,17 +23,21 @@ namespace CommandCenter.Views
     ///   │   ┌──────────────────────────────────────────────┐ │
     ///   │   │ gridCameras（DataGridView）                    │ │
     ///   │   └──────────────────────────────────────────────┘ │
-    ///   │   [btnAddCam] [btnDelCam]       [btnSave] [btnCancel]│
+    ///   │   [btnAddCam] [btnDelCam]                          │
+    ///   │ 扫码枪列表:                                        │
+    ///   │   ┌──────────────────────────────────────────────┐ │
+    ///   │   │ gridScanners（DataGridView）                   │ │
+    ///   │   └──────────────────────────────────────────────┘ │
+    ///   │   [btnAddScanner] [btnDelScanner] [btnSave] [btnCancel]│
     ///   └────────────────────────────────────────────────────┘
     /// 说明：
     ///   - 控件说明不占界面：原常驻灰字标签（lblDirPreview/lblHelp/lblPointsHelp）已删除，
     ///     统一改为 ToolTip 气泡（悬停按钮/标题/输入框 0.5 秒显示，Windows 标准延迟）。
     ///     其中"当前目录结构"是动态信息，实时挂在"配置目录结构..."按钮的 ToolTip 里。
-    ///   - 控件的"显示内容"（IP/端口/行列/目录模板/相机行）由 SettingsForm.cs 运行时
+    ///   - 控件的"显示内容"（IP/端口/行列/目录模板/相机行/扫码枪行）由 SettingsForm.cs 运行时
     ///     从 AppConfig 填充（LoadFromConfig），设计器里的值只是可视化参照。
-    ///   - gridCameras 的 4 个列由运行时代码添加（AddCameraColumns：相机IP/触发端口/FTP上传目录/
-    ///     取图方式下拉框），不在设计器序列化，避免 DataGridView 列序列化代码冗长易错；
-    ///     外观与行为在设计器里设置。
+    ///   - gridCameras 的 4 个列与 gridScanners 的 8 个列由运行时代码添加，不在设计器序列化，
+    ///     避免 DataGridView 列序列化代码冗长易错；外观与行为在设计器里设置。
     ///   - 保存/取消按钮的 DialogResult 在设计器里设好，点保存时上层按 DialogResult 判断。
     /// </summary>
     partial class SettingsForm
@@ -79,6 +83,10 @@ namespace CommandCenter.Views
             this.gridCameras = new System.Windows.Forms.DataGridView();
             this.btnAddCam = new System.Windows.Forms.Button();
             this.btnDelCam = new System.Windows.Forms.Button();
+            this.lblScanners = new System.Windows.Forms.Label();
+            this.gridScanners = new System.Windows.Forms.DataGridView();
+            this.btnAddScanner = new System.Windows.Forms.Button();
+            this.btnDelScanner = new System.Windows.Forms.Button();
             this.btnSave = new System.Windows.Forms.Button();
             this.btnCancel = new System.Windows.Forms.Button();
             this.tip = new System.Windows.Forms.ToolTip(this.components);
@@ -86,6 +94,7 @@ namespace CommandCenter.Views
             ((System.ComponentModel.ISupportInitialize)(this.nudRows)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.nudCols)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.gridCameras)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.gridScanners)).BeginInit();
             this.SuspendLayout();
             //
             // lblPlcIp
@@ -309,11 +318,60 @@ namespace CommandCenter.Views
             this.btnDelCam.Text = "删除选中";
             this.btnDelCam.UseVisualStyleBackColor = true;
             //
+            // lblScanners
+            // 扫码枪列表标题（V1.8.1 支持多台），加粗醒目，与"相机列表"同风格
+            //
+            this.lblScanners.AutoSize = true;
+            this.lblScanners.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
+            this.lblScanners.Location = new System.Drawing.Point(20, 545);
+            this.lblScanners.Name = "lblScanners";
+            this.lblScanners.Size = new System.Drawing.Size(84, 19);
+            this.lblScanners.TabIndex = 26;
+            this.lblScanners.Text = "扫码枪列表:";
+            //
+            // gridScanners
+            // 扫码枪清单：一行一台扫码枪（行数=台数）。
+            // 列结构由 SettingsForm.cs 运行时 SetupScannerGridColumns 添加，此处只设外观与编辑行为。
+            //
+            this.gridScanners.AllowUserToAddRows = true;
+            this.gridScanners.AllowUserToDeleteRows = true;
+            this.gridScanners.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
+            this.gridScanners.BackgroundColor = System.Drawing.Color.White;
+            this.gridScanners.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.gridScanners.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            this.gridScanners.EditMode = System.Windows.Forms.DataGridViewEditMode.EditOnEnter;
+            this.gridScanners.Location = new System.Drawing.Point(20, 571);
+            this.gridScanners.Name = "gridScanners";
+            this.gridScanners.RowHeadersVisible = false;
+            this.gridScanners.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
+            this.gridScanners.Size = new System.Drawing.Size(680, 150);
+            this.gridScanners.TabIndex = 27;
+            //
+            // btnAddScanner
+            // 添加一台默认扫码枪行（默认值即 ScanConfig 模型默认）
+            //
+            this.btnAddScanner.Location = new System.Drawing.Point(20, 740);
+            this.btnAddScanner.Name = "btnAddScanner";
+            this.btnAddScanner.Size = new System.Drawing.Size(100, 30);
+            this.btnAddScanner.TabIndex = 28;
+            this.btnAddScanner.Text = "添加一台";
+            this.btnAddScanner.UseVisualStyleBackColor = true;
+            //
+            // btnDelScanner
+            // 删除当前选中的扫码枪行
+            //
+            this.btnDelScanner.Location = new System.Drawing.Point(150, 740);
+            this.btnDelScanner.Name = "btnDelScanner";
+            this.btnDelScanner.Size = new System.Drawing.Size(100, 30);
+            this.btnDelScanner.TabIndex = 29;
+            this.btnDelScanner.Text = "删除选中";
+            this.btnDelScanner.UseVisualStyleBackColor = true;
+            //
             // btnSave
             // 保存：把界面值回写内存配置并返回 OK（上层写盘 + 热生效，V1.6.0 免重启）
             //
             this.btnSave.DialogResult = System.Windows.Forms.DialogResult.OK;
-            this.btnSave.Location = new System.Drawing.Point(490, 492);
+            this.btnSave.Location = new System.Drawing.Point(490, 740);
             this.btnSave.Name = "btnSave";
             this.btnSave.Size = new System.Drawing.Size(90, 32);
             this.btnSave.TabIndex = 24;
@@ -326,10 +384,10 @@ namespace CommandCenter.Views
             // 与"保存"之间留 30px 间隙（与"添加一台/删除选中"一致），悬停有说明即可。
             //
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(610, 492);
+            this.btnCancel.Location = new System.Drawing.Point(610, 740);
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(90, 32);
-            this.btnCancel.TabIndex = 25;
+            this.btnCancel.TabIndex = 30;
             this.btnCancel.Text = "取消";
             this.btnCancel.UseVisualStyleBackColor = true;
             //
@@ -339,9 +397,13 @@ namespace CommandCenter.Views
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.AcceptButton = this.btnSave;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(720, 632);
+            this.ClientSize = new System.Drawing.Size(720, 790);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnSave);
+            this.Controls.Add(this.btnDelScanner);
+            this.Controls.Add(this.btnAddScanner);
+            this.Controls.Add(this.gridScanners);
+            this.Controls.Add(this.lblScanners);
             this.Controls.Add(this.btnDelCam);
             this.Controls.Add(this.btnAddCam);
             this.Controls.Add(this.gridCameras);
@@ -406,10 +468,14 @@ namespace CommandCenter.Views
                 "在列表末尾添加一台相机（默认值可直接改 IP / 端口 / FTP 上传目录）。");
             this.tip.SetToolTip(this.chkTitleOkNg,
                 "标题栏的 OK / NG 计数用\"实心彩色色块 + 白字\"高亮（绿底=OK、红底=NG），\r\n比普通彩色文字醒目得多。取消则回退彩色文字样式。保存后即时生效。");
-            this.tip.SetToolTip(this.btnAddCam,
-                "在列表末尾添加一台相机（默认值可直接改 IP / 端口 / FTP 上传目录）。");
             this.tip.SetToolTip(this.btnDelCam,
                 "删除选中的相机行；未选中时先点选要删的行。");
+            this.tip.SetToolTip(this.lblScanners,
+                "扫码枪列表：一台一行，多台各配各的通讯参数。\r\n任何一台扫到的条码都会更新当前序列号（标题栏与存图目录同步）。\r\n\"启用\"不打勾则这台不接入（序列号走手动输入/模拟）。");
+            this.tip.SetToolTip(this.btnAddScanner,
+                "在列表末尾添加一台扫码枪（默认值可直接改方式/IP/串口参数）。");
+            this.tip.SetToolTip(this.btnDelScanner,
+                "删除选中的扫码枪行；未选中时先点选要删的行。");
             this.tip.SetToolTip(this.btnSave,
                 "保存所有设置并写盘到 Config/appconfig.json，保存后即时生效（V1.6.0 免重启）。\r\n服务层按新配置自动重建，设备短暂断连后几秒内自动连回。");
             this.tip.SetToolTip(this.btnCancel,
@@ -418,6 +484,7 @@ namespace CommandCenter.Views
             ((System.ComponentModel.ISupportInitialize)(this.nudRows)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.nudCols)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.gridCameras)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.gridScanners)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
         }
@@ -446,6 +513,10 @@ namespace CommandCenter.Views
         private DataGridView gridCameras;
         private Button btnAddCam;
         private Button btnDelCam;
+        private Label lblScanners;
+        private DataGridView gridScanners;
+        private Button btnAddScanner;
+        private Button btnDelScanner;
         private Button btnSave;
         private Button btnCancel;
         private ToolTip tip;

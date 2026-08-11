@@ -102,6 +102,7 @@
     <Compile Include="Services\ImageStore.cs" />
     <Compile Include="Services\RecipeManager.cs" />
     <Compile Include="Services\ScannerService.cs" />
+    <Compile Include="Services\ScannerTcpService.cs" />
     <Compile Include="Services\ProductionCoordinator.cs" />
     <Compile Include="Services\ConnectionMonitor.cs" />
     <Compile Include="Utils\ConfigStore.cs" />

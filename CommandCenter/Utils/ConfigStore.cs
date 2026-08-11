@@ -36,6 +36,7 @@ namespace CommandCenter.Utils
 
                     // 空段兜底（json 缺字段/显式 null 时用模型默认），保证后续代码不 NRE
                     if (cfg.Cameras == null) cfg.Cameras = new List<Models.CameraConfig>();
+                    if (cfg.Scanners == null) cfg.Scanners = new List<Models.ScanConfig>();
                     if (cfg.Display == null) cfg.Display = new Models.DisplayConfig();
                     if (cfg.Image == null) cfg.Image = new Models.ImageConfig();
 

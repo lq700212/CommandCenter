@@ -46,7 +46,7 @@ namespace CommandCenter.Views
         private RecipeManager _recipes;
         private ProductionCoordinator _coordinator;
         private ConnectionMonitor _monitor;
-
+        private List<IScanner> _scanners = new List<IScanner>();   // 扫码枪列表（多台各一个实例，V1.8.1 起支持多台；串口/基恩士 TCP 无协议按各自 Mode 二选一）
         private Label[] _lblCamStatuses;            // 每个相机一个连接指示灯（按相机下标对齐）
         private bool _recipeComboInit;    // 组合框程序内初始化/刷新时防误触 SelectedIndexChanged
         private int _recipeSwitchVer;     // 配方下发任务的版本号：只让"最新一次切换"的结果更新状态条（丢弃过期提示）
@@ -88,6 +88,29 @@ namespace CommandCenter.Views
 
             // 连接健康监控：后台心跳 + 断连自动重连 + 边沿日志（不影响任何 UI 刷新）
             _monitor = new ConnectionMonitor(_plc, _cameras);
+
+            // 扫码枪（V1.8.1 起支持多台）：每台按各自的 ScanConfig.Mode 选实现——
+            // "Tcp"=基恩士 SR 以太网无协议，其余按串口兜底。扫码枪断连自愈由实现类内部完成，
+            // 不占 ConnectionMonitor。列表为空则不留任何扫码枪（序列号走手动输入/模拟）。
+            _scanners = new List<IScanner>();
+            foreach (var sc in _config.Scanners ?? new List<ScanConfig>())
+                _scanners.Add(BuildScanner(sc));
+        }
+
+        /// <summary>
+        /// 按配置创建一台扫码枪实例。
+        /// "Tcp" → ScannerTcpService（基恩士 SR 系列 TCP/IP 无协议，上位机作客户端收条码行）；
+        /// 其余 → ScannerService（串口 RS-232）。两者实现同一 IScanner 接口。
+        /// </summary>
+        private static IScanner BuildScanner(ScanConfig scan)
+        {
+            if (scan != null
+                && !string.IsNullOrWhiteSpace(scan.Mode)
+                && scan.Mode.Trim().Equals("Tcp", StringComparison.OrdinalIgnoreCase))
+            {
+                return new ScannerTcpService(scan);
+            }
+            return new ScannerService(scan ?? new ScanConfig());
         }
 
         /// <summary>
@@ -388,6 +411,11 @@ namespace CommandCenter.Views
                 catch (Exception ex) { LogHelper.Warn("关闭：协调器释放异常 " + ex.Message); }
                 try { _plc?.Dispose(); }
                 catch (Exception ex) { LogHelper.Warn("关闭：PLC 释放异常 " + ex.Message); }
+                foreach (var sc in _scanners)
+                {
+                    try { sc?.Dispose(); }
+                    catch (Exception ex) { LogHelper.Warn("关闭：扫码枪释放异常 " + ex.Message); }
+                }
                 foreach (var cam in _cameras)
                 {
                     try { cam?.Dispose(); }
@@ -399,7 +427,7 @@ namespace CommandCenter.Views
 
         /// <summary>
         /// 订阅"运行时"业务事件（构造与热更都会调用）：
-        /// 检测完成 / 状态变化 / 异常提醒 / PLC与各相机连接状态指示灯。
+        /// 检测完成 / 状态变化 / 异常提醒 / PLC与各相机连接状态指示灯 / 扫码条码。
         /// 旧服务实例在热更时已 Dispose，这里只对当前字段引用的新服务订阅，不会叠加。
         /// </summary>
         private void SubscribeRuntimeEvents()
@@ -407,6 +435,13 @@ namespace CommandCenter.Views
             _coordinator.InspectionFinished += OnInspectionFinished;
             _coordinator.StateChanged += OnStateChanged;
             _coordinator.ErrorRaised += msg => LogHelper.Warn("界面收到错误：" + msg);
+
+            // 扫码枪（V1.8.1 多台）：每台扫到的条码都更新当前产品序列号（进 {SN} 目录与标题栏）
+            foreach (var sc in _scanners)
+            {
+                sc.SerialNumberScanned += OnSerialScanned;
+                sc.Open(); // 串口打开失败 / TCP 连不上都不影响主流程，后台持续重连
+            }
 
             // 连接状态指示灯：PLC 与每台相机 断连时 UI 实时变红，重连成功回绿
             _plc.ConnectionChanged += (s, c) => UpdateDeviceStatus(lblPlcStatus, c);
@@ -417,6 +452,23 @@ namespace CommandCenter.Views
             }
 
             _monitor?.Start();
+        }
+
+        /// <summary>
+        /// 扫到一条条码：更新当前产品序列号并刷新标题栏（V1.8.0 接入）。
+        /// 事件来自扫码枪工作线程，统一 Invoke 回 UI 线程。
+        /// </summary>
+        private void OnSerialScanned(object sender, string code)
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<object, string>(OnSerialScanned), sender, code);
+                return;
+            }
+            _coordinator.LatestSerialNumber = code;
+            if (lblSerial != null) lblSerial.Text = code;
+            LogHelper.Info("当前产品序列号：" + code);
         }
 
         /// <summary>
@@ -511,6 +563,8 @@ namespace CommandCenter.Views
             catch (Exception ex) { LogHelper.Warn("热更：协调器释放异常 " + ex.Message); }
             try { _plc?.Dispose(); }
             catch (Exception ex) { LogHelper.Warn("热更：PLC 释放异常 " + ex.Message); }
+            foreach (var sc in _scanners)
+            { try { sc?.Dispose(); } catch (Exception ex) { LogHelper.Warn("热更：扫码枪释放异常 " + ex.Message); } }
             foreach (var cam in _cameras ?? new List<KeyenceIV4Camera>())
             { try { cam?.Dispose(); } catch (Exception ex) { LogHelper.Warn("热更：相机释放异常 " + ex.Message); } }
 

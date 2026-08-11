@@ -30,8 +30,13 @@ namespace CommandCenter.Models
         /// <summary>图像保存配置</summary>
         public ImageConfig Image { get; set; } = new ImageConfig();
 
-        /// <summary>扫码枪配置（可选，未启用时使用模拟数据）</summary>
-        public ScanConfig Scan { get; set; } = new ScanConfig();
+        /// <summary>
+        /// 扫码枪配置列表（可选，未启用时使用模拟数据）。
+        /// 【为什么是列表】现场可能有多台扫码枪（不同工位/不同门各一把），每台的通讯方式
+        /// （串口/TCP）、IP/串口名都独立配置；任何一台扫到的条码都会更新当前产品序列号
+        /// （进标题栏与 {SN} 存图目录）。一台也够用——配置里只留一行即可。
+        /// </summary>
+        public List<ScanConfig> Scanners { get; set; } = new List<ScanConfig>();
     }
 
     /// <summary>
@@ -288,23 +293,40 @@ namespace CommandCenter.Models
     }
 
     /// <summary>
-    /// 扫码枪配置（可选用串口扫码枪，未启用则序列号走手动输入/模拟）。
+    /// 扫码枪配置（V1.8.0 起支持两种通讯方式，见 Mode；未启用则序列号走手动输入/模拟）。
     /// </summary>
     public class ScanConfig
     {
-        /// <summary>是否启用扫码枪</summary>
+        /// <summary>
+        /// 是否启用扫码枪。
+        /// </summary>
         public bool Enabled { get; set; } = false;
 
-        /// <summary>串口名，如 COM3</summary>
+        /// <summary>
+        /// 通讯方式（V1.8.0 新增，大小写不敏感，其他值按 Serial 兜底）：
+        ///   "Serial"：串口 RS-232 扫码枪（默认，扫完发一行条码+CR/LF）；
+        ///   "Tcp"   ：基恩士 SR 系列扫码枪以太网 TCP/IP 无协议通讯——上位机作 TCP 客户端连扫码枪，
+        ///              扫码枪读到条码后主动推送文本行，本程序按行切分（与串口行为一致）。
+        /// </summary>
+        public string Mode { get; set; } = "Serial";
+
+        /// <summary>串口名，如 COM3（仅 Mode=Serial 使用）</summary>
         public string PortName { get; set; } = "COM3";
 
-        /// <summary>波特率，扫码枪常见 115200 / 9600</summary>
+        /// <summary>波特率，扫码枪常见 115200 / 9600（仅 Mode=Serial 使用）</summary>
         public int BaudRate { get; set; } = 115200;
 
-        /// <summary>停止位字符串，遵循项目约定："1"/"15"/"2"</summary>
+        /// <summary>停止位字符串，遵循项目约定："1"/"15"/"2"（仅 Mode=Serial 使用）</summary>
         public string StopBits { get; set; } = "1";
 
-        /// <summary>校验位，标准枚举名 None/Odd/Even/Mark/Space</summary>
+        /// <summary>校验位，标准枚举名 None/Odd/Even/Mark/Space（仅 Mode=Serial 使用）</summary>
         public string Parity { get; set; } = "None";
+
+        /// <summary>扫码枪 IP（仅 Mode=Tcp 使用）。基恩士 SR 系列无协议通讯的默认监听端口请查
+        /// 《SR 系列通信指南》，常见 9005 左右，现场按扫码枪设置改。</summary>
+        public string IpAddress { get; set; } = "192.168.1.110";
+
+        /// <summary>扫码枪 TCP 端口（仅 Mode=Tcp 使用，基恩士 SR 无协议默认端口，现场确认）</summary>
+        public int Port { get; set; } = 9005;
     }
 }

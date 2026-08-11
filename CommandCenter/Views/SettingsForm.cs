@@ -23,12 +23,19 @@ namespace CommandCenter.Views
     /// │            ├────────┼────┼──────────┼────────────────────────┤ │
     /// │            │ 192…   │8500│ Ftp/Tcp  │ D:\…\ftp\cam1          │ │
     /// │            └────────┴────┴──────────┴────────────────────────┘ │
-    /// │            [添加一台] [删除选中]      [保存] [取消]               │
+    /// │            [添加一台] [删除选中]                               │
+    /// │ 扫码枪列表: ┌────┬────────┬────────┬────┬────────┬─────┬─────┐ │
+    /// │              │启用 │ 方式    │ IP     │端口 │串口名  │波特率│停止位│ │
+    /// │              │√  │ Tcp     │192…    │9005│ COM3   │115200│ 1   │ │
+    /// │              └────┴────────┴────────┴────┴────────┴─────┴─────┘ │
+    /// │            [添加一台] [删除选中]  [保存] [取消]                   │
     /// └─────────────────────────────────────────────────────────────┘
     /// 布局（静态控件）在 SettingsForm.Designer.cs 里可视化维护；
     /// 本文件只负责"数据 ↔ 控件"：构造时把 AppConfig 填进界面（LoadFromConfig），
     /// 点保存回写（OnSave，仅改内存对象，返回 DialogResult.OK，上层写盘并热生效 V1.6.0 免重启）。
     /// 相机行数即相机台数：多台直接加行，各配各的 IP / 触发端口 / FTP 上传目录。
+    /// 扫码枪行数即扫码枪台数（V1.8.1 起）：启用勾选=是否接入，方式=串口(Serial)/以太网无协议(Tcp)，
+    /// 串口模式配串口名/波特率/停止位/校验位，TCP 模式配 IP/端口（与相机配置风格一致）。
     /// "配置目录结构..."按钮打开 DirTreeEditForm，可视化编辑目录层级与文件名规则，
     /// 返回后把当前目录结构刷进该按钮的 ToolTip（原常驻预览标签 lblDirPreview 已删，
     /// 界面说明统一用悬停气泡，见 SettingsForm.Designer.cs 的 tip）。
@@ -66,6 +73,9 @@ namespace CommandCenter.Views
             // 相机表格：先建列，再逐行填数据
             SetupCameraGridColumns();
             LoadCameraRows();
+            // 扫码枪表格：先建列，再逐行填数据（V1.8.1 起支持多台）
+            SetupScannerGridColumns();
+            LoadScannerRows();
         }
 
         /// <summary>
@@ -118,6 +128,59 @@ namespace CommandCenter.Views
                 gridCameras.Rows.Add("192.168.1.100", 8500, "", "Ftp");
         }
 
+        /// <summary>给扫码枪表格建好列结构（V1.8.1 起，列固定，运行时加一次即可）。
+        /// 列对齐 ScanConfig 字段：启用/方式/串口参数/网络参数，一台扫码枪一行。</summary>
+        private void SetupScannerGridColumns()
+        {
+            if (gridScanners.Columns["Mode"] == null)
+            {
+                // 启用：勾选列，控制这台扫码枪是否接入
+                var enCol = new DataGridViewCheckBoxColumn
+                {
+                    Name = "Enabled",
+                    HeaderText = "启用",
+                    Width = 50
+                };
+                gridScanners.Columns.Add(enCol);
+
+                // 方式：串口(Serial)/以太网无协议(Tcp) 下拉选择，对应 ScanConfig.Mode
+                var modeCol = new DataGridViewComboBoxColumn
+                {
+                    Name = "Mode",
+                    HeaderText = "方式",
+                    Width = 80,
+                    SortMode = DataGridViewColumnSortMode.NotSortable
+                };
+                modeCol.Items.Add("Serial");
+                modeCol.Items.Add("Tcp");
+                gridScanners.Columns.Add(modeCol);
+
+                // 串口参数（Mode=Serial 用）
+                gridScanners.Columns.Add("PortName", "串口名");
+                gridScanners.Columns.Add("BaudRate", "波特率");
+                gridScanners.Columns.Add("StopBits", "停止位");
+                gridScanners.Columns.Add("Parity", "校验位");
+                // 网络参数（Mode=Tcp 用）
+                gridScanners.Columns.Add("IpAddress", "IP");
+                gridScanners.Columns.Add("Port", "端口");
+            }
+        }
+
+        /// <summary>把现有扫码枪配置逐行填进表格（V1.8.1）。空列表则留一行默认串口配置当模板。</summary>
+        private void LoadScannerRows()
+        {
+            foreach (var s in _cfg.Scanners ?? new List<ScanConfig>())
+            {
+                gridScanners.Rows.Add(s.Enabled,
+                    string.IsNullOrWhiteSpace(s.Mode) ? "Serial" : s.Mode,   // 旧配置 Mode 为空按串口兜底显示
+                    s.PortName, s.BaudRate, s.StopBits, s.Parity,
+                    s.IpAddress, s.Port);
+            }
+            // 至少留一行可见（默认值即 ScanConfig 模型默认）
+            if (gridScanners.Rows.Count == 0)
+                gridScanners.Rows.Add(false, "Serial", "COM3", 115200, "1", "None", "192.168.1.110", 9005);
+        }
+
         /// <summary>
         /// 挂上"添加一台/删除选中/保存"按钮的点击事件。
         /// （保存/取消 按钮的 DialogResult 已在设计器里设好；取消无需挂线）
@@ -142,6 +205,22 @@ namespace CommandCenter.Views
                 }
                 foreach (var r in rows)
                     gridCameras.Rows.Remove(r);
+            };
+            // 添加一台扫码枪：追加一行默认串口配置（V1.8.1 多台）
+            btnAddScanner.Click += (s, e) => gridScanners.Rows.Add(false, "Serial", "COM3", 115200, "1", "None", "192.168.1.110", 9005);
+            // 删除选中的扫码枪行（与相机同样的"先选中再删"交互）
+            btnDelScanner.Click += (s, e) =>
+            {
+                var rows = gridScanners.SelectedRows.Cast<DataGridViewRow>()
+                    .Where(r => !r.IsNewRow).ToList();
+                if (rows.Count == 0)
+                {
+                    MessageBox.Show("请先点击表格中要删除的扫码枪行（整行高亮），再点\"删除选中\"。",
+                        "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                foreach (var r in rows)
+                    gridScanners.Rows.Remove(r);
             };
             // 保存：把界面值回写内存配置，返回 DialogResult.OK（上层负责写盘与提示）
             btnSave.Click += OnSave;
@@ -203,6 +282,42 @@ namespace CommandCenter.Views
             }
             if (cams.Count == 0) cams.Add(new CameraConfig()); // 兜底：至少一台相机
             _cfg.Cameras = cams;
+
+            // 扫码枪（V1.8.1 多台）：逐行回写；未勾选"启用"的行也会保留进配置
+            //（Enabled=false 时主程序不建实例，序列号走手动输入/模拟）。
+            // 串口模式看 PortName/波特率/停止位/校验位；TCP 模式看 IP/端口，与相机配置风格一致。
+            var scanners = new List<ScanConfig>();
+            foreach (DataGridViewRow r in gridScanners.Rows)
+            {
+                if (r.IsNewRow) continue; // 表格末尾的"新行"不算真实扫码枪
+                bool enabled = r.Cells["Enabled"].Value is bool b && b;
+                string mode = r.Cells["Mode"].Value == null ? "Serial" : r.Cells["Mode"].Value.ToString();
+                string portName = r.Cells["PortName"].Value == null ? "" : r.Cells["PortName"].Value.ToString().Trim();
+                int baud = 115200;
+                string baudTxt = r.Cells["BaudRate"].Value == null ? "" : r.Cells["BaudRate"].Value.ToString();
+                if (!int.TryParse(baudTxt, out baud)) baud = 115200;
+                string stopBits = r.Cells["StopBits"].Value == null ? "" : r.Cells["StopBits"].Value.ToString().Trim();
+                string parity = r.Cells["Parity"].Value == null ? "" : r.Cells["Parity"].Value.ToString().Trim();
+                string ip = r.Cells["IpAddress"].Value == null ? "" : r.Cells["IpAddress"].Value.ToString().Trim();
+                int port = 9005;
+                string portTxt = r.Cells["Port"].Value == null ? "" : r.Cells["Port"].Value.ToString();
+                if (!int.TryParse(portTxt, out port)) port = 9005;
+                // 全空的模板行（什么都没填）忽略，避免保存一堆垃圾行
+                if (string.IsNullOrWhiteSpace(portName) && string.IsNullOrWhiteSpace(ip)) continue;
+                scanners.Add(new ScanConfig
+                {
+                    Enabled = enabled,
+                    Mode = string.IsNullOrWhiteSpace(mode) ? "Serial" : mode.Trim(),
+                    PortName = portName,
+                    BaudRate = Math.Max(1, baud),
+                    StopBits = string.IsNullOrWhiteSpace(stopBits) ? "1" : stopBits,
+                    Parity = string.IsNullOrWhiteSpace(parity) ? "None" : parity,
+                    IpAddress = string.IsNullOrWhiteSpace(ip) ? "192.168.1.110" : ip,
+                    Port = Math.Max(1, port)
+                });
+            }
+            if (scanners.Count == 0) scanners.Add(new ScanConfig()); // 兜底：保留一条默认（未启用）
+            _cfg.Scanners = scanners;
         }
     }
 }
