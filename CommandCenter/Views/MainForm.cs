@@ -34,6 +34,8 @@ namespace CommandCenter.Views
     /// 职责：只做界面呈现 + 事件绑定，业务编排在 ProductionCoordinator。
     /// 静态布局控件（标题栏字段/配方下拉框/设置按钮/PLC灯/状态栏/窗口矩阵容器）在
     /// MainForm.Designer.cs 中由设计器维护；动态控件（相机灯/窗口矩阵内容）在此运行时生成。
+    /// 系统设置保存后不重启：ApplyRuntimeConfig 停旧服务层、按新配置全量重建服务与界面
+    /// （V1.6.0，连接惰性 + 后台心跳自动按新 IP 重连，等效"断开重连"）。
     /// </summary>
     public partial class MainForm : Form
     {
@@ -89,15 +91,33 @@ namespace CommandCenter.Views
         }
 
         /// <summary>
-        /// 标题栏"运行时"初始化：把设计器里做好的静态控件按配置补全成最终形态。
-        /// 设计器负责"控件长什么样"，此处负责"数据与动态部分"：
-        ///   ① 产品型号前缀文案（ProductModelPrefix）与各信息字段的可见性（ShowXxx 开关）；
-        ///   ② 配方下拉框填充（cmbRecipe 显示当前配方、可点切换，见 InitRecipeCombo）；
-        ///   ③ 每台相机一个连接指示灯（_lblCamStatuses，按相机下标对齐）——相机台数运行时才知道，
-        ///      所以这类"动态控件"不进设计器，在这里循环生成，Dock.Right 排在 PLC 灯右侧；
-        ///   ④ 最后按"哪些字段可见"做一次紧凑重排（RelayoutTitleBar），隐藏字段不占位。
+        /// 标题栏"运行时"初始化（仅构造调用一次）：
+        ///   ① 字段/可见性/OK-NG 色块/相机灯 → InitTitleBarFields（可重入，热更时再调）；
+        ///   ② 配方下拉框填充（只一次）；
+        ///   ③ 设置按钮事件挂线（只一次）。
+        /// 设计器负责"控件长什么样"，此处负责"数据与动态部分"。
         /// </summary>
         private void InitTitleBarRuntime()
+        {
+            // ① 标题栏字段 + 动态相机灯（构造与"设置保存热更"都会调用，可重入）
+            InitTitleBarFields();
+
+            // ② 配方下拉框：填充配方项并选中当前（期间屏蔽事件，防初始化误触发切换）
+            InitRecipeCombo();
+
+            // ③ 设置按钮事件（设计器只做外观，交互在这里挂线，只挂一次）
+            btnSettings.Click += (s, e) => OpenSettings();
+        }
+
+        /// <summary>
+        /// 标题栏"字段与动态部分"按配置初始化（构造与"设置保存热更"都会调用，可重入）：
+        ///   ① 产品型号前缀文案（ProductModelPrefix）与各信息字段的可见性（ShowXxx 开关）；
+        ///   ② 标题栏 OK/NG 计数色块高亮（StyleCountBadge，配色跟随配置）；
+        ///   ③ 每台相机一个连接指示灯（_lblCamStatuses，按相机下标对齐）——相机台数运行时才知道，
+        ///      所以这类"动态控件"不进设计器，在这里循环生成，Dock.Right 排在 PLC 灯右侧；
+        /// 说明：紧凑重排（RelayoutTitleBar）在 OnShown / 热更末尾执行，不在此处。
+        /// </summary>
+        private void InitTitleBarFields()
         {
             // ① 产品型号 = 配方（V1.1.2 现场业务对应）：前缀文案走配置，开关控制整段显示
             lblProductPrefix.Text = _config.Display.ProductModelPrefix + ":";
@@ -112,7 +132,7 @@ namespace CommandCenter.Views
             lblOk.Visible = _config.Display.ShowOkCount;
             lblNg.Visible = _config.Display.ShowNgCount;
 
-            // 标题栏 OK/NG 计数高亮（V1.5.0 现场反馈"彩色数字不够醒目"）：
+            // ② 标题栏 OK/NG 计数高亮（V1.5.0 现场反馈"彩色数字不够醒目"）：
             // 默认把 OK/NG 做成"实心彩色色块 + 白字"（绿底=OK、红底=NG，配色走 DisplayConfig），
             // 关闭 TitleOkNgHighlight 配置时回退为普通彩色文字。
             if (_config.Display.TitleOkNgHighlight)
@@ -121,17 +141,22 @@ namespace CommandCenter.Views
                 StyleCountBadge(lblNg, _config.Display.NgColor);
             }
 
-            // ② 配方下拉框：填充配方项并选中当前（期间屏蔽事件，防初始化误触发切换）
-            InitRecipeCombo();
-
-            // 设置按钮事件（设计器只做外观，交互在这里挂线）
-            btnSettings.Click += (s, e) => OpenSettings();
-
             // ③ 动态相机连接指示灯：先 Add 的 Dock.Right 靠左，后 Add 的靠右。
-            //    设计器里已 Add 了 PLC 灯（最左侧），这里从"台数-1"倒着 Add，
-            //    得到 相机N..相机1 顺序排在 PLC 灯右侧，与历史实测布局一致。
-            //    先隐藏设计器里的占位灯（lblCamPlaceholder）：它只是设计器视觉提示，
-            //    不参与实际布局，隐藏后 Dock 空间让给下面循环生成的真灯。
+            BuildCameraStatusLights();
+        }
+
+        /// <summary>
+        /// 重建标题栏每台相机的连接指示灯（构造与热更都会调用）。
+        /// 先移除旧的（热更后相机台数可能变化，必须整套重建），再按当前台数从"台数-1"倒着 Add，
+        /// 得到 相机N..相机1 顺序排在 PLC 灯右侧，与历史实测布局一致。
+        /// lblCamPlaceholder 是设计器视觉提示，隐藏后 Dock 空间让给循环生成的真灯。
+        /// </summary>
+        private void BuildCameraStatusLights()
+        {
+            if (_lblCamStatuses != null)
+                foreach (var lbl in _lblCamStatuses)
+                    if (lbl != null) pnlTitleBar.Controls.Remove(lbl);
+
             lblCamPlaceholder.Visible = false;
             _lblCamStatuses = new Label[_cameras.Count];
             for (int i = _cameras.Count - 1; i >= 0; i--)
@@ -148,9 +173,6 @@ namespace CommandCenter.Views
                 pnlTitleBar.Controls.Add(lbl);
                 _lblCamStatuses[i] = lbl;
             }
-
-            // ④ 紧凑重排延迟到 OnShown 执行：窗体首次显示时的 AutoScale 会自动缩放/还原
-            //    设计器基准坐标，会覆盖构造阶段的赋值；OnShown 时缩放已完成，此时重排才真正生效
         }
 
         /// <summary>
@@ -294,10 +316,15 @@ namespace CommandCenter.Views
         {
             int rows = Math.Max(1, _config.Display.Rows);
             int cols = Math.Max(1, _config.Display.Columns);
-            _windows = new CameraDisplayControl[rows * cols];
 
-            // 重置容器：清掉设计器默认的 1×1 行列与可能残留的子控件
+            // 重置容器：先释放旧窗口（热更时旧窗口 PictureBox 持有图片句柄，必须 Dispose 防泄漏），
+            // 再清掉设计器默认的 1×1 行列与可能残留的子控件。
+            // 注意：释放必须针对"上一轮"的 _windows 数组，所以要在 _windows 重建之前做。
             var grid = gridCameraWindows;
+            if (_windows != null)
+                foreach (var w in _windows)
+                    try { w?.Dispose(); } catch { }
+            _windows = null;
             grid.Controls.Clear();
             grid.ColumnCount = cols;
             grid.RowCount = rows;
@@ -309,6 +336,10 @@ namespace CommandCenter.Views
                 grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / cols));
             for (int r = 0; r < rows; r++)
                 grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100f / rows));
+
+            // 新建数组放到填充循环之前：顺序必须是"先释放旧数组→再建新数组→再填充"，
+            // 否则循环里 _windows[idx] = w 会对 null 解引用抛 NullReferenceException。
+            _windows = new CameraDisplayControl[rows * cols];
 
             int idx = 0;
             for (int r = 0; r < rows; r++)
@@ -334,20 +365,16 @@ namespace CommandCenter.Views
             grid.BringToFront();
         }
 
-        /// <summary>订阅业务事件：检测完成 / 状态变化 / 异常提醒 / 设备连接状态。</summary>
+        /// <summary>
+        /// 事件订阅总入口（仅构造调用一次）：
+        ///   - 运行时业务事件（检测完成/状态变化/异常/设备连接状态）→ SubscribeRuntimeEvents，
+        ///     构造与"设置保存热更"都会调用（旧服务已释放，新服务重新订阅，可重入）；
+        ///   - 窗体生命周期事件（FormClosing 释放服务）只挂一次。lambda 内引用的是字段
+        ///     （_monitor/_coordinator/_plc/_cameras），热更替换服务后自动指向新实例，无需解绑重挂。
+        /// </summary>
         private void SubscribeEvents()
         {
-            _coordinator.InspectionFinished += OnInspectionFinished;
-            _coordinator.StateChanged += OnStateChanged;
-            _coordinator.ErrorRaised += msg => LogHelper.Warn("界面收到错误：" + msg);
-
-            // 连接状态指示灯：PLC 与每台相机 断连时 UI 实时变红，重连成功回绿
-            _plc.ConnectionChanged += (s, c) => UpdateDeviceStatus(lblPlcStatus, c);
-            for (int i = 0; i < _cameras.Count; i++)
-            {
-                int idx = i; // 闭包锁定下标，避免循环变量被所有事件共享
-                _cameras[i].ConnectionChanged += (s, c) => UpdateDeviceStatus(_lblCamStatuses[idx], c);
-            }
+            SubscribeRuntimeEvents();
 
             FormClosing += (s, e) =>
             {
@@ -367,6 +394,26 @@ namespace CommandCenter.Views
                 }
                 LogHelper.Info("程序关闭，服务已释放");
             };
+        }
+
+        /// <summary>
+        /// 订阅"运行时"业务事件（构造与热更都会调用）：
+        /// 检测完成 / 状态变化 / 异常提醒 / PLC与各相机连接状态指示灯。
+        /// 旧服务实例在热更时已 Dispose，这里只对当前字段引用的新服务订阅，不会叠加。
+        /// </summary>
+        private void SubscribeRuntimeEvents()
+        {
+            _coordinator.InspectionFinished += OnInspectionFinished;
+            _coordinator.StateChanged += OnStateChanged;
+            _coordinator.ErrorRaised += msg => LogHelper.Warn("界面收到错误：" + msg);
+
+            // 连接状态指示灯：PLC 与每台相机 断连时 UI 实时变红，重连成功回绿
+            _plc.ConnectionChanged += (s, c) => UpdateDeviceStatus(lblPlcStatus, c);
+            for (int i = 0; i < _cameras.Count; i++)
+            {
+                int idx = i; // 闭包锁定下标，避免循环变量被所有事件共享
+                _cameras[i].ConnectionChanged += (s, c) => UpdateDeviceStatus(_lblCamStatuses[idx], c);
+            }
 
             _monitor?.Start();
         }
@@ -437,14 +484,59 @@ namespace CommandCenter.Views
             lblNg.Text = "NG: " + _ng;
         }
 
-        /// <summary>打开系统设置：保存后提示重启生效。</summary>
+        /// <summary>
+        /// 配置保存后的热生效入口（V1.6.0，免重启）：停掉旧服务层，用新配置全量重建。
+        /// 服务连接是惰性的（EnsureConnected 才建连），重建后由后台心跳/到位轮询按新 IP 自动重连，
+        /// 等效于"按新配置断开重连"；界面（标题栏字段/相机灯/OK-NG 色块、窗口矩阵）同步按新配置重建。
+        ///
+        /// 【线程安全】本方法在 UI 线程执行，但只做"停服务/建对象/摆控件"，不发任何网络请求，
+        /// 不违反"UI 线程禁网络 IO"铁律；真正的连接动作发生在后台心跳线程。
+        /// 各服务 Dispose 均有"限时抢锁 + 锁外强断网"兜底，即使后台连接任务正忙也不会阻塞界面。
+        ///
+        /// 【为什么全量重建而非局部热更】PLC/相机寄存器、FTP 目录、窗口行列、相机台数等配置
+        /// 相互牵连（coordinator 持有相机列表与窗口总数、ImageStore 持有 FTP 监听），局部替换易留
+        /// 旧引用；全量重建逻辑简单且不易出错，副作用仅是"保存后设备短暂断连、几秒内自动连回"，
+        /// 对现场可接受。
+        /// </summary>
+        private void ApplyRuntimeConfig()
+        {
+            // ① 保留下一个流程要用的状态（新 coordinator 实例会重建，这些状态属于主窗体）
+            string serial = _coordinator?.LatestSerialNumber ?? "";
+
+            // ② 停旧服务：关窗顺序同 FormClosing，先停心跳/编排，再断设备
+            try { _monitor?.Dispose(); }
+            catch (Exception ex) { LogHelper.Warn("热更：监控器释放异常 " + ex.Message); }
+            try { _coordinator?.Dispose(); }
+            catch (Exception ex) { LogHelper.Warn("热更：协调器释放异常 " + ex.Message); }
+            try { _plc?.Dispose(); }
+            catch (Exception ex) { LogHelper.Warn("热更：PLC 释放异常 " + ex.Message); }
+            foreach (var cam in _cameras ?? new List<KeyenceIV4Camera>())
+            { try { cam?.Dispose(); } catch (Exception ex) { LogHelper.Warn("热更：相机释放异常 " + ex.Message); } }
+
+            // ③ 用新配置重建服务层（BuildServices 内部全部读取 _config 的最新值）
+            BuildServices();
+            _coordinator.LatestSerialNumber = serial;
+
+            // ④ 重建界面与重新订阅：标题栏（相机灯/色块）→ 窗口矩阵 → 运行时事件 → 启动流程
+            InitTitleBarFields();
+            BuildWindowGrid();
+            SubscribeRuntimeEvents();
+            _coordinator.Start();
+            RelayoutTitleBar();
+            RefreshTitle();
+
+            LogHelper.Info("配置已保存并热生效（服务层已按新配置重建）");
+        }
+
+        /// <summary>打开系统设置：保存后写盘并热生效（V1.6.0 起免重启）。</summary>
         private void OpenSettings()
         {
             using (var dlg = new SettingsForm(_config))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 ConfigStore.Save(_config);
-                MessageBox.Show("配置已保存，重启程序后生效。", "提示",
+                ApplyRuntimeConfig();   // 保存即生效：停旧服务、按新配置重建服务层与界面
+                MessageBox.Show("配置已保存并即时生效。", "提示",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }

@@ -27,7 +27,7 @@ namespace CommandCenter.Views
     /// └─────────────────────────────────────────────────────────────┘
     /// 布局（静态控件）在 SettingsForm.Designer.cs 里可视化维护；
     /// 本文件只负责"数据 ↔ 控件"：构造时把 AppConfig 填进界面（LoadFromConfig），
-    /// 点保存回写（OnSave，仅改内存对象，返回 DialogResult.OK，上层写盘并提示重启）。
+    /// 点保存回写（OnSave，仅改内存对象，返回 DialogResult.OK，上层写盘并热生效 V1.6.0 免重启）。
     /// 相机行数即相机台数：多台直接加行，各配各的 IP / 触发端口 / FTP 上传目录。
     /// "配置目录结构..."按钮打开 DirTreeEditForm，可视化编辑目录层级与文件名规则，
     /// 返回后把当前目录结构刷进该按钮的 ToolTip（原常驻预览标签 lblDirPreview 已删，
@@ -153,7 +153,7 @@ namespace CommandCenter.Views
             };
         }
 
-        /// <summary>把界面值回写内存配置（注意：窗口行列/相机台数改动需重启生效）。</summary>
+        /// <summary>把界面值回写内存配置（V1.6.0：保存后由 MainForm 热生效，免重启）。</summary>
         private void OnSave(object sender, EventArgs e)
         {
             _cfg.Plc.IpAddress = txtPlcIp.Text.Trim();

@@ -309,7 +309,7 @@ namespace CommandCenter.Views
             this.btnDelCam.UseVisualStyleBackColor = true;
             //
             // btnSave
-            // 保存：把界面值回写内存配置并返回 OK（上层写盘 + 提示重启）
+            // 保存：把界面值回写内存配置并返回 OK（上层写盘 + 热生效，V1.6.0 免重启）
             //
             this.btnSave.DialogResult = System.Windows.Forms.DialogResult.OK;
             this.btnSave.Location = new System.Drawing.Point(490, 492);
@@ -386,13 +386,13 @@ namespace CommandCenter.Views
             // "配置目录结构..."按钮的 ToolTip 内容是动态的（当前目录结构），在 SettingsForm.cs 里刷新。
             //
             this.tip.SetToolTip(this.txtPlcIp,
-                "PLC 的 IP 地址（汇川，Modbus TCP 从站）。\r\n与上位机同一网段、能 ping 通；改完需重启程序生效。");
+                "PLC 的 IP 地址（汇川，Modbus TCP 从站）。\r\n与上位机同一网段、能 ping 通；保存后即时生效（自动按新 IP 重连）。");
             this.tip.SetToolTip(this.nudPlcPort,
-                "PLC 通讯端口，默认 502（Modbus TCP 标准端口）。\r\n改完需重启程序生效。");
+                "PLC 通讯端口，默认 502（Modbus TCP 标准端口）。\r\n保存后即时生效（自动重连）。");
             this.tip.SetToolTip(this.nudRows,
-                "主界面显示窗口的行数。窗口总数=行×列；改完需重启程序生效。\r\n新增窗口的存图点位默认=窗口编号，可在下方\"窗口/点位配置...\"里改。");
+                "主界面显示窗口的行数。窗口总数=行×列；保存后即时生效。\r\n新增窗口的存图点位默认=窗口编号，可在下方\"窗口/点位配置...\"里改。");
             this.tip.SetToolTip(this.nudCols,
-                "主界面显示窗口的列数。窗口总数=行×列；改完需重启程序生效。\r\n新增窗口的存图点位默认=窗口编号，可在下方\"窗口/点位配置...\"里改。");
+                "主界面显示窗口的列数。窗口总数=行×列；保存后即时生效。\r\n新增窗口的存图点位默认=窗口编号，可在下方\"窗口/点位配置...\"里改。");
             this.tip.SetToolTip(this.txtSaveDir,
                 "图片保存的根目录（绝对路径）。\r\n实际目录结构按\"配置目录结构...\"里的层级逐级创建。");
             this.tip.SetToolTip(this.btnEditDirs,
@@ -404,11 +404,13 @@ namespace CommandCenter.Views
             this.tip.SetToolTip(this.btnAddCam,
                 "在列表末尾添加一台相机（默认值可直接改 IP / 端口 / FTP 上传目录）。");
             this.tip.SetToolTip(this.chkTitleOkNg,
-                "标题栏的 OK / NG 计数用\"实心彩色色块 + 白字\"高亮（绿底=OK、红底=NG），\r\n比普通彩色文字醒目得多。取消则回退彩色文字样式。改完需重启程序生效。");
+                "标题栏的 OK / NG 计数用\"实心彩色色块 + 白字\"高亮（绿底=OK、红底=NG），\r\n比普通彩色文字醒目得多。取消则回退彩色文字样式。保存后即时生效。");
+            this.tip.SetToolTip(this.btnAddCam,
+                "在列表末尾添加一台相机（默认值可直接改 IP / 端口 / FTP 上传目录）。");
             this.tip.SetToolTip(this.btnDelCam,
                 "删除选中的相机行；未选中时先点选要删的行。");
             this.tip.SetToolTip(this.btnSave,
-                "保存所有设置并写盘到 Config/appconfig.json。\r\n部分改动（窗口行列/相机台数等）需重启程序后生效。");
+                "保存所有设置并写盘到 Config/appconfig.json，保存后即时生效（V1.6.0 免重启）。\r\n服务层按新配置自动重建，设备短暂断连后几秒内自动连回。");
             this.tip.SetToolTip(this.btnCancel,
                 "放弃本次修改并关闭，不写盘。");
             ((System.ComponentModel.ISupportInitialize)(this.nudPlcPort)).EndInit();
