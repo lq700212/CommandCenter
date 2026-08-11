@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</ProjectGuid>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>CommandCenter</RootNamespace>
+    <AssemblyName>CommandCenter</AssemblyName>
+    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <Deterministic>true</Deterministic>
+    <LangVersion>7.3</LangVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Deployment" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xml" />
+    <!-- 串口扫码枪 -->
+    <Reference Include="System.IO.Ports" />
+    <!-- 本地引用的第三方库（libs 目录，离线可编译；版本以 packages.config 为准） -->
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>libs\Newtonsoft.Json.dll</HintPath>
+      <!-- NuGet: Newtonsoft.Json 13.0.4 -->
+    </Reference>
+    <Reference Include="NModbus">
+      <HintPath>libs\NModbus.dll</HintPath>
+      <!-- NuGet: NModbus 3.0.83（git 2023 fork，命名空间 NModbus，工厂方法 CreateMaster） -->
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="Views\MainForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <!-- MainForm 的 Designer 分部文件：静态控件（标题栏/配方下拉框/设置按钮/连接灯/状态栏/窗口矩阵）
+         由 Visual Studio 窗体设计器可视化维护；动态控件（相机灯/窗口矩阵内容）仍在 MainForm.cs 运行时生成 -->
+    <Compile Include="Views\MainForm.Designer.cs">
+      <DependentUpon>MainForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Views\SettingsForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <!-- SettingsForm 的 Designer 分部文件：静态布局控件（PLC/窗口/图片模板/相机表格/按钮）由
+         Visual Studio 窗体设计器可视化维护；数据填充与保存逻辑仍在 SettingsForm.cs -->
+    <Compile Include="Views\SettingsForm.Designer.cs">
+      <DependentUpon>SettingsForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Controls\CameraDisplayControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Controls\OkNgBadge.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Models\AppConfig.cs" />
+    <Compile Include="Models\RecipeConfig.cs" />
+    <Compile Include="Models\WindowData.cs" />
+    <Compile Include="Services\PlcService.cs" />
+    <Compile Include="Services\KeyenceIV4Camera.cs" />
+    <Compile Include="Services\ImageStore.cs" />
+    <Compile Include="Services\RecipeManager.cs" />
+    <Compile Include="Services\ScannerService.cs" />
+    <Compile Include="Services\ProductionCoordinator.cs" />
+    <Compile Include="Services\ConnectionMonitor.cs" />
+    <Compile Include="Utils\ConfigStore.cs" />
+    <Compile Include="Utils\LogHelper.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="App.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Views\MainForm.resx">
+      <DependentUpon>MainForm.cs</DependentUpon>
+    </EmbeddedResource>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

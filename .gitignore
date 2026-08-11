@@ -1,0 +1,20 @@
+# 编译产物
+bin/
+obj/
+
+# 运行日志
+Logs/
+
+# 运行时数据（现场维护配置，不入库）
+Config/*.json
+*.tmp
+
+# VS 用户文件
+*.user
+.vs/
+
+# opencode 工具本地状态（node_modules 依赖 + 会话计划/记忆，不入库）
+.opencode/
+
+# NuGet 包缓存目录（项目依赖已拷入 CommandCenter/libs/ 直接引用，不靠 restore）
+packages/
