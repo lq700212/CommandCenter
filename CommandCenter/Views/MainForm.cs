@@ -16,7 +16,7 @@ namespace CommandCenter.Views
     /// 命令中心主窗体。
     /// 【界面布局】
     /// ┌───────────────────────────────────────────────────────────────────┐
-    /// │ 产品型号:[1]产品A▾ | 序列号:[框] | 总数:0 | OK:0 | NG:0 | [系统设置] │
+    /// │ 产品型号:[1]产品A▾ | 序列号:[框] | 总数:0 | [OK] | [NG] | [系统设置] │
     /// │                                                        ●PLC ●相机2 ●相机1 │
     /// ├───────────────────────────────────────────────────────────────────┤
     /// │  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐                  │
@@ -28,6 +28,8 @@ namespace CommandCenter.Views
     /// │ 状态:等待PLC到位…（左下角；配方下发成功时变绿显示"配方切换完成"）          │
     /// └───────────────────────────────────────────────────────────────────┘
     /// 标题栏：左起信息字段（按配置开关）→ 配方下拉框（显示+切换合一）→ 系统设置按钮 → 连接指示灯；
+    ///   - OK/NG 计数默认"实心彩色色块 + 白字"高亮（绿底=OK、红底=NG），关闭
+    ///     DisplayConfig.TitleOkNgHighlight 则回退普通彩色文字；
     /// 底部栏：仅状态文本，固定在左下角。
     /// 职责：只做界面呈现 + 事件绑定，业务编排在 ProductionCoordinator。
     /// 静态布局控件（标题栏字段/配方下拉框/设置按钮/PLC灯/状态栏/窗口矩阵容器）在
@@ -110,6 +112,15 @@ namespace CommandCenter.Views
             lblOk.Visible = _config.Display.ShowOkCount;
             lblNg.Visible = _config.Display.ShowNgCount;
 
+            // 标题栏 OK/NG 计数高亮（V1.5.0 现场反馈"彩色数字不够醒目"）：
+            // 默认把 OK/NG 做成"实心彩色色块 + 白字"（绿底=OK、红底=NG，配色走 DisplayConfig），
+            // 关闭 TitleOkNgHighlight 配置时回退为普通彩色文字。
+            if (_config.Display.TitleOkNgHighlight)
+            {
+                StyleCountBadge(lblOk, _config.Display.OkColor);
+                StyleCountBadge(lblNg, _config.Display.NgColor);
+            }
+
             // ② 配方下拉框：填充配方项并选中当前（期间屏蔽事件，防初始化误触发切换）
             InitRecipeCombo();
 
@@ -176,6 +187,23 @@ namespace CommandCenter.Views
                 else if (c == lblSerial) { c.Location = new Point(x, y); x += c.Width + 18; } // 固定宽度显示框
                 else                { c.Location = new Point(x, y); x += ((Label)c).PreferredWidth + 18; }
             }
+        }
+
+        /// <summary>
+        /// 把标题栏计数标签做成"实心彩色色块 + 白色加粗字"（现场要求 OK/NG 高亮醒目）。
+        /// BackColor 用配置色（绿=OK、红=NG），ForeColor 白色，字号 11F→12F，
+        /// 四周留 padding 让色块饱满；AutoSize 保持 true，色块宽度随数字自动伸缩，
+        /// RelayoutTitleBar 的 PreferredWidth 布局照常工作、垂直居中公式不变。
+        /// </summary>
+        /// <param name="lbl">要样式化的标题栏计数标签（lblOk / lblNg）</param>
+        /// <param name="color">色块底色（DisplayConfig.OkColor / NgColor）</param>
+        private void StyleCountBadge(Label lbl, Color color)
+        {
+            lbl.BackColor = color;
+            lbl.ForeColor = Color.White;
+            lbl.Font = new Font("微软雅黑", 12F, FontStyle.Bold);
+            lbl.Padding = new Padding(6, 2, 6, 2);
+            lbl.TextAlign = ContentAlignment.MiddleCenter;
         }
 
         /// <summary>

@@ -18,6 +18,7 @@ namespace CommandCenter.Views
     ///   │    （上下各留 12px 空隙，避免与文件名模板行挤在一起）│
     ///   │ 文件名模板:     [txtFileNameTpl]                    │
     ///   │ 窗口点位: [btnEditPoints 窗口/点位配置…]            │
+    ///   │ OK/NG显示: [√标题栏高亮]                            │
     ///   │ 相机列表:                                          │
     ///   │   ┌──────────────────────────────────────────────┐ │
     ///   │   │ gridCameras（DataGridView）                    │ │
@@ -71,6 +72,8 @@ namespace CommandCenter.Views
             this.txtFileNameTpl = new System.Windows.Forms.TextBox();
             this.lblPoints = new System.Windows.Forms.Label();
             this.btnEditPoints = new System.Windows.Forms.Button();
+            this.lblOkNg = new System.Windows.Forms.Label();
+            this.chkTitleOkNg = new System.Windows.Forms.CheckBox();
             this.lblCams = new System.Windows.Forms.Label();
             this.gridCameras = new System.Windows.Forms.DataGridView();
             this.btnAddCam = new System.Windows.Forms.Button();
@@ -232,15 +235,37 @@ namespace CommandCenter.Views
             this.btnEditPoints.Text = "窗口/点位配置...";
             this.btnEditPoints.UseVisualStyleBackColor = true;
             //
+            // lblOkNg
+            // "OK/NG 显示" 配置行标题（标题栏 OK/NG 计数高亮开关的说明，与开关垂直居中）
+            //
+            this.lblOkNg.AutoSize = true;
+            this.lblOkNg.Location = new System.Drawing.Point(20, 253);
+            this.lblOkNg.Name = "lblOkNg";
+            this.lblOkNg.Size = new System.Drawing.Size(96, 19);
+            this.lblOkNg.TabIndex = 14;
+            this.lblOkNg.Text = "OK/NG显示:";
+            //
+            // chkTitleOkNg
+            // 标题栏 OK/NG 计数高亮开关：实心彩色色块 + 白字（绿底=OK、红底=NG），
+            // 现场嫌"只显示带颜色数字不够醒目"，V1.5.0 默认开；关闭则回退普通彩色文字
+            //
+            this.chkTitleOkNg.AutoSize = true;
+            this.chkTitleOkNg.Location = new System.Drawing.Point(130, 251);
+            this.chkTitleOkNg.Name = "chkTitleOkNg";
+            this.chkTitleOkNg.Size = new System.Drawing.Size(111, 23);
+            this.chkTitleOkNg.TabIndex = 15;
+            this.chkTitleOkNg.Text = "标题栏高亮";
+            this.chkTitleOkNg.UseVisualStyleBackColor = true;
+            //
             // lblCams
             // 相机列表标题，加粗醒目
             //
             this.lblCams.AutoSize = true;
             this.lblCams.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
-            this.lblCams.Location = new System.Drawing.Point(20, 262);
+            this.lblCams.Location = new System.Drawing.Point(20, 296);
             this.lblCams.Name = "lblCams";
             this.lblCams.Size = new System.Drawing.Size(84, 19);
-            this.lblCams.TabIndex = 18;
+            this.lblCams.TabIndex = 20;
             this.lblCams.Text = "相机列表:";
             //
             // gridCameras
@@ -255,31 +280,31 @@ namespace CommandCenter.Views
             this.gridCameras.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.gridCameras.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.gridCameras.EditMode = System.Windows.Forms.DataGridViewEditMode.EditOnEnter;
-            this.gridCameras.Location = new System.Drawing.Point(20, 288);
+            this.gridCameras.Location = new System.Drawing.Point(20, 322);
             this.gridCameras.Name = "gridCameras";
             this.gridCameras.RowHeadersVisible = false;
             // 整行选择：点任意单元格都整行高亮 → SelectedRows 才有值，"删除选中"才好使
             this.gridCameras.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
             this.gridCameras.Size = new System.Drawing.Size(680, 150);
-            this.gridCameras.TabIndex = 19;
+            this.gridCameras.TabIndex = 21;
             //
             // btnAddCam
             // 添加一台默认相机行（默认值 192.168.1.1 / 8500 / 点位1 / FTP留空用全局）
             //
-            this.btnAddCam.Location = new System.Drawing.Point(20, 458);
+            this.btnAddCam.Location = new System.Drawing.Point(20, 492);
             this.btnAddCam.Name = "btnAddCam";
             this.btnAddCam.Size = new System.Drawing.Size(100, 30);
-            this.btnAddCam.TabIndex = 20;
+            this.btnAddCam.TabIndex = 22;
             this.btnAddCam.Text = "添加一台";
             this.btnAddCam.UseVisualStyleBackColor = true;
             //
             // btnDelCam
             // 删除当前选中的相机行
             //
-            this.btnDelCam.Location = new System.Drawing.Point(150, 458);
+            this.btnDelCam.Location = new System.Drawing.Point(150, 492);
             this.btnDelCam.Name = "btnDelCam";
             this.btnDelCam.Size = new System.Drawing.Size(100, 30);
-            this.btnDelCam.TabIndex = 21;
+            this.btnDelCam.TabIndex = 23;
             this.btnDelCam.Text = "删除选中";
             this.btnDelCam.UseVisualStyleBackColor = true;
             //
@@ -287,10 +312,10 @@ namespace CommandCenter.Views
             // 保存：把界面值回写内存配置并返回 OK（上层写盘 + 提示重启）
             //
             this.btnSave.DialogResult = System.Windows.Forms.DialogResult.OK;
-            this.btnSave.Location = new System.Drawing.Point(490, 458);
+            this.btnSave.Location = new System.Drawing.Point(490, 492);
             this.btnSave.Name = "btnSave";
             this.btnSave.Size = new System.Drawing.Size(90, 32);
-            this.btnSave.TabIndex = 22;
+            this.btnSave.TabIndex = 24;
             this.btnSave.Text = "保存";
             this.btnSave.UseVisualStyleBackColor = true;
             //
@@ -300,10 +325,10 @@ namespace CommandCenter.Views
             // 与"保存"之间留 30px 间隙（与"添加一台/删除选中"一致），悬停有说明即可。
             //
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(610, 458);
+            this.btnCancel.Location = new System.Drawing.Point(610, 492);
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(90, 32);
-            this.btnCancel.TabIndex = 23;
+            this.btnCancel.TabIndex = 25;
             this.btnCancel.Text = "取消";
             this.btnCancel.UseVisualStyleBackColor = true;
             //
@@ -313,13 +338,15 @@ namespace CommandCenter.Views
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.AcceptButton = this.btnSave;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(720, 598);
+            this.ClientSize = new System.Drawing.Size(720, 632);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnSave);
             this.Controls.Add(this.btnDelCam);
             this.Controls.Add(this.btnAddCam);
             this.Controls.Add(this.gridCameras);
             this.Controls.Add(this.lblCams);
+            this.Controls.Add(this.chkTitleOkNg);
+            this.Controls.Add(this.lblOkNg);
             this.Controls.Add(this.btnEditPoints);
             this.Controls.Add(this.lblPoints);
             this.Controls.Add(this.txtFileNameTpl);
@@ -376,6 +403,8 @@ namespace CommandCenter.Views
                 "可视化设置每个窗口的存图点位（默认点位=窗口编号）。\r\n点格子选中→\"编辑点位\"改存图号；\"交换位置\"互换两个窗口的内容（编号固定跟随格子）；\"恢复默认\"一键还原。\r\n改动随本次\"保存\"一起写盘。");
             this.tip.SetToolTip(this.btnAddCam,
                 "在列表末尾添加一台相机（默认值可直接改 IP / 端口 / FTP 上传目录）。");
+            this.tip.SetToolTip(this.chkTitleOkNg,
+                "标题栏的 OK / NG 计数用\"实心彩色色块 + 白字\"高亮（绿底=OK、红底=NG），\r\n比普通彩色文字醒目得多。取消则回退彩色文字样式。改完需重启程序生效。");
             this.tip.SetToolTip(this.btnDelCam,
                 "删除选中的相机行；未选中时先点选要删的行。");
             this.tip.SetToolTip(this.btnSave,
@@ -408,6 +437,8 @@ namespace CommandCenter.Views
         private TextBox txtFileNameTpl;
         private Label lblPoints;
         private Button btnEditPoints;
+        private Label lblOkNg;
+        private CheckBox chkTitleOkNg;
         private Label lblCams;
         private DataGridView gridCameras;
         private Button btnAddCam;

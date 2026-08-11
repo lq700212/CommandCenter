@@ -206,6 +206,13 @@ namespace CommandCenter.Models
         /// <summary>NG 徽标颜色名（如 Red）</summary>
         public string NgColorName { get; set; } = "Red";
 
+        /// <summary>
+        /// 标题栏 OK/NG 计数是否用"实心彩色色块 + 白字"高亮显示。
+        /// 现场反馈"只显示带颜色数字不够醒目"，默认开：OK 用 OkColor 绿底白字、NG 用 NgColor 红底白字；
+        /// false 回退为普通彩色文字（旧版样式）。
+        /// </summary>
+        public bool TitleOkNgHighlight { get; set; } = true;
+
         /// <summary>按配置反解出 OK/NG 实际画刷色，配置非法时回退默认</summary>
         public Color OkColor => ColorFromName(OkColorName, Color.Green);
         public Color NgColor => ColorFromName(NgColorName, Color.Red);
