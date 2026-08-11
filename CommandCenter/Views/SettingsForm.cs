@@ -18,11 +18,11 @@ namespace CommandCenter.Views
     /// │ 文件名模板:   [{点位}]   （占位符提示见界面）              │
     /// │ 窗口点位: [窗口/点位配置...] 点格改存图点位/可交换窗口位置   │
     /// │ OK/NG显示: [√标题栏高亮]                                   │
-    /// │ 相机列表: ┌────────┬────┬────────────────────────┐          │
-    /// │            │ 相机IP │端口│ FTP上传目录            │          │
-    /// │            ├────────┼────┼────────────────────────┤          │
-    /// │            │ 192…   │8500│ D:\…\ftp\cam1          │          │
-    /// │            └────────┴────┴────────────────────────┘          │
+    /// │ 相机列表: ┌────────┬────┬──────────┬────────────────────────┐ │
+    /// │            │ 相机IP │端口│ 取图方式  │ FTP上传目录            │ │
+    /// │            ├────────┼────┼──────────┼────────────────────────┤ │
+    /// │            │ 192…   │8500│ Ftp/Tcp  │ D:\…\ftp\cam1          │ │
+    /// │            └────────┴────┴──────────┴────────────────────────┘ │
     /// │            [添加一台] [删除选中]      [保存] [取消]               │
     /// └─────────────────────────────────────────────────────────────┘
     /// 布局（静态控件）在 SettingsForm.Designer.cs 里可视化维护；
@@ -80,8 +80,9 @@ namespace CommandCenter.Views
                 "可视化编辑存图目录结构（目录层级列表 + 文件名规则），并实时预览 OK/NG 落盘路径。\r\n当前结构：" + cur);
         }
 
-        /// <summary>给相机表格建好 3 列结构（列固定，运行时加一次即可，不用进设计器序列化）。
-        /// 注意：旧版的"点位号"列已移除——存图点位统一由"窗口/点位配置…"（WindowStationMap）驱动。</summary>
+        /// <summary>给相机表格建好 4 列结构（列固定，运行时加一次即可，不用进设计器序列化）。
+        /// 注意：旧版的"点位号"列已移除——存图点位统一由"窗口/点位配置…"（WindowStationMap）驱动；
+        /// "取图方式"列（V1.7.0）是下拉框，现场可直接在 Ftp/Tcp 间切换（对应 CameraConfig.ImageSource）。</summary>
         private void SetupCameraGridColumns()
         {
             // 仅在还没有"相机IP"列时初始化，保证重复调用不会越建越多
@@ -90,6 +91,16 @@ namespace CommandCenter.Views
                 gridCameras.Columns.Add("IpAddress", "相机IP");
                 gridCameras.Columns.Add("CommandPort", "触发端口");
                 gridCameras.Columns.Add("FtpUploadDir", "FTP上传目录（留空用全局目录）");
+                // 取图方式：Ftp=相机 FTP 推图（默认，成熟）/ Tcp=上位机 BR 指令直接读图（V1.7.0 新增）
+                var srcCol = new DataGridViewComboBoxColumn
+                {
+                    Name = "ImageSource",
+                    HeaderText = "取图方式",
+                    SortMode = DataGridViewColumnSortMode.NotSortable // 组合列无排序意义
+                };
+                srcCol.Items.Add("Ftp");
+                srcCol.Items.Add("Tcp");
+                gridCameras.Columns.Add(srcCol);
             }
         }
 
@@ -97,10 +108,14 @@ namespace CommandCenter.Views
         private void LoadCameraRows()
         {
             foreach (var c in _cfg.Cameras ?? new List<CameraConfig>())
-                gridCameras.Rows.Add(c.IpAddress, c.CommandPort, c.FtpUploadDir);
+            {
+                // ImageSource 为空（旧配置）时按 Ftp 兜底显示
+                string src = string.IsNullOrWhiteSpace(c.ImageSource) ? "Ftp" : c.ImageSource;
+                gridCameras.Rows.Add(c.IpAddress, c.CommandPort, c.FtpUploadDir, src);
+            }
             // 至少留一行可见，别让表格空着无从下手
             if (gridCameras.Rows.Count == 0)
-                gridCameras.Rows.Add("192.168.1.100", 8500, "");
+                gridCameras.Rows.Add("192.168.1.100", 8500, "", "Ftp");
         }
 
         /// <summary>
@@ -109,8 +124,8 @@ namespace CommandCenter.Views
         /// </summary>
         private void WireButtonEvents()
         {
-            // 添加一台相机：直接往表格追加一行默认值，现场改 IP/端口/点位即可
-            btnAddCam.Click += (s, e) => gridCameras.Rows.Add("192.168.1.1", 8500, 1, "");
+            // 添加一台相机：直接往表格追加一行默认值，现场改 IP/端口/取图方式即可
+            btnAddCam.Click += (s, e) => gridCameras.Rows.Add("192.168.1.1", 8500, "", "Ftp");
             // 删除选中：把当前选中的行整行移除；没有选中行则什么都不做
             btnDelCam.Click += (s, e) =>
             {
@@ -176,11 +191,14 @@ namespace CommandCenter.Views
                 int port = 8500;
                 string portTxt = r.Cells["CommandPort"].Value == null ? "" : r.Cells["CommandPort"].Value.ToString();
                 if (!int.TryParse(portTxt, out port)) port = 8500;   // TryParse 失败会写 0，手动回默认
+                // 取图方式：Ftp/Tcp（空值按 Ftp 兜底，与 ProductionCoordinator.IsTcpImage 判断一致）
+                string imgSrc = r.Cells["ImageSource"].Value == null ? "Ftp" : r.Cells["ImageSource"].Value.ToString();
                 cams.Add(new CameraConfig
                 {
                     IpAddress = ip,
                     CommandPort = Math.Max(1, port),
-                    FtpUploadDir = r.Cells["FtpUploadDir"].Value == null ? "" : r.Cells["FtpUploadDir"].Value.ToString().Trim()
+                    FtpUploadDir = r.Cells["FtpUploadDir"].Value == null ? "" : r.Cells["FtpUploadDir"].Value.ToString().Trim(),
+                    ImageSource = string.IsNullOrWhiteSpace(imgSrc) ? "Ftp" : imgSrc.Trim()
                 });
             }
             if (cams.Count == 0) cams.Add(new CameraConfig()); // 兜底：至少一台相机

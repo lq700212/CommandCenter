@@ -31,8 +31,9 @@ namespace CommandCenter.Views
     ///     其中"当前目录结构"是动态信息，实时挂在"配置目录结构..."按钮的 ToolTip 里。
     ///   - 控件的"显示内容"（IP/端口/行列/目录模板/相机行）由 SettingsForm.cs 运行时
     ///     从 AppConfig 填充（LoadFromConfig），设计器里的值只是可视化参照。
-    ///   - gridCameras 的 3 个列由运行时代码添加（AddCameraColumns），不在设计器序列化，
-    ///     避免 DataGridView 列序列化代码冗长易错；外观与行为在设计器里设置。
+    ///   - gridCameras 的 4 个列由运行时代码添加（AddCameraColumns：相机IP/触发端口/FTP上传目录/
+    ///     取图方式下拉框），不在设计器序列化，避免 DataGridView 列序列化代码冗长易错；
+    ///     外观与行为在设计器里设置。
     ///   - 保存/取消按钮的 DialogResult 在设计器里设好，点保存时上层按 DialogResult 判断。
     /// </summary>
     partial class SettingsForm

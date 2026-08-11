@@ -37,8 +37,10 @@ namespace CommandCenter.Models
     /// <summary>
     /// 相机通讯配置（基恩士 IV4-500CA）。
     /// IV4 支持 "TCP/IP 无协议通信"（最多 2 路连接），本文档按该方式对接：
-    ///   - 触发拍摄：上位机往相机的 CommandPort 发 ASCII 指令；
-    ///   - 图像回传：相机作为 FTP 客户端把照片推到 Image.FtpRootDir，上位机监听新文件。
+    ///   - 触发拍摄：上位机往相机的 CommandPort 发 ASCII 指令（T1/T2/RT，判定结果走指令回帧）；
+    ///   - 图像回传（V1.7.0 两种来源二选一，见 ImageSource）：
+    ///       Ftp：相机作为 FTP 客户端把照片推到 Image.FtpRootDir，上位机监听新文件（默认，成熟）；
+    ///       Tcp：上位机发 BR 指令直接从相机读最新图像（24bit 位图），免 FTP 落盘中转。
     /// 具体指令帧格式需以《IV4 系列通信、连接指南》为准，本模型可配帧字符串。
     /// </summary>
     public class CameraConfig
@@ -89,6 +91,28 @@ namespace CommandCenter.Models
 
         /// <summary>触发后等相机 FTP 新图的最长毫秒数（超时视为取像失败）</summary>
         public int ImageWaitMs { get; set; } = 10000;
+
+        /// <summary>
+        /// 取图来源（V1.7.0，现场二选一实测后定，大小写不敏感）：
+        ///   "Ftp"（默认）：相机作 FTP 客户端把照片推到上位机目录，上位机监听新图（现方案，成熟稳定）；
+        ///   "Tcp"       ：上位机发 BR 指令直接从相机读最新图像（24bit 位图），触发后同步读回，
+        ///                  链路更短（不经过 FTP 服务器落盘中转），依赖相机的 TCP/IP 无协议通信；
+        /// 其他取值一律按 Ftp 兜底（旧配置无需迁移）。
+        /// </summary>
+        public string ImageSource { get; set; } = "Ftp";
+
+        /// <summary>
+        /// 读取图像数据指令名（仅 ImageSource=="Tcp" 时使用）：IV4 手册原文 "BR,m[CR]"，
+        /// BR 读"最新图像"（24bit 位图格式），响应 "BR,nnnnnnnnnn,ddddddd,图像数据"。
+        /// 此字段只存指令名（默认 "BR"），参数 m 见 ReadImageMode，发送时拼成 "BR,m"。
+        /// </summary>
+        public string ReadImageCommand { get; set; } = "BR";
+
+        /// <summary>
+        /// BR 指令的数据格式参数 m（拼成 "BR,m" 发送）。手册原文为 "BR,m"，
+        /// m 的确切取值与含义以《IV4 通信、连接指南》为准，现场实测后在此调整。
+        /// </summary>
+        public string ReadImageMode { get; set; } = "1";
 
         /// <summary>
         /// 相机 FTP 主动上传目录 = 上位机 ImageConfig.FtpRootDir，

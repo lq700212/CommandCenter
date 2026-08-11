@@ -122,6 +122,34 @@ namespace CommandCenter.Services
                 return null;
             }
         }
+
+        /// <summary>
+        /// 把"TCP/BR 指令读回的图像字节"解码成 Bitmap 后按模板归档（V1.7.0，SaveImage 的字节入口）。
+        /// 期望字节是完整 24bit BMP 文件（以 'BM' 开头，Image.FromStream 可直接解码）；
+        /// 解码失败返回 null（不落盘坏文件），由调用方记日志——若现场实测确认是"裸像素"
+        /// （无 BMP 文件头），需在 KeyenceIV4Camera.ReadImage 侧按实测补文件头后再调用本方法。
+        /// </summary>
+        /// <param name="imageData">BR 指令读回的图像字节</param>
+        /// <param name="stationNo">拍照点位号（同 SaveImage 的 stationNo，进文件名 {点位}）</param>
+        /// <param name="isOk">本次结果（OK/NG 进目录 {OKNG}）</param>
+        /// <param name="serial">产品序列号（进 {SN} 目录）</param>
+        public string SaveImageBytes(byte[] imageData, int stationNo, bool isOk, string serial)
+        {
+            try
+            {
+                using (var ms = new MemoryStream(imageData))
+                using (var img = Image.FromStream(ms))
+                using (var copy = new Bitmap(img))
+                {
+                    return SaveImage(copy, stationNo, isOk, serial);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Error("图像字节归档失败（若相机非标准 BMP 返回，需按实测格式补 BMP 文件头）", ex);
+                return null;
+            }
+        }
         /// </summary>
         private static string JoinDirSegments(string rendered)
         {
