@@ -306,6 +306,10 @@ namespace CommandCenter.Views
                 "下移选中的层级，调整目录顺序（顺序即建目录顺序）。");
             this.tip.SetToolTip(this.txtFileNameTpl,
                 "图片文件名规则（默认 {点位}，如 1.png）。\r\n占位符：{点位}点位号、{SN}序列号、{OKNG}→OK 或 NG、{年}/{月}/{日}日期、{时间}毫秒时间戳；\r\n其余文字原样保留。");
+            // 预览说明同时挂在 GroupBox 上：悬停预览区（含标题）即显示说明，
+            // 问号标记因此可放在 gbPreview 右侧（tvPreview 在容器内四周无空位放不下）
+            this.tip.SetToolTip(this.gbPreview,
+                "实时预览：按当前规则用示例数据（今天日期 / SN-0001 / 点位1）\r\n渲染出将来落盘的完整目录树，OK 和 NG 各展示一棵。");
             this.tip.SetToolTip(this.tvPreview,
                 "实时预览：按当前规则用示例数据（今天日期 / SN-0001 / 点位1）\r\n渲染出将来落盘的完整目录树，OK 和 NG 各展示一棵。");
             //

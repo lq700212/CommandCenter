@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
+using CommandCenter.Controls;
 using CommandCenter.Models;
 using CommandCenter.Services;
 
@@ -42,6 +43,8 @@ namespace CommandCenter.Views
     ///   - 占位符插入目标：默认/选中层级时插入到"当前层级名字"框；用户点过"文件名规则"框后才插文件名。
     ///   - 占位符/按钮说明不占界面（原常驻标签 lblNote 已删）：悬停输入框/按钮/标题显示 ToolTip 气泡，
     ///     悬停 0.5 秒出现、停留 8 秒消失（Windows 标准参数，见 DirTreeEditForm.Designer.cs 的 tip）。
+    ///   - 每个带 ToolTip 的控件旁会自动出现一个蓝色 "?" 小标记（TipMarker 生成，见 Controls/TipMarker.cs），
+    ///     提醒操作员"这里悬停有说明"；悬停问号同样显示对应提示。位置自动找控件旁空位，不挤不重叠。
     /// </summary>
     public partial class DirTreeEditForm : Form
     {
@@ -74,6 +77,9 @@ namespace CommandCenter.Views
             lstLevels.SelectedIndex = 0;   // 会触发 SelectedIndexChanged → txtLevelName 同步 + 插入目标锁定层级名
 
         RefreshPreview();               // 初始预览
+
+        // 给所有带 ToolTip 的控件补 "?" 标记：提醒操作员悬停有说明（Windows 帮助惯例）
+        TipMarker.AttachAll(this, tip);
     }
 
         /// <summary>把配置填进界面：根目录、目录层级列表、文件名规则。</summary>

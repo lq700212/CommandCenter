@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
+using CommandCenter.Controls;
 using CommandCenter.Models;
 
 namespace CommandCenter.Views
@@ -33,6 +34,8 @@ namespace CommandCenter.Views
     /// 界面说明统一用悬停气泡，见 SettingsForm.Designer.cs 的 tip）。
     /// "窗口/点位配置..."按钮打开 WindowPointForm，可视化设置每个窗口的存图点位
     /// （默认点位=窗口编号，可自定义、可交换窗口位置，见 DisplayConfig.WindowStationMap）。
+    /// 每个带 ToolTip 的控件旁会自动出现一个蓝色 "?" 小标记（TipMarker 生成，见 Controls/TipMarker.cs），
+    /// 提醒操作员"这里悬停有说明"；"配置目录结构..."按钮提示是动态的，刷新后同步到问号标记（TipMarker.Sync）。
     /// </summary>
     public partial class SettingsForm : Form
     {
@@ -45,6 +48,10 @@ namespace CommandCenter.Views
 
             LoadFromConfig();               // 把当前配置值填进各输入框
             WireButtonEvents();             // 添加/删除相机按钮事件
+
+            // 给所有带 ToolTip 的控件补 "?" 标记：提醒操作员悬停有说明（Windows 帮助惯例）。
+            // 必须放在 LoadFromConfig 之后，否则 btnEditDirs 的动态提示还没生成就取不到完整文本。
+            TipMarker.AttachAll(this, tip);
         }
 
         /// <summary>把现有配置值填充到控件（配置来源是上层传来的 _cfg 实例）。</summary>
@@ -75,6 +82,8 @@ namespace CommandCenter.Views
             string cur = dirs.Count > 0 ? string.Join("/", dirs) : "（未配置）";
             tip.SetToolTip(btnEditDirs,
                 "可视化编辑存图目录结构（目录层级列表 + 文件名规则），并实时预览 OK/NG 落盘路径。\r\n当前结构：" + cur);
+            // 动态 ToolTip：问号标记的内容也要跟着刷新，否则还挂着旧目录结构
+            TipMarker.Sync(btnEditDirs, tip);
         }
 
         /// <summary>给相机表格建好 3 列结构（列固定，运行时加一次即可，不用进设计器序列化）。
