@@ -24,7 +24,8 @@ namespace CommandCenter.Views
     ///     运行时由 MainForm.InitTitleBarRuntime/RelayoutTitleBar 按"显示开关"紧凑重排。
     ///   - lblProductPrefix 的文案与各信息字段的 Visible 由 Display 配置控制（运行时设置）。
     ///   - 连接状态灯：PLC 灯在 Designer 中先 Add（Dock.Right 先加的靠左），
-    ///     相机动灯随后由 MainForm.cs 循环 Add（靠右），与历史实测布局一致。
+    ///     相机动灯随后由 MainForm.cs 正序循环 Add（靠右）——相机1..相机N 从左到右排
+    ///     （V1.7.1 起：相机1 在相机2 左边，相机3 继续往右）。
     ///   - gridCameraWindows 只做容器，行列数量、百分比分格、窗口填充全部由
     ///     MainForm.BuildWindowGrid 运行时重建，保证改 Rows/Columns 配置即可生效。
     /// </summary>

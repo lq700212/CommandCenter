@@ -17,7 +17,7 @@ namespace CommandCenter.Views
     /// 【界面布局】
     /// ┌───────────────────────────────────────────────────────────────────┐
     /// │ 产品型号:[1]产品A▾ | 序列号:[框] | 总数:0 | [OK] | [NG] | [系统设置] │
-    /// │                                                        ●PLC ●相机2 ●相机1 │
+    /// │                                                        ●PLC ●相机1 ●相机2 │
     /// ├───────────────────────────────────────────────────────────────────┤
     /// │  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐                  │
     /// │  │ W1   │ │ W2   │ │ W3   │ │ W4   │ │ W5   │                   │
@@ -147,8 +147,9 @@ namespace CommandCenter.Views
 
         /// <summary>
         /// 重建标题栏每台相机的连接指示灯（构造与热更都会调用）。
-        /// 先移除旧的（热更后相机台数可能变化，必须整套重建），再按当前台数从"台数-1"倒着 Add，
-        /// 得到 相机N..相机1 顺序排在 PLC 灯右侧，与历史实测布局一致。
+        /// 先移除旧的（热更后相机台数可能变化，必须整套重建），再按当前台数正序 Add：
+        /// Dock.Right 布局是"先 Add 的靠左、后 Add 的靠右"，正序循环得到
+        /// 相机1..相机N 依次排在 PLC 灯右侧（V1.7.1 起：相机1 在相机2 左边，相机3 继续往右排）。
         /// lblCamPlaceholder 是设计器视觉提示，隐藏后 Dock 空间让给循环生成的真灯。
         /// </summary>
         private void BuildCameraStatusLights()
@@ -159,7 +160,7 @@ namespace CommandCenter.Views
 
             lblCamPlaceholder.Visible = false;
             _lblCamStatuses = new Label[_cameras.Count];
-            for (int i = _cameras.Count - 1; i >= 0; i--)
+            for (int i = 0; i < _cameras.Count; i++)
             {
                 var lbl = new Label
                 {
