@@ -27,6 +27,8 @@ namespace CommandCenter.Views
 
         private void InitializeComponent()
         {
+            // components 容器必须先初始化：ToolTip 等组件要挂到它上面统一自动释放
+            this.components = new System.ComponentModel.Container();
             this.lblRootDir = new System.Windows.Forms.Label();
             this.txtSaveRootDir = new System.Windows.Forms.TextBox();
             this.btnBrowse = new System.Windows.Forms.Button();
@@ -39,16 +41,17 @@ namespace CommandCenter.Views
             this.btnInsertPh = new System.Windows.Forms.Button();
             this.btnAddLevel = new System.Windows.Forms.Button();
             this.btnInsertLevel = new System.Windows.Forms.Button();
+            this.btnInsertBelow = new System.Windows.Forms.Button();
             this.btnDeleteLevel = new System.Windows.Forms.Button();
             this.btnUp = new System.Windows.Forms.Button();
             this.btnDown = new System.Windows.Forms.Button();
             this.lblFileRule = new System.Windows.Forms.Label();
             this.txtFileNameTpl = new System.Windows.Forms.TextBox();
-            this.lblNote = new System.Windows.Forms.Label();
             this.gbPreview = new System.Windows.Forms.GroupBox();
             this.tvPreview = new System.Windows.Forms.TreeView();
             this.btnOk = new System.Windows.Forms.Button();
             this.btnCancel = new System.Windows.Forms.Button();
+            this.tip = new System.Windows.Forms.ToolTip(this.components);
             this.gbPreview.SuspendLayout();
             this.SuspendLayout();
             //
@@ -161,30 +164,40 @@ namespace CommandCenter.Views
             this.btnInsertLevel.Text = "插入到上方";
             this.btnInsertLevel.UseVisualStyleBackColor = true;
             //
+            // btnInsertBelow
+            // 在选中层级的下一级位置插入一级（{SN}）；与"插入到上方"对称，满足"插到某层屁股后面"的诉求
+            //
+            this.btnInsertBelow.Location = new System.Drawing.Point(250, 338);
+            this.btnInsertBelow.Name = "btnInsertBelow";
+            this.btnInsertBelow.Size = new System.Drawing.Size(110, 30);
+            this.btnInsertBelow.TabIndex = 12;
+            this.btnInsertBelow.Text = "插入到下方";
+            this.btnInsertBelow.UseVisualStyleBackColor = true;
+            //
             // btnDeleteLevel
             //
-            this.btnDeleteLevel.Location = new System.Drawing.Point(250, 338);
+            this.btnDeleteLevel.Location = new System.Drawing.Point(368, 338);
             this.btnDeleteLevel.Name = "btnDeleteLevel";
             this.btnDeleteLevel.Size = new System.Drawing.Size(100, 30);
-            this.btnDeleteLevel.TabIndex = 12;
+            this.btnDeleteLevel.TabIndex = 13;
             this.btnDeleteLevel.Text = "删除选中";
             this.btnDeleteLevel.UseVisualStyleBackColor = true;
             //
             // btnUp
             //
-            this.btnUp.Location = new System.Drawing.Point(370, 338);
+            this.btnUp.Location = new System.Drawing.Point(476, 338);
             this.btnUp.Name = "btnUp";
             this.btnUp.Size = new System.Drawing.Size(50, 30);
-            this.btnUp.TabIndex = 13;
+            this.btnUp.TabIndex = 14;
             this.btnUp.Text = "↑ 上移";
             this.btnUp.UseVisualStyleBackColor = true;
             //
             // btnDown
             //
-            this.btnDown.Location = new System.Drawing.Point(430, 338);
+            this.btnDown.Location = new System.Drawing.Point(534, 338);
             this.btnDown.Name = "btnDown";
             this.btnDown.Size = new System.Drawing.Size(50, 30);
-            this.btnDown.TabIndex = 14;
+            this.btnDown.TabIndex = 15;
             this.btnDown.Text = "↓ 下移";
             this.btnDown.UseVisualStyleBackColor = true;
             //
@@ -206,22 +219,13 @@ namespace CommandCenter.Views
             this.txtFileNameTpl.TabIndex = 16;
             this.txtFileNameTpl.Text = "{点位}";
             //
-            // lblNote
-            //
-            this.lblNote.AutoSize = true;
-            this.lblNote.ForeColor = System.Drawing.Color.Gray;
-            this.lblNote.Location = new System.Drawing.Point(20, 420);
-            this.lblNote.Name = "lblNote";
-            this.lblNote.Size = new System.Drawing.Size(571, 19);
-            this.lblNote.TabIndex = 17;
-            this.lblNote.Text = "占位符:{年月日} 整个目录名(2026年08月11日)  {SN}序列号  {OKNG}判成OK或NG目录  {点位}点位号  {时间}毫秒时间戳";
-            //
             // gbPreview
             // 实时目录结构预览：按当前层级规则用示例数据展开成"文件夹树"，
             // 让现场一眼看到将来落盘的完整目录长什么样（OK/NG 两种分支各展示一棵子树）。
+            // 占位符说明不再用常驻标签（原 lblNote 已删），改为悬停在输入框/按钮上显示的 ToolTip。
             //
             this.gbPreview.Controls.Add(this.tvPreview);
-            this.gbPreview.Location = new System.Drawing.Point(20, 445);
+            this.gbPreview.Location = new System.Drawing.Point(20, 420);
             this.gbPreview.Name = "gbPreview";
             this.gbPreview.Size = new System.Drawing.Size(584, 150);
             this.gbPreview.TabIndex = 18;
@@ -243,22 +247,67 @@ namespace CommandCenter.Views
             // btnOk
             //
             this.btnOk.DialogResult = System.Windows.Forms.DialogResult.OK;
-            this.btnOk.Location = new System.Drawing.Point(420, 610);
+            this.btnOk.Location = new System.Drawing.Point(420, 578);
             this.btnOk.Name = "btnOk";
             this.btnOk.Size = new System.Drawing.Size(90, 32);
-            this.btnOk.TabIndex = 19;
+            this.btnOk.TabIndex = 18;
             this.btnOk.Text = "确定";
             this.btnOk.UseVisualStyleBackColor = true;
             //
             // btnCancel
             //
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(520, 610);
+            this.btnCancel.Location = new System.Drawing.Point(520, 578);
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(90, 32);
-            this.btnCancel.TabIndex = 20;
+            this.btnCancel.TabIndex = 19;
             this.btnCancel.Text = "取消";
             this.btnCancel.UseVisualStyleBackColor = true;
+            //
+            // tip（ToolTip 气泡：悬停 0.5 秒出提示、停留 8 秒自动消失）
+            // 悬停延迟 InitialDelay=500ms 是 Windows 工具提示的标准参数（行业惯例 0.4~0.7s），
+            // ReshowDelay=100ms 表示在别的控件间快速移动时缩短再次弹出等待；
+            // AutoPopDelay=8000ms 停留 8 秒自动消失，避免气泡挡住界面；
+            // ShowAlways=true 窗体未激活时也显示，鼠标移上来就有。
+            // 文本以 "?" 开头会显示帮助图标（Windows 惯例：?=帮助提示）。
+            //
+            this.tip.InitialDelay = 500;
+            this.tip.ReshowDelay = 100;
+            this.tip.AutoPopDelay = 8000;
+            this.tip.ShowAlways = true;
+            //
+            // 悬停提示：按钮、标题、输入框都挂上，现场不用点开就知道每个控件干嘛的
+            //
+            this.tip.SetToolTip(this.txtSaveRootDir,
+                "图片保存的根目录（绝对路径）。\r\n点\"浏览...\"可直接选文件夹；\r\n实际子目录按下方\"目录层级\"逐级创建。");
+            this.tip.SetToolTip(this.btnBrowse,
+                "选择图片保存根目录的文件夹。");
+            this.tip.SetToolTip(this.lblLevels,
+                "存图目录从根目录起按此列表逐级创建。\r\n每级可以写固定名字（如 OK），也可以是生成规则（如 {年月日}）。\r\n顺序即建目录顺序：从上到下。");
+            this.tip.SetToolTip(this.lstLevels,
+                "目录层级列表（从上到下逐级建目录）。\r\n双击一项可直接进入编辑；\r\n支持占位符：{年月日}整个日期目录、{SN}序列号、{OKNG}→OK/NG 两个分支目录、{点位}点位号。");
+            this.tip.SetToolTip(this.txtLevelName,
+                "当前选中层级的名字/规则，直接改文字就同步到左侧列表。\r\n支持占位符：{年月日}整个日期目录、{SN}序列号、{OKNG}→OK/NG 两个分支目录、{点位}点位号。");
+            this.tip.SetToolTip(this.cmbPlaceholder,
+                "选中的占位符会插入到当前正在编辑的框里（目录层级名或文件名）。\r\n{年月日}→如 2026年08月11日  {SN}→序列号  {OKNG}→OK 或 NG 目录  {点位}→存图点位号  {时间}→毫秒时间戳");
+            this.tip.SetToolTip(this.btnInsertPh,
+                "把下拉框选中的占位符插到当前编辑框的光标位置，\r\n插入后光标自动移到其后。");
+            this.tip.SetToolTip(this.btnAddLevel,
+                "在列表末尾追加一级目录（默认给 {SN}，现场按需改）。");
+            this.tip.SetToolTip(this.btnInsertLevel,
+                "在选中层级的上方插入一级（默认 {SN}）；未选中则插到最顶部。");
+            this.tip.SetToolTip(this.btnInsertBelow,
+                "在选中层级的下方插入一级（默认 {SN}）；未选中则插到末尾。\r\n现场常需要把\"OK/NG\"插到某层后面，用它不用先删再加。");
+            this.tip.SetToolTip(this.btnDeleteLevel,
+                "删除选中的层级；删空会自动保留至少一级默认，避免存出空结构。");
+            this.tip.SetToolTip(this.btnUp,
+                "上移选中的层级，调整目录顺序（顺序即建目录顺序）。");
+            this.tip.SetToolTip(this.btnDown,
+                "下移选中的层级，调整目录顺序（顺序即建目录顺序）。");
+            this.tip.SetToolTip(this.txtFileNameTpl,
+                "图片文件名规则（默认 {点位}，如 1.png）。\r\n占位符：{点位}点位号、{SN}序列号、{OKNG}→OK 或 NG、{年}/{月}/{日}日期、{时间}毫秒时间戳；\r\n其余文字原样保留。");
+            this.tip.SetToolTip(this.tvPreview,
+                "实时预览：按当前规则用示例数据（今天日期 / SN-0001 / 点位1）\r\n渲染出将来落盘的完整目录树，OK 和 NG 各展示一棵。");
             //
             // DirTreeEditForm
             //
@@ -266,16 +315,16 @@ namespace CommandCenter.Views
             this.CancelButton = this.btnCancel;
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 17F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(624, 658);
+            this.ClientSize = new System.Drawing.Size(624, 628);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnOk);
             this.Controls.Add(this.gbPreview);
-            this.Controls.Add(this.lblNote);
             this.Controls.Add(this.txtFileNameTpl);
             this.Controls.Add(this.lblFileRule);
             this.Controls.Add(this.btnDown);
             this.Controls.Add(this.btnUp);
             this.Controls.Add(this.btnDeleteLevel);
+            this.Controls.Add(this.btnInsertBelow);
             this.Controls.Add(this.btnInsertLevel);
             this.Controls.Add(this.btnAddLevel);
             this.Controls.Add(this.btnInsertPh);
@@ -315,15 +364,16 @@ namespace CommandCenter.Views
         private Button btnInsertPh;
         private Button btnAddLevel;
         private Button btnInsertLevel;
+        private Button btnInsertBelow;
         private Button btnDeleteLevel;
         private Button btnUp;
         private Button btnDown;
         private Label lblFileRule;
         private TextBox txtFileNameTpl;
-        private Label lblNote;
         private GroupBox gbPreview;
         private TreeView tvPreview;
         private Button btnOk;
         private Button btnCancel;
+        private ToolTip tip;
     }
 }

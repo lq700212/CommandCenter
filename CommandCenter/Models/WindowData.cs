@@ -27,7 +27,7 @@ namespace CommandCenter.Models
         /// <summary>相机判定文本（例如 IV4 标准结果 8 位："00000000"），非判定模式为空</summary>
         public string ResultText { get; set; } = "";
 
-        /// <summary>拍照点位号（来自 CameraConfig.StationNo，即存图文件名里的 {点位}）</summary>
+        /// <summary>拍照点位号（来自 DisplayConfig.WindowStationMap：该结果落到的窗口对应点位，进存图文件名 {点位}）</summary>
         public int StationNo { get; set; } = 1;
     }
 }

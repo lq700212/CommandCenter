@@ -79,7 +79,8 @@ namespace CommandCenter.Views
                 _cameras.Add(new KeyenceIV4Camera(c));
 
             _imageStore = new ImageStore(_config.Image);
-            _coordinator = new ProductionCoordinator(_plc, _cameras, cams, _imageStore, _config.Display);
+            _coordinator = new ProductionCoordinator(_plc, _cameras, cams, _imageStore, _config.Display,
+                _config.Display.WindowStationMap);
             _coordinator.LatestSerialNumber = "待扫码";
 
             // 连接健康监控：后台心跳 + 断连自动重连 + 边沿日志（不影响任何 UI 刷新）
@@ -284,6 +285,9 @@ namespace CommandCenter.Views
                         Dock = DockStyle.Fill
                     };
                     w.SetWindowIndex(idx + 1);
+                    // 右上角显示该窗口的存图点位（默认=窗口编号，可自定义）；映射缺/越界时兜底窗口编号
+                    var map = _config.Display.WindowStationMap;
+                    w.SetStationNo(map != null && idx < map.Count && map[idx] > 0 ? map[idx] : idx + 1);
                     _windows[idx] = w;
                     grid.Controls.Add(w, c, r);
                     idx++;

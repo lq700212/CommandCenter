@@ -81,6 +81,13 @@
     <Compile Include="Views\DirTreeEditForm.Designer.cs">
       <DependentUpon>DirTreeEditForm.cs</DependentUpon>
     </Compile>
+    <!-- WindowPointForm：窗口→存图点位映射的可视化配置对话框（格子矩阵：编辑点位/交换位置/恢复默认） -->
+    <Compile Include="Views\WindowPointForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Views\WindowPointForm.Designer.cs">
+      <DependentUpon>WindowPointForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="Controls\CameraDisplayControl.cs">
       <SubType>UserControl</SubType>
     </Compile>

@@ -14,8 +14,9 @@ namespace CommandCenter.Views
     ///   │ PLC IP:   [txtPlcIp]   端口:[nudPlcPort]           │
     ///   │ 显示窗口行:[nudRows] 列:[nudCols]                   │
     ///   │ 图片保存根目录: [txtSaveDir]                         │
-    ///   │ 目录结构: [btnEditDirs 配置目录结构…] [lblDirPreview] │
-    ///   │ 文件名模板:     [txtFileNameTpl]  (lblHelp 灰字提示) │
+    ///   │ 目录结构: [btnEditDirs 配置目录结构…]               │
+    ///   │ 文件名模板:     [txtFileNameTpl]                    │
+    ///   │ 窗口点位: [btnEditPoints 窗口/点位配置…]            │
     ///   │ 相机列表:                                          │
     ///   │   ┌──────────────────────────────────────────────┐ │
     ///   │   │ gridCameras（DataGridView）                    │ │
@@ -23,9 +24,12 @@ namespace CommandCenter.Views
     ///   │   [btnAddCam] [btnDelCam]      [btnSave] [btnCancel]│
     ///   └────────────────────────────────────────────────────┘
     /// 说明：
+    ///   - 控件说明不占界面：原常驻灰字标签（lblDirPreview/lblHelp/lblPointsHelp）已删除，
+    ///     统一改为 ToolTip 气泡（悬停按钮/标题/输入框 0.5 秒显示，Windows 标准延迟）。
+    ///     其中"当前目录结构"是动态信息，实时挂在"配置目录结构..."按钮的 ToolTip 里。
     ///   - 控件的"显示内容"（IP/端口/行列/目录模板/相机行）由 SettingsForm.cs 运行时
     ///     从 AppConfig 填充（LoadFromConfig），设计器里的值只是可视化参照。
-    ///   - gridCameras 的 4 个列由运行时代码添加（AddCameraColumns），不在设计器序列化，
+    ///   - gridCameras 的 3 个列由运行时代码添加（AddCameraColumns），不在设计器序列化，
     ///     避免 DataGridView 列序列化代码冗长易错；外观与行为在设计器里设置。
     ///   - 保存/取消按钮的 DialogResult 在设计器里设好，点保存时上层按 DialogResult 判断。
     /// </summary>
@@ -49,6 +53,8 @@ namespace CommandCenter.Views
         /// <summary>设计器支持所需的方法 - 不要修改此方法的内容，使用代码编辑器修改此方法的内容。</summary>
         private void InitializeComponent()
         {
+            // components 容器必须先初始化：ToolTip 等组件要挂到它上面统一自动释放
+            this.components = new System.ComponentModel.Container();
             this.lblPlcIp = new System.Windows.Forms.Label();
             this.txtPlcIp = new System.Windows.Forms.TextBox();
             this.lblPlcPort = new System.Windows.Forms.Label();
@@ -60,16 +66,17 @@ namespace CommandCenter.Views
             this.lblDir = new System.Windows.Forms.Label();
             this.txtSaveDir = new System.Windows.Forms.TextBox();
             this.btnEditDirs = new System.Windows.Forms.Button();
-            this.lblDirPreview = new System.Windows.Forms.Label();
             this.lblFile = new System.Windows.Forms.Label();
             this.txtFileNameTpl = new System.Windows.Forms.TextBox();
-            this.lblHelp = new System.Windows.Forms.Label();
+            this.lblPoints = new System.Windows.Forms.Label();
+            this.btnEditPoints = new System.Windows.Forms.Button();
             this.lblCams = new System.Windows.Forms.Label();
             this.gridCameras = new System.Windows.Forms.DataGridView();
             this.btnAddCam = new System.Windows.Forms.Button();
             this.btnDelCam = new System.Windows.Forms.Button();
             this.btnSave = new System.Windows.Forms.Button();
             this.btnCancel = new System.Windows.Forms.Button();
+            this.tip = new System.Windows.Forms.ToolTip(this.components);
             ((System.ComponentModel.ISupportInitialize)(this.nudPlcPort)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.nudRows)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.nudCols)).BeginInit();
@@ -173,7 +180,8 @@ namespace CommandCenter.Views
             this.txtSaveDir.Text = "D:\\CommandCenter\\Images";
             //
             // btnEditDirs
-            // 打开"图片存储目录结构配置"对话框（DirTreeEditForm），可视化编辑目录层级与文件名规则
+            // 打开"图片存储目录结构配置"对话框（DirTreeEditForm），可视化编辑目录层级与文件名规则。
+            // 当前目录结构（动态）显示在该按钮的 ToolTip 里，界面不再放常驻灰字标签。
             //
             this.btnEditDirs.Location = new System.Drawing.Point(130, 139);
             this.btnEditDirs.Name = "btnEditDirs";
@@ -181,17 +189,6 @@ namespace CommandCenter.Views
             this.btnEditDirs.TabIndex = 11;
             this.btnEditDirs.Text = "配置目录结构...";
             this.btnEditDirs.UseVisualStyleBackColor = true;
-            //
-            // lblDirPreview
-            // 只读展示当前目录结构（层级名/规则用 / 拼接），点按钮进可视化对话框改
-            //
-            this.lblDirPreview.AutoSize = true;
-            this.lblDirPreview.ForeColor = System.Drawing.Color.Gray;
-            this.lblDirPreview.Location = new System.Drawing.Point(300, 145);
-            this.lblDirPreview.Name = "lblDirPreview";
-            this.lblDirPreview.Size = new System.Drawing.Size(300, 19);
-            this.lblDirPreview.TabIndex = 11;
-            this.lblDirPreview.Text = "{年月日}/{SN}/{OKNG}";
             //
             // lblFile
             //
@@ -203,34 +200,46 @@ namespace CommandCenter.Views
             this.lblFile.Text = "文件名模板:";
             //
             // txtFileNameTpl
-            // 图片文件名模板；宽 200，右侧留位给占位符提示（lblHelp）
+            // 图片文件名模板。原右侧的占位符常驻标签（lblHelp）已删，说明并入悬停 ToolTip；
+            // 因此输入框一路加宽到窗体右缘，与"图片保存根目录"对齐，更整齐。
             //
             this.txtFileNameTpl.Location = new System.Drawing.Point(130, 169);
             this.txtFileNameTpl.Name = "txtFileNameTpl";
-            this.txtFileNameTpl.Size = new System.Drawing.Size(200, 25);
+            this.txtFileNameTpl.Size = new System.Drawing.Size(570, 25);
             this.txtFileNameTpl.TabIndex = 13;
             this.txtFileNameTpl.Text = "{点位}";
             //
-            // lblHelp
-            // 模板占位符速查提示，灰字，不动手改
+            // lblPoints
+            // 窗口→存图点位 配置标题（点位默认=窗口编号，可在可视化矩阵里自定义）
             //
-            this.lblHelp.AutoSize = true;
-            this.lblHelp.ForeColor = System.Drawing.Color.Gray;
-            this.lblHelp.Location = new System.Drawing.Point(340, 172);
-            this.lblHelp.Name = "lblHelp";
-            this.lblHelp.Size = new System.Drawing.Size(413, 19);
-            this.lblHelp.TabIndex = 14;
-            this.lblHelp.Text = "占位符:{年}{月}{日}{SN}{OKNG}{点位}{时间}，其余文字原样保留；目录模板用 / 分层";
+            this.lblPoints.AutoSize = true;
+            this.lblPoints.Location = new System.Drawing.Point(20, 208);
+            this.lblPoints.Name = "lblPoints";
+            this.lblPoints.Size = new System.Drawing.Size(96, 19);
+            this.lblPoints.TabIndex = 15;
+            this.lblPoints.Text = "窗口点位:";
+            //
+            // btnEditPoints
+            // 打开"窗口与存图点位配置"对话框（WindowPointForm），可视化改每个窗口的存图点位、
+            // 交换窗口位置；默认点位=窗口编号，改动随本次"保存"一起写盘。
+            // 操作方式说明并入悬停 ToolTip（原 lblPointsHelp 已删）。
+            //
+            this.btnEditPoints.Location = new System.Drawing.Point(130, 204);
+            this.btnEditPoints.Name = "btnEditPoints";
+            this.btnEditPoints.Size = new System.Drawing.Size(150, 30);
+            this.btnEditPoints.TabIndex = 16;
+            this.btnEditPoints.Text = "窗口/点位配置...";
+            this.btnEditPoints.UseVisualStyleBackColor = true;
             //
             // lblCams
             // 相机列表标题，加粗醒目
             //
             this.lblCams.AutoSize = true;
             this.lblCams.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
-            this.lblCams.Location = new System.Drawing.Point(20, 211);
+            this.lblCams.Location = new System.Drawing.Point(20, 250);
             this.lblCams.Name = "lblCams";
             this.lblCams.Size = new System.Drawing.Size(84, 19);
-            this.lblCams.TabIndex = 15;
+            this.lblCams.TabIndex = 18;
             this.lblCams.Text = "相机列表:";
             //
             // gridCameras
@@ -245,31 +254,31 @@ namespace CommandCenter.Views
             this.gridCameras.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.gridCameras.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.gridCameras.EditMode = System.Windows.Forms.DataGridViewEditMode.EditOnEnter;
-            this.gridCameras.Location = new System.Drawing.Point(20, 237);
+            this.gridCameras.Location = new System.Drawing.Point(20, 276);
             this.gridCameras.Name = "gridCameras";
             this.gridCameras.RowHeadersVisible = false;
             // 整行选择：点任意单元格都整行高亮 → SelectedRows 才有值，"删除选中"才好使
             this.gridCameras.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
-            this.gridCameras.Size = new System.Drawing.Size(680, 170);
-            this.gridCameras.TabIndex = 16;
+            this.gridCameras.Size = new System.Drawing.Size(680, 150);
+            this.gridCameras.TabIndex = 19;
             //
             // btnAddCam
             // 添加一台默认相机行（默认值 192.168.1.1 / 8500 / 点位1 / FTP留空用全局）
             //
-            this.btnAddCam.Location = new System.Drawing.Point(20, 417);
+            this.btnAddCam.Location = new System.Drawing.Point(20, 446);
             this.btnAddCam.Name = "btnAddCam";
             this.btnAddCam.Size = new System.Drawing.Size(100, 30);
-            this.btnAddCam.TabIndex = 17;
+            this.btnAddCam.TabIndex = 20;
             this.btnAddCam.Text = "添加一台";
             this.btnAddCam.UseVisualStyleBackColor = true;
             //
             // btnDelCam
             // 删除当前选中的相机行
             //
-            this.btnDelCam.Location = new System.Drawing.Point(130, 417);
+            this.btnDelCam.Location = new System.Drawing.Point(130, 446);
             this.btnDelCam.Name = "btnDelCam";
             this.btnDelCam.Size = new System.Drawing.Size(100, 30);
-            this.btnDelCam.TabIndex = 18;
+            this.btnDelCam.TabIndex = 21;
             this.btnDelCam.Text = "删除选中";
             this.btnDelCam.UseVisualStyleBackColor = true;
             //
@@ -277,10 +286,10 @@ namespace CommandCenter.Views
             // 保存：把界面值回写内存配置并返回 OK（上层写盘 + 提示重启）
             //
             this.btnSave.DialogResult = System.Windows.Forms.DialogResult.OK;
-            this.btnSave.Location = new System.Drawing.Point(300, 417);
+            this.btnSave.Location = new System.Drawing.Point(300, 446);
             this.btnSave.Name = "btnSave";
             this.btnSave.Size = new System.Drawing.Size(90, 32);
-            this.btnSave.TabIndex = 19;
+            this.btnSave.TabIndex = 22;
             this.btnSave.Text = "保存";
             this.btnSave.UseVisualStyleBackColor = true;
             //
@@ -288,10 +297,10 @@ namespace CommandCenter.Views
             // 取消：直接关闭，不写盘；回车/ESC 快捷键见 AcceptButton/CancelButton
             //
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(400, 417);
+            this.btnCancel.Location = new System.Drawing.Point(400, 446);
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(90, 32);
-            this.btnCancel.TabIndex = 20;
+            this.btnCancel.TabIndex = 23;
             this.btnCancel.Text = "取消";
             this.btnCancel.UseVisualStyleBackColor = true;
             //
@@ -301,17 +310,17 @@ namespace CommandCenter.Views
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.AcceptButton = this.btnSave;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(720, 560);
+            this.ClientSize = new System.Drawing.Size(720, 586);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnSave);
             this.Controls.Add(this.btnDelCam);
             this.Controls.Add(this.btnAddCam);
             this.Controls.Add(this.gridCameras);
             this.Controls.Add(this.lblCams);
-            this.Controls.Add(this.lblHelp);
+            this.Controls.Add(this.btnEditPoints);
+            this.Controls.Add(this.lblPoints);
             this.Controls.Add(this.txtFileNameTpl);
             this.Controls.Add(this.lblFile);
-            this.Controls.Add(this.lblDirPreview);
             this.Controls.Add(this.btnEditDirs);
             this.Controls.Add(this.txtSaveDir);
             this.Controls.Add(this.lblDir);
@@ -330,6 +339,46 @@ namespace CommandCenter.Views
             this.Name = "SettingsForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
             this.Text = "系统设置";
+            //
+            // tip（ToolTip 气泡：悬停 0.5 秒出提示、停留 8 秒自动消失）
+            // 悬停延迟 InitialDelay=500ms 是 Windows 工具提示的标准参数（行业惯例 0.4~0.7s），
+            // ReshowDelay=100ms 表示在别的控件间快速移动时缩短再次弹出等待；
+            // AutoPopDelay=8000ms 停留 8 秒自动消失，避免气泡挡住界面；
+            // ShowAlways=true 窗体未激活时也显示，鼠标移上来就有。
+            // 文本以 "?" 开头会显示帮助图标（Windows 惯例：?=帮助提示）。
+            //
+            this.tip.InitialDelay = 500;
+            this.tip.ReshowDelay = 100;
+            this.tip.AutoPopDelay = 8000;
+            this.tip.ShowAlways = true;
+            //
+            // 悬停提示：按钮、标题、输入框都挂上，现场不用点开就知道每个控件干嘛的。
+            // "配置目录结构..."按钮的 ToolTip 内容是动态的（当前目录结构），在 SettingsForm.cs 里刷新。
+            //
+            this.tip.SetToolTip(this.txtPlcIp,
+                "PLC 的 IP 地址（汇川，Modbus TCP 从站）。\r\n与上位机同一网段、能 ping 通；改完需重启程序生效。");
+            this.tip.SetToolTip(this.nudPlcPort,
+                "PLC 通讯端口，默认 502（Modbus TCP 标准端口）。\r\n改完需重启程序生效。");
+            this.tip.SetToolTip(this.nudRows,
+                "主界面显示窗口的行数。窗口总数=行×列；改完需重启程序生效。\r\n新增窗口的存图点位默认=窗口编号，可在下方\"窗口/点位配置...\"里改。");
+            this.tip.SetToolTip(this.nudCols,
+                "主界面显示窗口的列数。窗口总数=行×列；改完需重启程序生效。\r\n新增窗口的存图点位默认=窗口编号，可在下方\"窗口/点位配置...\"里改。");
+            this.tip.SetToolTip(this.txtSaveDir,
+                "图片保存的根目录（绝对路径）。\r\n实际目录结构按\"配置目录结构...\"里的层级逐级创建。");
+            this.tip.SetToolTip(this.btnEditDirs,
+                "可视化编辑存图目录结构（目录层级列表 + 文件名规则），并实时预览 OK/NG 两条落盘路径。\r\n当前结构见下方动态提示。");
+            this.tip.SetToolTip(this.txtFileNameTpl,
+                "图片文件名规则，占位符会自动替换：\r\n{点位}→窗口点位号（如 1.png）  {SN}→序列号  {OKNG}→OK 或 NG\r\n{年}/{月}/{日}→日期  {时间}→毫秒时间戳；其余文字原样保留。\r\n目录结构里的层级同样支持这些占位符。");
+            this.tip.SetToolTip(this.btnEditPoints,
+                "可视化设置每个窗口的存图点位（默认点位=窗口编号）。\r\n点格子选中→\"编辑点位\"改存图号；\"交换位置\"互换两个窗口的内容（编号固定跟随格子）；\"恢复默认\"一键还原。\r\n改动随本次\"保存\"一起写盘。");
+            this.tip.SetToolTip(this.btnAddCam,
+                "在列表末尾添加一台相机（默认值可直接改 IP / 端口 / FTP 上传目录）。");
+            this.tip.SetToolTip(this.btnDelCam,
+                "删除选中的相机行；未选中时先点选要删的行。");
+            this.tip.SetToolTip(this.btnSave,
+                "保存所有设置并写盘到 Config/appconfig.json。\r\n部分改动（窗口行列/相机台数等）需重启程序后生效。");
+            this.tip.SetToolTip(this.btnCancel,
+                "放弃本次修改并关闭，不写盘。");
             ((System.ComponentModel.ISupportInitialize)(this.nudPlcPort)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.nudRows)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.nudCols)).EndInit();
@@ -352,15 +401,16 @@ namespace CommandCenter.Views
         private Label lblDir;
         private TextBox txtSaveDir;
         private Button btnEditDirs;
-        private Label lblDirPreview;
         private Label lblFile;
         private TextBox txtFileNameTpl;
-        private Label lblHelp;
+        private Label lblPoints;
+        private Button btnEditPoints;
         private Label lblCams;
         private DataGridView gridCameras;
         private Button btnAddCam;
         private Button btnDelCam;
         private Button btnSave;
         private Button btnCancel;
+        private ToolTip tip;
     }
 }

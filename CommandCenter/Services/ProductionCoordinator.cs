@@ -36,6 +36,7 @@ namespace CommandCenter.Services
         private readonly List<CameraConfig> _cameraCfgs;    // 对应的相机配置（点位号/FTP目录等）
         private readonly ImageStore _imageStore;
         private readonly DisplayConfig _display;
+        private readonly List<int> _windowStationMap;       // 窗口→存图点位映射（配置，可能为 null 由调用方兜底）
 
         private readonly System.Threading.Timer _positionTimer;  // 到位轮询（后台线程）
         private readonly System.Threading.Timer _imageWaitTimer; // 等图超时单发（到期触发收尾）
@@ -74,13 +75,15 @@ namespace CommandCenter.Services
                                      List<KeyenceIV4Camera> cameras,
                                      List<CameraConfig> cameraCfgs,
                                      ImageStore imageStore,
-                                     DisplayConfig display)
+                                     DisplayConfig display,
+                                     List<int> windowStationMap)
         {
             _plc = plc;
             _cameras = cameras;
             _cameraCfgs = cameraCfgs;
             _imageStore = imageStore;
             _display = display;
+            _windowStationMap = windowStationMap;
             _windowCount = Math.Max(1, display.Rows * display.Columns);
 
             // 到位轮询：后台线程 200ms 一问 PLC。
@@ -178,7 +181,6 @@ namespace CommandCenter.Services
                     var p = new PendingCamera
                     {
                         CameraIndex = i,
-                        StationNo = cfg.StationNo,
                         ResultText = ""
                     };
                     _pends.Add(p);
@@ -286,11 +288,16 @@ namespace CommandCenter.Services
                     if (p.TriggerOk && !p.IsSnapped && string.IsNullOrEmpty(p.FailReason))
                         p.FailReason = globalFailReason ?? "等待相机图像超时"; // 超时补记点位失败原因
 
+                    // 本次结果落在哪个窗口（1..N 环形）→ 该窗口的点位即存图点位（可自定义，见 WindowStationMap）
+                    int targetWindow = _nextWindowIndex;
+                    _nextWindowIndex = (_nextWindowIndex % _windowCount) + 1;
+                    int stationNo = ResolveStation(targetWindow);
+
                     bool hasImage = p.TriggerOk && p.IsSnapped && !string.IsNullOrEmpty(p.FtpPath);
                     string archived = null;
                     if (hasImage)
                     {
-                        archived = ArchiveImage(p);
+                        archived = ArchiveImage(p, stationNo);
                         if (archived == null) archived = p.FtpPath; // 归档失败不致命：仍以 FTP 原图当结果
                     }
                     anyImage |= !string.IsNullOrEmpty(archived);
@@ -306,16 +313,14 @@ namespace CommandCenter.Services
                             CapturedAt = DateTime.Now,
                             SerialNumber = LatestSerialNumber,
                             ResultText = p.ResultText ?? "",
-                            StationNo = p.StationNo
+                            StationNo = stationNo
                         };
-                        int targetWindow = _nextWindowIndex;
-                        _nextWindowIndex = (_nextWindowIndex % _windowCount) + 1; // 1..N 环形
                         InspectionFinished?.Invoke(data, targetWindow);
 
                         if (!hasImage && p.FailReason != null)
                             ErrorRaised?.Invoke(p.FailReason);
                         else if (hasImage)
-                            LogHelper.Info($"点位{p.StationNo} 检测完成：{(p.IsOk ? "OK" : "NG")} → {archived}");
+                            LogHelper.Info($"点位{stationNo} 检测完成：{(p.IsOk ? "OK" : "NG")} → {archived}");
                     }
                     catch (Exception ex)
                     {
@@ -344,22 +349,40 @@ namespace CommandCenter.Services
         /// 归档图片：把 FTP 新图读入内存并按模板转存到正式目录（年/月/日/SN/OK|NG + 点位号.png）。
         /// 用内存解码避免 FTP 源文件可能被相机重写的文件占用问题。失败返回 null。
         /// </summary>
-        private string ArchiveImage(PendingCamera p)
+        /// <param name="p">本点位触发/判定快照</param>
+        /// <param name="stationNo">本次存图点位（来自窗口点位映射，见 ResolveStation）</param>
+        private string ArchiveImage(PendingCamera p, int stationNo)
         {
             try
             {
                 using (var src = Image.FromFile(p.FtpPath))
                 using (var copy = new Bitmap(src))
                 {
-                    return _imageStore.SaveImage(copy, p.StationNo, p.IsOk, LatestSerialNumber);
+                    return _imageStore.SaveImage(copy, stationNo, p.IsOk, LatestSerialNumber);
                 }
             }
             catch (Exception ex)
             {
                 LogHelper.Error("图片归档失败", ex);
-                ErrorRaised?.Invoke($"点位{p.StationNo} 图片归档失败：" + p.FtpPath);
+                ErrorRaised?.Invoke($"点位{stationNo} 图片归档失败：" + p.FtpPath);
                 return null;
             }
+        }
+
+        /// <summary>
+        /// 解析某号窗口的存图点位：优先取配置的窗口映射 WindowStationMap[窗口号-1]；
+        /// 映射缺失 / 越界（窗口数中途改小、旧配置等）时兜底"点位=窗口编号"。
+        /// </summary>
+        private int ResolveStation(int windowIndex)
+        {
+            if (_windowStationMap != null
+                && windowIndex - 1 >= 0
+                && windowIndex - 1 < _windowStationMap.Count
+                && _windowStationMap[windowIndex - 1] > 0)
+            {
+                return _windowStationMap[windowIndex - 1];
+            }
+            return windowIndex;
         }
 
         /// <summary>
@@ -418,7 +441,6 @@ namespace CommandCenter.Services
         private class PendingCamera
         {
             public int CameraIndex;    // 相机在配置里的下标（0 起）
-            public int StationNo;      // 点位号（进存图文件名）
             public bool TriggerOk;     // 触发是否成功（成功才等这张图）
             public bool IsOk;          // IV4 判定结论（触发失败时无意义）
             public string ResultText;  // 8 位判定文本

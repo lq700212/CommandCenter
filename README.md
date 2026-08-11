@@ -15,7 +15,8 @@
 
 ```
 CommandCenter/
-├── Views/           界面（MainForm + MainForm.Designer / SettingsForm + SettingsForm.Designer）
+├── Views/           界面（MainForm + MainForm.Designer / SettingsForm + SettingsForm.Designer /
+│                    DirTreeEditForm 目录结构可视化配置 / WindowPointForm 窗口点位可视化配置）
 │                    ※ MainForm/SettingsForm 静态布局（标题栏、状态栏、矩阵容器、设置表控件）
 │                      在对应 .Designer.cs 里可视化维护；动态部分（相机灯、窗口矩阵内容）
 │                      在业务文件里运行时生成
@@ -46,10 +47,11 @@ CommandCenter/
 
 所有参数集中在运行时生成的 `Config/appconfig.json`：
 
-- 相机：**多台相机列表**（每台：IP、触发端口、点位号、FTP上传目录、触发指令、超时），
+- 相机：**多台相机列表**（每台：IP、触发端口、FTP上传目录、触发指令、超时），
   一次"到位"对所有相机各触发一次拍照
 - PLC：IP、端口、站号、到位/开始/完成/配方/计数寄存器 D 地址
-- 显示：窗口行数 × 列数、标题栏字段开关、OK/NG 颜色名
+- 显示：窗口行数 × 列数、标题栏字段开关、OK/NG 颜色名、**窗口→存图点位映射**
+  （默认点位=窗口编号，可在设置窗体"窗口/点位配置..."里可视化自定义/交换窗口位置）
 - 图像：保存根目录、**存图目录结构**（可视化逐级配置，默认 年月日/SN号/OK|NG，点位号进文件名，
   在设置窗体点"配置目录结构..."编辑）、FTP 监听
 - 扫码枪：是否启用、串口参数（按项目约定：停止位存 "1"/"15"/"2"，校验位存标准枚举名）

@@ -15,20 +15,24 @@ namespace CommandCenter.Views
     /// │ 图片保存根目录: [D:\CommandCenter\Images]                   │
     /// │ 目录结构: [配置目录结构...] {年月日}/{SN}/{OKNG}             │
     /// │ 文件名模板:   [{点位}]   （占位符提示见界面）              │
-    /// │ 相机列表: ┌────────┬────┬────┬──────────────────────┐       │
-    /// │            │ 相机IP │端口│点位│ FTP上传目录          │       │
-    /// │            ├────────┼────┼────┼──────────────────────┤       │
-    /// │            │ 192…   │8500│ 1  │ D:\…\ftp\cam1        │       │
-    /// │            └────────┴────┴────┴──────────────────────┘       │
+    /// │ 窗口点位: [窗口/点位配置...] 点格改存图点位/可交换窗口位置   │
+    /// │ 相机列表: ┌────────┬────┬────────────────────────┐          │
+    /// │            │ 相机IP │端口│ FTP上传目录            │          │
+    /// │            ├────────┼────┼────────────────────────┤          │
+    /// │            │ 192…   │8500│ D:\…\ftp\cam1          │          │
+    /// │            └────────┴────┴────────────────────────┘          │
     /// │            [添加一台] [删除选中]                              │
     /// │                                  [保存] [取消]               │
     /// └─────────────────────────────────────────────────────────────┘
     /// 布局（静态控件）在 SettingsForm.Designer.cs 里可视化维护；
     /// 本文件只负责"数据 ↔ 控件"：构造时把 AppConfig 填进界面（LoadFromConfig），
     /// 点保存回写（OnSave，仅改内存对象，返回 DialogResult.OK，上层写盘并提示重启）。
-    /// 相机行数即相机台数：多台直接加行，各配各的 IP / 点位号 / FTP 目录。
+    /// 相机行数即相机台数：多台直接加行，各配各的 IP / 触发端口 / FTP 上传目录。
     /// "配置目录结构..."按钮打开 DirTreeEditForm，可视化编辑目录层级与文件名规则，
-    /// 返回后刷新右侧预览文本（lblDirPreview）。
+    /// 返回后把当前目录结构刷进该按钮的 ToolTip（原常驻预览标签 lblDirPreview 已删，
+    /// 界面说明统一用悬停气泡，见 SettingsForm.Designer.cs 的 tip）。
+    /// "窗口/点位配置..."按钮打开 WindowPointForm，可视化设置每个窗口的存图点位
+    /// （默认点位=窗口编号，可自定义、可交换窗口位置，见 DisplayConfig.WindowStationMap）。
     /// </summary>
     public partial class SettingsForm : Form
     {
@@ -62,19 +66,19 @@ namespace CommandCenter.Views
         }
 
         /// <summary>
-        /// 刷新"目录结构"右侧的只读预览：显示当前层级列表（用 / 拼接），
-        /// 供现场一眼看出当前配置的目录结构；列表为空时回退旧字符串模板。
+        /// 刷新"配置目录结构..."按钮的 ToolTip：把当前目录结构（层级用 / 拼接）动态挂到按钮上，
+        /// 现场鼠标悬停即可查看当前配置，界面不再占用常驻标签行。
         /// </summary>
         private void RefreshDirPreview()
         {
-            var dirs = _cfg.Image.SubDirs;
-            if (dirs != null && dirs.Count > 0)
-                lblDirPreview.Text = string.Join("/", dirs);
-            else
-                lblDirPreview.Text = _cfg.Image.SubDirTemplate;
+            var dirs = _cfg.Image.SubDirs ?? new List<string>();
+            string cur = dirs.Count > 0 ? string.Join("/", dirs) : "（未配置）";
+            tip.SetToolTip(btnEditDirs,
+                "可视化编辑存图目录结构（目录层级列表 + 文件名规则），并实时预览 OK/NG 落盘路径。\r\n当前结构：" + cur);
         }
 
-        /// <summary>给相机表格建好 4 列结构（列固定，运行时加一次即可，不用进设计器序列化）。</summary>
+        /// <summary>给相机表格建好 3 列结构（列固定，运行时加一次即可，不用进设计器序列化）。
+        /// 注意：旧版的"点位号"列已移除——存图点位统一由"窗口/点位配置…"（WindowStationMap）驱动。</summary>
         private void SetupCameraGridColumns()
         {
             // 仅在还没有"相机IP"列时初始化，保证重复调用不会越建越多
@@ -82,7 +86,6 @@ namespace CommandCenter.Views
             {
                 gridCameras.Columns.Add("IpAddress", "相机IP");
                 gridCameras.Columns.Add("CommandPort", "触发端口");
-                gridCameras.Columns.Add("StationNo", "点位号");
                 gridCameras.Columns.Add("FtpUploadDir", "FTP上传目录（留空用全局目录）");
             }
         }
@@ -91,10 +94,10 @@ namespace CommandCenter.Views
         private void LoadCameraRows()
         {
             foreach (var c in _cfg.Cameras ?? new List<CameraConfig>())
-                gridCameras.Rows.Add(c.IpAddress, c.CommandPort, c.StationNo, c.FtpUploadDir);
+                gridCameras.Rows.Add(c.IpAddress, c.CommandPort, c.FtpUploadDir);
             // 至少留一行可见，别让表格空着无从下手
             if (gridCameras.Rows.Count == 0)
-                gridCameras.Rows.Add("192.168.1.100", 8500, 1, "");
+                gridCameras.Rows.Add("192.168.1.100", 8500, "");
         }
 
         /// <summary>
@@ -133,6 +136,18 @@ namespace CommandCenter.Views
                         RefreshDirPreview();
                 }
             };
+            // 打开窗口/存图点位可视化配置对话框：改的是同一 _cfg.Display.WindowStationMap 实例。
+            // 注意：行列数取【界面 nud 上的最新值】（用户可能刚改了行/列还没保存），
+            // 而不是 _cfg.Display.Rows/Columns（那是上次已保存的旧值）——保证格子矩阵
+            // 与"用户即将保存的新窗口总数"一致，改完行列再配置点位所见即所得。
+            btnEditPoints.Click += (s, e) =>
+            {
+                using (var dlg = new WindowPointForm(_cfg.Display.WindowStationMap,
+                                                     (int)nudRows.Value, (int)nudCols.Value))
+                {
+                    dlg.ShowDialog(this);
+                }
+            };
         }
 
         /// <summary>把界面值回写内存配置（注意：窗口行列/相机台数改动需重启生效）。</summary>
@@ -144,25 +159,23 @@ namespace CommandCenter.Views
             _cfg.Display.Columns = (int)nudCols.Value;
             _cfg.Image.SaveRootDir = txtSaveDir.Text.Trim();
             _cfg.Image.FileNameTemplate = txtFileNameTpl.Text.Trim();
-            // 目录结构由 DirTreeEditForm 直接写入 _cfg.Image.SubDirs/SubDirTemplate，这里不用回写；
-            // 若未打开过对话框，SubDirs 保持原值（可能为空），运行时 ImageStore 会回退旧模板。
+            // 目录结构由 DirTreeEditForm 直接写入 _cfg.Image.SubDirs，这里不用回写；
+            // 未打开过对话框则保持 SubDirs 原值（首次为模型默认的三层）。
 
-            // 相机：逐行回写；IP 空的行视为"未填写"自动剔除；剔除后一台都不剩则补一台默认
+            // 相机：逐行回写；IP 空的行视为"未填写"自动剔除；剔除后一台都不剩则补一台默认。
+            // 注意：存图点位不再在此配置（由"窗口/点位配置…"的 WindowStationMap 驱动，见 DisplayConfig）
             var cams = new List<CameraConfig>();
             foreach (DataGridViewRow r in gridCameras.Rows)
             {
                 string ip = r.Cells["IpAddress"].Value != null ? r.Cells["IpAddress"].Value.ToString().Trim() : "";
                 if (string.IsNullOrEmpty(ip)) continue; // 空行/未填IP行忽略
-                int port = 8500, station = 1;
+                int port = 8500;
                 string portTxt = r.Cells["CommandPort"].Value == null ? "" : r.Cells["CommandPort"].Value.ToString();
                 if (!int.TryParse(portTxt, out port)) port = 8500;   // TryParse 失败会写 0，手动回默认
-                string stationTxt = r.Cells["StationNo"].Value == null ? "" : r.Cells["StationNo"].Value.ToString();
-                if (!int.TryParse(stationTxt, out station)) station = 1;
                 cams.Add(new CameraConfig
                 {
                     IpAddress = ip,
                     CommandPort = Math.Max(1, port),
-                    StationNo = station,
                     FtpUploadDir = r.Cells["FtpUploadDir"].Value == null ? "" : r.Cells["FtpUploadDir"].Value.ToString().Trim()
                 });
             }

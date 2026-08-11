@@ -23,7 +23,7 @@ namespace CommandCenter.Views
     /// │ └──────────────────────────────────────────────────────────┘  │
     /// │ 当前层级名字/规则: [txtLevelName                   ]          │
     /// │ 插入占位符: [cmbPlaceholder ▼] [btnInsertPh 插入]             │
-    /// │ [btnAddLevel 添加] [btnInsertLevel 插入上方]                   │
+    /// │ [btnAddLevel 添加] [btnInsertLevel 插入上方] [btnInsertBelow 插入下方] │
     /// │ [btnDeleteLevel 删除] [btnUp ↑] [btnDown ↓]                   │
     /// │ ── 文件名规则 ────────────────────────────────────────────    │
     /// │ 文件名: [txtFileNameTpl                          ]            │
@@ -40,6 +40,8 @@ namespace CommandCenter.Views
     ///   - 每级既能写固定名字（如 "OK"），也能写生成规则（含占位符，如 {年月日}）。
     ///   - 改动直接写回传入的 ImageConfig（同一实例），确定后由设置窗体统一保存。
     ///   - 占位符插入目标：默认/选中层级时插入到"当前层级名字"框；用户点过"文件名规则"框后才插文件名。
+    ///   - 占位符/按钮说明不占界面（原常驻标签 lblNote 已删）：悬停输入框/按钮/标题显示 ToolTip 气泡，
+    ///     悬停 0.5 秒出现、停留 8 秒消失（Windows 标准参数，见 DirTreeEditForm.Designer.cs 的 tip）。
     /// </summary>
     public partial class DirTreeEditForm : Form
     {
@@ -79,12 +81,8 @@ namespace CommandCenter.Views
         {
             txtSaveRootDir.Text = _cfg.SaveRootDir;
 
-            // 层级列表：优先用 SubDirs；为空（旧配置/首次）则从旧字符串模板拆解兜底
-            var levels = (_cfg.SubDirs != null && _cfg.SubDirs.Count > 0)
-                ? _cfg.SubDirs
-                : _cfg.SubDirTemplate
-                    .Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
-                    .ToList();
+            // 层级列表：直接用 SubDirs（模型默认已带三层，首次打开即所见即所得）
+            var levels = _cfg.SubDirs ?? new List<string>();
             foreach (var lvl in levels)
                 lstLevels.Items.Add(lvl);
 
@@ -131,7 +129,8 @@ namespace CommandCenter.Views
 
             btnBrowse.Click += (s, e) => PickRootDir();
             btnAddLevel.Click += (s, e) => AddLevel("");
-            btnInsertLevel.Click += (s, e) => AddLevel(true);
+            btnInsertLevel.Click += (s, e) => AddLevelInsert(true);
+            btnInsertBelow.Click += (s, e) => AddLevelInsert(false);
             btnDeleteLevel.Click += (s, e) => DeleteLevel();
             btnUp.Click += (s, e) => MoveLevel(-1);
             btnDown.Click += (s, e) => MoveLevel(1);
@@ -171,14 +170,19 @@ namespace CommandCenter.Views
         }
 
         /// <summary>
-        /// 在选中层级上方插入一级（现场常需要把"年月日"放在最上面，先删再加可能打乱顺序）。
+        /// 在选中层级的上方或下方插入一级（默认给 {SN}，现场按需改）。
+        /// 现场常需要把"年月日"放在最上面、或把"OK/NG"插在某层后面，插入位置比"先删再加"更直观。
         /// </summary>
-        private void AddLevel(bool insertAbove)
+        /// <param name="above">true=插入到选中层级上方；false=插入到选中层级下方。</param>
+        private void AddLevelInsert(bool above)
         {
+            // 没选中任何层级时：插入上方就放最顶部，插入下方就追到末尾，避免无去处
             int idx = lstLevels.SelectedIndex;
-            if (idx < 0) idx = 0;
-            lstLevels.Items.Insert(idx, "{SN}");
-            lstLevels.SelectedIndex = idx;
+            int insertAt = idx < 0
+                ? (above ? 0 : lstLevels.Items.Count)
+                : (above ? idx : idx + 1);
+            lstLevels.Items.Insert(insertAt, "{SN}");
+            lstLevels.SelectedIndex = insertAt;
             txtLevelName.Text = "{SN}";
         }
 
@@ -293,7 +297,7 @@ namespace CommandCenter.Views
             }
         }
 
-        /// <summary>确定：把编辑结果写回 ImageConfig（同一实例），并同步旧字符串模板便于兼容展示。</summary>
+        /// <summary>确定：把编辑结果写回 ImageConfig（同一实例）。</summary>
         private void OnOk()
         {
             // 收集层级：清掉空白项，避免存出空目录层级；删空则保留默认 {年月日} 兜底
@@ -305,7 +309,6 @@ namespace CommandCenter.Views
 
             _cfg.SaveRootDir = txtSaveRootDir.Text.Trim();
             _cfg.SubDirs = levels;
-            _cfg.SubDirTemplate = string.Join("/", levels);      // 兼容旧字段：展示与老版本对照
             _cfg.FileNameTemplate = txtFileNameTpl.Text.Trim();
 
             DialogResult = DialogResult.OK;

@@ -1,10 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using Newtonsoft.Json.Serialization;
 
 namespace CommandCenter.Utils
@@ -16,8 +14,7 @@ namespace CommandCenter.Utils
     ///   1. 首次运行无配置文件时，用模型自带默认值重建并把默认配置落盘，方便现场看着改；
     ///   2. 序列化时忽略值为 null 的字段、使用缩进格式，人工可读；
     ///   3. 保存先写临时文件再改名替换，避免"写到一半断电把配置写坏"导致程序起不来；
-    ///   4. 兼容旧版单相机配置：旧 json 的 "camera" 是对象、新版是 "cameras" 列表，
-    ///      加载时若列表为空则用旧字段迁移到第 0 项，现场升级不用重配。
+    ///   4. 不做任何旧配置兼容/迁移：项目未上线，配置全部以当前模型为准，字段缺了就用模型默认值。
     /// </summary>
     public static class ConfigStore
     {
@@ -37,29 +34,13 @@ namespace CommandCenter.Utils
                     string json = File.ReadAllText(ConfigFile, Encoding.UTF8);
                     var cfg = JsonConvert.DeserializeObject<Models.AppConfig>(json) ?? new Models.AppConfig();
 
-                    // 兼容迁移：旧配置只有 "camera" 单对象，把它补进 Cameras 列表第 0 项
-                    if (cfg.Cameras == null || cfg.Cameras.Count == 0)
-                    {
-                        var legacy = JObject.Parse(json)["camera"];
-                        cfg.Cameras = new List<Models.CameraConfig>();
-                        if (legacy != null)
-                        {
-                            var cam = legacy.ToObject<Models.CameraConfig>();
-                            if (cam != null) cfg.Cameras.Add(cam);
-                        }
-                        if (cfg.Cameras.Count == 0)
-                            cfg.Cameras.Add(new Models.CameraConfig()); // 全缺：补一台默认
-                    }
+                    // 空段兜底（json 缺字段/显式 null 时用模型默认），保证后续代码不 NRE
+                    if (cfg.Cameras == null) cfg.Cameras = new List<Models.CameraConfig>();
+                    if (cfg.Display == null) cfg.Display = new Models.DisplayConfig();
+                    if (cfg.Image == null) cfg.Image = new Models.ImageConfig();
 
-                    // 兼容迁移：旧配置只有字符串模板 subDirTemplate（如 {年}/{月}/{日}/{SN}/{OKNG}），
-                    // 新版用 SubDirs 层级列表；SubDirs 为空时把旧模板拆成层级列表，现场升级不用重配。
-                    if (cfg.Image != null && (cfg.Image.SubDirs == null || cfg.Image.SubDirs.Count == 0)
-                        && !string.IsNullOrWhiteSpace(cfg.Image.SubDirTemplate))
-                    {
-                        cfg.Image.SubDirs = cfg.Image.SubDirTemplate
-                            .Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
-                            .ToList();
-                    }
+                    // 保证窗口→存图点位映射长度与窗口总数一致（缺的补默认、多的截断）
+                    EnsureStationMap(cfg);
                     return cfg;
                 }
             }
@@ -79,6 +60,7 @@ namespace CommandCenter.Utils
             try
             {
                 Directory.CreateDirectory(ConfigDir);
+                EnsureStationMap(config);   // 保存前把点位映射对齐到窗口总数，避免写盘出越界/缺项
                 string json = JsonConvert.SerializeObject(config, new JsonSerializerSettings
                 {
                     Formatting = Formatting.Indented,
@@ -98,6 +80,25 @@ namespace CommandCenter.Utils
                 LogHelper.Error("保存配置失败：" + ex.Message);
                 throw;
             }
+        }
+
+        /// <summary>
+        /// 保证 WindowStationMap（窗口→存图点位）与显示窗口总数（Rows×Columns）对齐：
+        ///   - 长度不足 → 缺的按"点位=窗口编号"补上（默认规则）；
+        ///   - 长度超出 → 多余截断（窗口数改小后，超出部分丢弃）。
+        /// 在加载与保存各调一次，保证运行时取 map[i] 永不越界。
+        /// </summary>
+        private static void EnsureStationMap(Models.AppConfig cfg)
+        {
+            int rows = Math.Max(1, cfg.Display.Rows);
+            int cols = Math.Max(1, cfg.Display.Columns);
+            int windowCount = rows * cols;
+
+            var map = cfg.Display.WindowStationMap ?? new List<int>();
+            while (map.Count < windowCount) map.Add(map.Count + 1);
+            if (map.Count > windowCount) map.RemoveRange(windowCount, map.Count - windowCount);
+
+            cfg.Display.WindowStationMap = map;
         }
     }
 }

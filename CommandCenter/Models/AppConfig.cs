@@ -15,9 +15,9 @@ namespace CommandCenter.Models
     {
         /// <summary>
         /// 相机通讯配置列表（基恩士 IV4 系列，支持多台）。
-        /// 【为什么是列表】现场可能有多台相机，每台的 IP/端口/FTP目录/点位号都独立配置；
+        /// 【为什么是列表】现场可能有多台相机，每台的 IP/端口/FTP目录都独立配置；
         /// 一次"到位"信号会对列表中每台都触发一次、各取各的图（见 ProductionCoordinator）。
-        /// 兼容旧配置：ConfigStore.Load 会把旧 json 的单对象 camera 自动迁移到本列表第 0 项。
+        /// 注意：存图点位与相机无关，由 DisplayConfig.WindowStationMap（窗口→点位映射）统一管理。
         /// </summary>
         public List<CameraConfig> Cameras { get; set; } = new List<CameraConfig>();
 
@@ -45,9 +45,6 @@ namespace CommandCenter.Models
     {
         /// <summary>相机 IP（如 192.168.1.100）</summary>
         public string IpAddress { get; set; } = "192.168.1.100";
-
-        /// <summary>自定义拍照点位号：存图文件名用（如 1.png）。与界面窗口号无关，现场按工位自定。</summary>
-        public int StationNo { get; set; } = 1;
 
         /// <summary>
         /// 该相机的 FTP 上传目录（相机作为 FTP 客户端把照片推到这台，独立监听）。
@@ -160,9 +157,8 @@ namespace CommandCenter.Models
         public int Columns { get; set; } = 7;
 
         /// <summary>
-        /// 窗口逻辑宽（px，保留字段兼容旧 json）。
-        /// 说明：现代码由 MainForm 用 TableLayoutPanel 将主区域等分，所有窗口尺寸严格一致并铺满，
-        /// 本字段不再参与布局计算，仅作为人工参考。
+        /// 窗口逻辑宽（px）。说明：现代码由 MainForm 用 TableLayoutPanel 将主区域等分，
+        /// 所有窗口尺寸严格一致并铺满，本字段不参与布局计算，仅作为人工参考。
         /// </summary>
         public int WindowWidth { get; set; } = 220;
 
@@ -171,6 +167,20 @@ namespace CommandCenter.Models
 
         /// <summary>窗口间距（px）</summary>
         public int WindowSpacing { get; set; } = 8;
+
+        /// <summary>
+        /// 窗口→存图点位映射（可视化配置的主数据）：第 i+1 号显示窗口存图用的点位号（进文件名 {点位}）。
+        /// 【默认规则】点位 = 窗口编号（1、2、3…），即 1 号窗口存图名为 1.png；
+        /// 【自定义】用户在"系统设置 → 窗口/点位配置…"里可把任意窗口的点位改成其他值
+        ///   （例如 1 号窗口存图名改成 2.png）；
+        /// 【窗口位置调整】交换两个窗口的点位值，等价于"把窗口内容搬到另一个格子"，
+        ///   而窗口编号固定跟随格子（不管谁放第一位都是 1 号）。
+        /// 说明：
+        ///   - 长度 = 显示窗口总数(Rows×Columns)，由 ConfigStore 在加载/保存时自动对齐
+        ///     （缺的补"点位=窗口编号"，多的截断），运行时 ProductionCoordinator 还有越界兜底；
+        ///   - 存图文件名的 {点位} 用本映射值，相机配置不再有点位概念。
+        /// </summary>
+        public List<int> WindowStationMap { get; set; } = new List<int>();
 
         /// <summary>标题栏是否显示各字段（复用项目时可整体隐藏）</summary>
         public bool ShowProductModel { get; set; } = true;
@@ -227,33 +237,20 @@ namespace CommandCenter.Models
         ///   {年月日} 是一个整体目录名，展开成"2026年08月11日"（不是年/月/日三级）；
         ///   {OKNG}   按本次判定展开成 OK 或 NG 两个并列目录之一，满足现场分开放习惯；
         ///   点位号进文件名（见 FileNameTemplate），不作为目录层级。
-        /// 兼容旧配置：SubDirTemplate 非空且本列表为空时自动从旧模板拆解迁移（见 ConfigStore.Load）。
         /// </summary>
-        public List<string> SubDirs { get; set; } = new List<string>();
-
-        /// <summary>
-        /// 目录结构模板（旧版字符串形式，用 / 分隔层级，供兼容与界面展示）。
-        /// 实际建目录以 SubDirs 列表为准；保存时由 SubDirs 用 / 拼接回本字段，方便老版本/人工对照。
-        /// </summary>
-        public string SubDirTemplate { get; set; } = "{年月日}/{SN}/{OKNG}";
+        public List<string> SubDirs { get; set; } = new List<string> { "{年月日}", "{SN}", "{OKNG}" };
 
         /// <summary>
         /// 文件名模板（不含扩展名，统一存 .png）。支持的占位符（其余文字原样保留）：
-        ///   {点位}   拍照点位号（CameraConfig.StationNo），默认即点位号
+        ///   {点位}   窗口存图点位（DisplayConfig.WindowStationMap，默认=窗口编号，可在设置里可视化改）
         ///   {时间}   精确到毫秒的时间戳 yyyyMMdd_HHmmss_fff（多张同点位防重名用）
         ///   {SN}     序列号（若文件名也要带 SN 可加）
         ///   例：默认 "{点位}" → 1.png
         /// </summary>
         public string FileNameTemplate { get; set; } = "{点位}";
 
-        /// <summary>按 yyyyMMdd 建子目录（保留兼容旧 json；新逻辑以 SubDirTemplate 为准，模板非空时忽略本项）</summary>
-        public bool SubDirByDate { get; set; } = true;
-
         /// <summary>保留天数，0 表示不自动清理</summary>
         public int KeepDays { get; set; } = 30;
-
-        /// <summary>文件名前缀（旧命名规则用；新逻辑以 FileNameTemplate 为准）</summary>
-        public string FilePrefix { get; set; } = "IMG";
 
         /// <summary>相机 FTP 上传目录兜底（各相机未单独配 FtpUploadDir 时用它；多台务必分开配）</summary>
         public string FtpRootDir { get; set; } = @"D:\CommandCenter\Images\ftp";

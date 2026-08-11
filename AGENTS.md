@@ -45,7 +45,9 @@
 | `CommandCenter/Services/ImageStore.cs` | 相机 FTP 推图监听 + 图片归档 |
 | `CommandCenter/Models/AppConfig.cs` | 全部可配置项模型（相机/PLC/显示/图像/扫码） |
 | `CommandCenter/Utils/ConfigStore.cs` | appconfig.json 读写（小驼峰序列化） |
-| `CommandCenter/Controls/CameraDisplayControl.cs` | 相机显示窗 + 右下角自绘 OK/NG 徽标 |
+| `CommandCenter/Controls/CameraDisplayControl.cs` | 相机显示窗 + 右下角自绘 OK/NG 徽标（右上角显示存图点位） |
+| `CommandCenter/Views/DirTreeEditForm.cs` | 图片存储目录结构可视化配置（逐级目录 + 文件名规则 + 实时预览） |
+| `CommandCenter/Views/WindowPointForm.cs` | 窗口→存图点位可视化配置（格子矩阵：编辑点位/交换位置/恢复默认） |
 | `docs/通讯接入.md` | 相机/PLC 对接流程与寄存器表 |
 | `CHANGELOG.md` | 版本改动记录（最新在前） |
 
