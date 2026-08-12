@@ -214,6 +214,14 @@ namespace CommandCenter.Models
         /// <summary>标题栏是否显示各字段（复用项目时可整体隐藏）</summary>
         public bool ShowProductModel { get; set; } = true;
 
+        /// <summary>
+        /// 标题栏是否显示"系统设置"按钮（V1.8.4）。
+        /// 默认 true；生产现场为防止误点改配置，可在 appconfig.json 的 display 节点改 false
+        /// 隐藏该按钮（隐藏后配置只读、只能由管理员改 json 恢复）。布局自动紧凑：隐藏的按钮
+        /// 不占标题栏位置（RelayoutTitleBar 按 Visible 跳过）。
+        /// </summary>
+        public bool ShowSettingsButton { get; set; } = true;
+
         /// <summary>标题栏是否显示扫码序列号</summary>
         public bool ShowSerialNumber { get; set; } = true;
 

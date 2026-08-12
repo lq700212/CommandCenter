@@ -154,6 +154,8 @@ namespace CommandCenter.Views
             lblTotal.Visible = _config.Display.ShowTotalCount;
             lblOk.Visible = _config.Display.ShowOkCount;
             lblNg.Visible = _config.Display.ShowNgCount;
+            // 系统设置按钮显隐（V1.8.4）：按配置隐藏后标题栏自动紧凑重排，隐藏期间配置只读
+            btnSettings.Visible = _config.Display.ShowSettingsButton;
 
             // ② 标题栏 OK/NG 计数高亮（V1.5.0 现场反馈"彩色数字不够醒目"）：
             // 默认把 OK/NG 做成"实心彩色色块 + 白字"（绿底=OK、红底=NG，配色走 DisplayConfig），
