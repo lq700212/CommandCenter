@@ -161,49 +161,59 @@ namespace CommandCenter.Models
     }
 
     /// <summary>
-    /// PLC 通讯配置（汇川，Modbus TCP 从站，端口 502）。
-    /// 汇川 D 寄存器映射到 Modbus 保持寄存器区（D0=40001, D100=40101），
-    /// 寄存器绝对地址 = 40001 + D地址。下面暴露的均是"D 地址"，发送时 +40001 转绝对地址。
-    /// 到位信号与完成信号若走位（M/Y）则用线圈读写，此处默认用位读出版社写法见 PlcService。
+    /// PLC 通讯配置（V1.12.11 起角色反转：现场汇川 PLC 做 Modbus TCP 主站，上位机做从站）。
+    /// 上位机监听本机 Port 端口（标准 502），等汇川主站 TCP 连入并读写上位机的保持寄存器区。
+    /// IpAddress = 上位机监听绑定 IP（"0.0.0.0"=监听所有网卡，现场主机多网卡时可绑指定 IP）。
+    ///
+    /// 【寄存器地址沿用 D100~D112，读写方向反转】
+    ///   D100 到位信号：PLC 主站写 1 → 上位机读后清 0；
+    ///   D101 开始信号：上位机写自己区，PLC 来读；
+    ///   D102 完成信号：上位机写自己区(1=成功/2=取像异常)，PLC 来读；
+    ///   D103~D(103+len-1) 配方号：上位机写自己区(ASCII)，D108 配方更新标志=1，PLC 读走后写 0 回执；
+    ///   D110/111/112 总数/OK/NG：上位机写自己区，PLC 来读。
+    /// （Modbus 是主从问答协议，从站不能主动发；"上位机→PLC"全靠 PLC 轮询来读）
     /// </summary>
     public class PlcConfig
     {
-        /// <summary>PLC IP（当前现场为 19.87.6.1）</summary>
-        public string IpAddress { get; set; } = "19.87.6.1";
+        /// <summary>上位机从站监听绑定 IP（"0.0.0.0"=所有网卡；多网卡可填 19.87.6.230 绑定指定网卡）</summary>
+        public string IpAddress { get; set; } = "0.0.0.0";
 
-        /// <summary>Modbus TCP 端口，标准 502</summary>
+        /// <summary>上位机从站监听端口，Modbus TCP 标准 502</summary>
         public int Port { get; set; } = 502;
 
-        /// <summary>Modbus 从站号（UnitId），默认 1</summary>
+        /// <summary>上位机从站 UnitId（需与汇川主站通讯指令里的 UnitId 一致，默认 1）</summary>
         public byte UnitId { get; set; } = 1;
 
-        /// <summary>单次读写超时（毫秒）</summary>
+        /// <summary>单次读写超时（毫秒，从站模式主要用于日志/容错，不再阻塞主动连接）</summary>
         public int TimeoutMs { get; set; } = 2000;
 
-        // ─── 寄存器地址映射（与现场 PLC 程序确认后调整） ───
+        // ─── 寄存器地址映射（与现场 PLC 程序确认后调整；方向见类注释） ───
 
-        /// <summary>PLC→上位机：相机运动到位信号（D 地址，读保持寄存器）</summary>
+        /// <summary>PLC→上位机：相机运动到位信号（D 地址，PLC 写 1，上位机读后清 0）</summary>
         public ushort MoveDoneAddress { get; set; } = 100;
 
-        /// <summary>上位机→PLC：触发相机工作的"开始"信号（D，写）</summary>
+        /// <summary>上位机→PLC：触发相机工作的"开始"信号（D，上位机写自己区，PLC 来读）</summary>
         public ushort StartSignalAddress { get; set; } = 101;
 
-        /// <summary>上位机→PLC：拍照完成信号（D，写 1=成功 2=取像失败）</summary>
+        /// <summary>上位机→PLC：拍照完成信号（D，上位机写自己区：1=成功 2=取像失败，PLC 来读）</summary>
         public ushort DoneSignalAddress { get; set; } = 102;
 
-        /// <summary>上位机→PLC：配方号起始 D 地址（连续写 N 个字）</summary>
+        /// <summary>上位机→PLC：配方号起始 D 地址（连续写 N 个字，ASCII 每字 2 字符）</summary>
         public ushort RecipeAddress { get; set; } = 103;
 
         /// <summary>配方号写入的字数（支持 1~20，ASCII 每字 2 字符）</summary>
         public ushort RecipeLen { get; set; } = 5;
 
-        /// <summary>上位机→PLC：检测总数（D）</summary>
+        /// <summary>上位机→PLC：配方更新标志位（V1.12.11 新增，D108）。上位机写 1=有新配方待切换，PLC 读走后写 0 回执。</summary>
+        public ushort RecipeFlagAddress { get; set; } = 108;
+
+        /// <summary>上位机→PLC：检测总数（D，上位机写自己区，PLC 来读）</summary>
         public ushort TotalCountAddress { get; set; } = 110;
 
-        /// <summary>上位机→PLC：OK 数（D）</summary>
+        /// <summary>上位机→PLC：OK 数（D，上位机写自己区，PLC 来读）</summary>
         public ushort OkCountAddress { get; set; } = 111;
 
-        /// <summary>上位机→PLC：NG 数（D）</summary>
+        /// <summary>上位机→PLC：NG 数（D，上位机写自己区，PLC 来读）</summary>
         public ushort NgCountAddress { get; set; } = 112;
     }
 

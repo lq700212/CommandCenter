@@ -320,9 +320,12 @@ namespace CommandCenter.Views
             });
         }
 
-        // ────────────── PLC 操作（全部后台线程） ──────────────
+        // ────────────── PLC 操作（全部后台线程；V1.12.11 起从站模式）────────────────
+        // 【角色反转】PLC(汇川)做主站、上位机做从站。下列 _plc 调用底层已改为读写上位机自己
+        //   DataStore 寄存器区（不连远端 PLC）：读 D100 到位=读 PLC 写入自己区的值；写寄存器=
+        //   写自己区供 PLC 主站来读。功能测试这里验证"从站数据存储读写正常 + PLC 主站能读到/写入"。
 
-        /// <summary>读到位信号（ReadMoveDone）：返回 true 表示 PLC 已把到位信号置 1。</summary>
+        /// <summary>读到位信号（ReadMoveDone）：返回 true 表示到位寄存器≠0（PLC 主站写入 1）。</summary>
         private void BtnReadMoveDone_Click(object sender, EventArgs e)
         {
             if (!EnsurePlc()) return;

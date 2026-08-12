@@ -181,6 +181,9 @@ namespace CommandCenter.Views
         /// <summary>把现有扫码枪配置分流填进两张表（V1.12.8 起）：Mode=Tcp 进 TCP 表，
         /// Mode=Serial 进串口表。两张表各至少留一行默认配置当模板——TCP 表默认用现场实测
         /// `19.87.6.100:9004 / LON`，串口表默认用模型默认串口参数（COM3/115200/1/None）。
+        /// 【默认启用（V1.12.9）】TCP 模板行默认勾选"启用"：与代码默认实际使用的扫码枪一致
+        /// （现场默认以太网无协议扫码枪，MainForm.BuildScanner 对 Mode=Tcp 建 ScannerTcpService，
+        /// 主界面开机即接这把枪收码）；串口表模板行保持不勾选（代码默认不用串口枪，要接入再勾）。
         /// 空安全说明：Mode 为 null/空时按 TCP 处理（现场默认以太网扫码枪，防配置手改 null 崩）。</summary>
         private void LoadScannerRows()
         {
@@ -199,9 +202,10 @@ namespace CommandCenter.Views
                     hasTcp = true;
                 }
             }
-            // 至少各留一行可见（默认值即 ScanConfig 模型默认；现场扫码枪实测 IP 19.87.6.100:9004，触发指令 LON）
+            // 至少各留一行可见（V1.12.9 起 TCP 模板行"启用"默认勾选，串口行不勾）：
+            // 现场扫码枪实测 IP 19.87.6.100:9004，触发指令 LON，与代码默认接入的那把枪保持一致
             if (!hasTcp)
-                gridScannersTcp.Rows.Add(false, "19.87.6.100", 9004, "LON");
+                gridScannersTcp.Rows.Add(true, "19.87.6.100", 9004, "LON");
             if (!hasSerial)
                 gridScannersSerial.Rows.Add(false, "COM3", 115200, "1", "None");
         }
@@ -221,10 +225,11 @@ namespace CommandCenter.Views
             btnDelCam.Click += (s, e) => DeleteSelectedRows(gridCameras, "相机");
 
             // 添加一台 TCP 扫码枪：追加一行默认配置（V1.12.8 起 TCP 独立成表；
-            // 默认现场实测 IP/触发指令，V1.12.0）
+            // 默认现场实测 IP/触发指令，V1.12.0；V1.12.9 起默认勾选"启用"——
+            // 与 LoadScannerRows 模板行一致：代码默认接入的就是以太网扫码枪）
             btnAddScannerTcp.Click += (s, e) =>
             {
-                gridScannersTcp.Rows.Add(false, "19.87.6.100", 9004, "LON");
+                gridScannersTcp.Rows.Add(true, "19.87.6.100", 9004, "LON");
             };
             // 删除选中的 TCP 扫码枪行（与相机同样的"先选中再删"交互；V1.8.4 同相机修复空白行误报）
             btnDelScannerTcp.Click += (s, e) => DeleteSelectedRows(gridScannersTcp, "扫码枪(TCP)");
@@ -400,7 +405,18 @@ namespace CommandCenter.Views
                 });
             }
 
-            if (scanners.Count == 0) scanners.Add(new ScanConfig()); // 兜底：保留一条默认（未启用）
+            // 兜底（V1.12.9 起）：保留一条默认与界面模板行一致——TCP 现场默认扫码枪且"启用"，
+            // 避免"把两张表都删空再保存"后重开设置，出现与界面（TCP 行默认勾选）不符的串口未启用条目；
+            // 此前兜底是 new ScanConfig()（Mode=Serial、未启用），与界面默认展示不一致。
+            if (scanners.Count == 0)
+                scanners.Add(new ScanConfig
+                {
+                    Mode = "Tcp",
+                    Enabled = true,
+                    IpAddress = "19.87.6.100",
+                    Port = 9004,
+                    TriggerCommand = "LON"
+                });
             _cfg.Scanners = scanners;
         }
     }

@@ -539,9 +539,9 @@ namespace CommandCenter.Views
             // 悬停提示：按钮、标题、输入框都挂上，现场不用点开就知道每个控件干嘛的。
             //
             this.tip.SetToolTip(this.txtPlcIp,
-                "PLC 的 IP 地址（汇川，Modbus TCP 从站）。\r\n与上位机同一网段、能 ping 通；保存后即时生效（自动按新 IP 重连）。");
+                "上位机从站监听绑定 IP（V1.12.11 起 PLC 做主站、上位机做从站）。\r\n填 0.0.0.0 监听所有网卡，或填本机指定 IP（如 19.87.6.230）；\r\n保存后即时生效（自动重启从站监听）。");
             this.tip.SetToolTip(this.nudPlcPort,
-                "PLC 通讯端口，默认 502（Modbus TCP 标准端口）。\r\n保存后即时生效（自动重连）。");
+                "上位机从站监听端口（Modbus TCP 标准 502，需与汇川主站通讯指令里的端口一致）。\r\n保存后即时生效（自动重启从站监听）。");
             this.tip.SetToolTip(this.nudRows,
                 "主界面显示窗口的行数。窗口总数=行×列；保存后即时生效。\r\n新增窗口的存图点位默认=窗口编号，可在下方\"窗口/点位配置...\"里改。");
             this.tip.SetToolTip(this.nudCols,

@@ -93,9 +93,9 @@ namespace CommandCenter.Services
                 }
             }
 
-            // ===== PLC =====
-            // 已连接无须处理：Coordinator 每 200ms 轮询"到位信号"本身就是心跳；
-            // 未连接则按节流后台重连（即时连不上也会被 Coordinator 的轮询兜住，这里只是加速恢复）。
+            // ===== PLC（V1.12.11 起从站模式）=====
+            // 已就绪无须处理：Coordinator 每 200ms 轮询"到位信号"（读自己 DataStore）本身就是心跳；
+            // 从站监听未就绪则按节流后台重启监听（EnsureConnected 启动监听，端口占用/异常恢复后自动就绪）。
             if (!_plc.IsConnected &&
                 (DateTime.Now - _lastPlcAttempt).TotalMilliseconds >= ReconnectThrottleMs)
             {

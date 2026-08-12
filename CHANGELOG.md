@@ -1,5 +1,84 @@
 # 版本改动记录
 
+## V1.12.11（2026-08-12）PLC 通讯角色反转：上位机做 Modbus TCP 从站
+
+> 现场确认：汇川 PLC 做 Modbus TCP 主站，上位机做从站。原方案上位机做主站主动
+> ReadHoldingRegisters/WriteSingleRegister 读写 PLC 寄存器，现全部反转为上位机监听本机 502、
+> 等主站连入并读写上位机自己的 SlaveDataStore 寄存器区。因 PlcService 保留全部对外方法签名，
+> 调用方(Coordinator/MainForm/DevTestForm/ConnectionMonitor)代码零改动，仅语义从"连上 PLC"
+> 变为"从站监听已就绪"。配方下发因从站不能主动发消息，改为 D108 标志位握手中转
+> （上位机写自己区+PLC 轮询拉取+写 0 回执）。
+
+### 改动范围
+- **`Services/PlcService.cs`**（重写）：从 `TcpClient + CreateMaster` 改为 `ModbusTcpSlaveNetwork +
+  ModbusSlave + SlaveDataStore` 从站；监听在后台线程承载 `ListenAsync(CancellationToken)`，
+  停止靠 `Cancel + listener.Stop()`；DataStore 读写用 `HoldingRegisters.ReadPoints/WritePoints`
+  （0-based，与原 ReadHoldingRegisters 一致）。对外方法签名全部保留，底层改读写自己 DataStore。
+- **`Models/AppConfig.cs`**：`PlcConfig` IpAddress 语义改为"监听绑定 IP"（默认 0.0.0.0），新增
+  `RecipeFlagAddress`=D108 配方握手标志位，寄存器注释更新方向反转。
+- **`Services/ProductionCoordinator.cs`/`ConnectionMonitor.cs`**：仅注释更新（角色反转说明），代码零改动。
+- **`Views/SettingsForm.Designer.cs`**：PLC IP/端口 ToolTip 文案改为"从站监听绑定 IP/监听端口"。
+- **`Views/DevTestForm.cs`**：PLC 操作区注释更新（改为读写上位机自己 DataStore）。
+- **`docs/通讯接入.md`/`docs/现场设备IP清单.md`/`README.md`/`AGENTS.md`**：PLC 角色与寄存器约定同步。
+
+### 为什么这么改
+- 现场实际架构就是 PLC 主站/上位机从站，原代码按"上位机主站"实现与现场不符；
+- 保留对外签名零改动调用方，把架构反转的风险锁在 PlcService 内部，便于回归验证。
+
+### 待现场联调确认
+- NModbus DataStore 地址偏移（当前按 0-based 与原主站一致；若 PLC 侧偏移不同，统一在
+  `PlcService.ReadLocal/WriteLocal` 调整，业务层无感）。
+- 上位机监听 502 需 Windows 防火墙放行入站；若 502 被占用，改 `PlcConfig.Port`。
+- 配方"型号→配方号"映射待现场约定后填配置（当前预留占位）。
+
+## V1.12.10（2026-08-12）现场资料更正：汇川 PLC 为主站
+
+> 现场确认：汇川 PLC 在系统中是**主站**角色（此前文档/界面文案按"从站"描述有误）。
+> 本次把文档与设置界面提示文案中的 PLC 角色更正为"主站"，并新增 `docs/现场设备IP清单.md`
+> （整理现场设备 IP：上位机 19.87.6.230 / PLC 19.87.6.1 / 相机1 19.87.6.212 / 相机2 19.87.6.213 /
+> 扫码枪 19.87.6.100:9004 触发指令 LON）。
+
+### 改动范围
+- **`docs/现场设备IP清单.md`**（新增）：现场设备 IP 速查文档——网络拓扑图 + 设备清单 +
+  扫码枪触发指令细节（以代码为准：`LON\r\n`，十六进制 `4C 4F 4E 0D 0A`，现场验证 OK）+
+  appconfig.json 字段对应 + 核对注意事项。
+- **`docs/通讯接入.md`**：顶部总览表 PLC 描述"Modbus TCP（从站）"→"Modbus TCP（现场为主站）"。
+- **`Views/SettingsForm.Designer.cs`**：PLC IP 输入框悬停提示文案"汇川，Modbus TCP 从站"→"汇川，现场为主站"。
+
+### 为什么这么改
+- PLC 主站角色以现场确认为准，文档与界面文案保持一致，避免后续联调/核对时因"从站"表述产生误导。
+
+### 优化点
+- 现场设备 IP 信息集中成独立文档，后续核对/交接直接看 `docs/现场设备IP清单.md`。
+
+## V1.12.9（2026-08-12）设置窗体扫码枪默认启用，与代码默认接入的扫码枪一致
+
+> 现场反馈：系统设置页面的扫码枪列表默认模板行"启用"都是未勾选状态，而主程序代码默认实际
+> 接入的是现场实测的以太网无协议扫码枪（`19.87.6.100:9004`，触发指令 `LON`，`ScannerTcpService`），
+> 两者不一致——现场打开设置看到默认没勾启用，容易误以为要手动加枪/勾选才生效。本次把设置界面
+> 的默认行为对齐代码：**TCP 表模板行与"添加一台"默认勾选"启用"，串口表模板行保持不勾选**
+> （代码默认不用串口枪，要接入再勾），并在界面上直接体现出来。
+
+### 改动范围
+- **`Views/SettingsForm.cs`**：
+  - `LoadScannerRows()`：TCP 表默认模板行"启用"由 `false` 改 `true`（串口表保持 `false`），
+    并更新方法注释说明"默认启用 = 代码默认接入的那把以太网扫码枪"；
+  - `WireButtonEvents()`："添加一台（TCP 扫码枪）"追加的默认行同步改 `true`，新加的枪默认启用；
+  - `OnSave()`：两张表都删空时的兜底条目由 `new ScanConfig()`（Mode=Serial、未启用）改为
+    TCP 现场默认枪且 `Enabled=true`，与界面模板行展示一致，避免"删空保存再打开"出现界面与配置不符。
+- **`README.md`**：扫码枪可配置项说明补充"TCP 表默认行默认勾选启用"。
+
+### 为什么这么改
+- 设置界面是现场配枪的入口，默认展示应与程序实际默认行为一致，减少"明明默认就该用、
+  界面却没勾选"的认知偏差；
+- 只把 TCP（以太网）枪设为默认启用：代码/现场默认接入的就是这把枪（`MainForm.BuildScanner`
+  对 `Mode=Tcp` 建 `ScannerTcpService`，连上即发 `LON` 自动收码）；串口枪不是默认设备，不勾选，
+  需要时再手动勾。
+
+### 优化点
+- 新增 TCP 扫码枪时默认勾选启用，现场"加一把枪直接用"的路径更顺；
+- 删空兜底与界面模板对齐，任何路径下界面显示与保存落盘的配置都一致。
+
 ## V1.12.8（2026-08-12）设置窗体扫码枪列表拆表 + 默认值 + 滚动条
 
 > 现场反馈系统设置页面的扫码枪列表有 bug：同一张 DataGridView 里第一行选 TCP、第二行选 Serial
