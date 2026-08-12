@@ -9,7 +9,8 @@
 - .NET Framework 4.7.2 WinForms（C# 7.3）
 - NModbus 3.0.83 —— 汇川 PLC Modbus TCP 通讯（本地 `libs/` 引用，离线可编译）
 - Newtonsoft.Json —— 配置 / 配方序列化（本地 `libs/` 引用）
-- 相机：基恩士 IV4-500CA，TCP/IP 无协议通信触发拍摄 + FTP 推图
+- 相机：基恩士 IV4-500CA，TCP/IP 无协议通信触发拍摄（T1/T2/RT/BR）+ 取图双通道
+  （FTP 推图 / TCP-BR 直读取图，逐台相机可选，见 `CameraConfig.ImageSource`）
 
 ## 目录结构
 
@@ -21,8 +22,9 @@ CommandCenter/
 │                      在对应 .Designer.cs 里可视化维护；动态部分（相机灯、窗口矩阵内容）
 │                      在业务文件里运行时生成
 ├── Controls/        自绘/辅助控件（CameraDisplayControl / OkNgBadge）
-├── Services/        通讯与业务编排（PlcService / KeyenceIV4Camera / ImageStore /
-│                    ProductionCoordinator / RecipeManager / ScannerService）
+├── Services/        通讯与业务编排（PlcService / ConnectionMonitor / KeyenceIV4Camera /
+│                    ImageStore / ProductionCoordinator / RecipeManager /
+│                    ScannerService / ScannerTcpService）
 ├── Models/          配置模型（AppConfig / RecipeConfig / WindowData）
 ├── Utils/           ConfigStore（JSON 读写）/ LogHelper（按天日志）
 ├── libs/            本地引用的第三方 DLL（NModbus / Newtonsoft.Json）
@@ -41,14 +43,20 @@ CommandCenter/
 
 ## 通讯对接
 
-相机（TCP 触发 + FTP 推图）与 PLC（Modbus TCP 保持寄存器）的详细握手与寄存器表，见 **`docs/通讯接入.md`**。
+相机（TCP 触发 + 取图双通道：FTP 推图 / TCP-BR 直读）与 PLC（Modbus TCP 保持寄存器）的
+详细握手与寄存器表，见 **`docs/通讯接入.md`**。
 
 ## 可配置项
 
 所有参数集中在运行时生成的 `Config/appconfig.json`：
 
-- 相机：**多台相机列表**（每台：IP、触发端口、FTP上传目录、触发指令、超时），
-  一次"到位"对所有相机各触发一次拍照
+- 相机：**多台相机列表**（每台：IP、触发端口、FTP上传目录、触发指令、超时、取图方式），
+  一次"到位"对所有相机**并行触发**拍照（V1.8.3 起，总耗时 ≈ 最慢一台相机，节拍快不漏检）。
+  **取图来源双通道（V1.7.0）**，每台相机在 `ImageSource` 里独立二选一：
+  - `Ftp`（默认，成熟）：相机作 FTP 客户端推图到上位机目录，上位机 FileSystemWatcher 监听新图；
+  - `Tcp`：触发成功后同一连接紧接发 `BR,m`（指令/参数见 `ReadImageCommand`/`ReadImageMode`，
+    默认 `BR`/`1`）同步读回相机最新 24bit 位图，免 FTP 服务器落盘中转；
+    Tcp 模式该相机不注册 FTP 监听，避免历史文件被误当新图。
 - PLC：IP、端口、站号、到位/开始/完成/配方/计数寄存器 D 地址
 - 显示：窗口行数 × 列数、标题栏字段开关、OK/NG 颜色名、**窗口→存图点位映射**
   （默认点位=窗口编号，可在设置窗体"窗口/点位配置..."里可视化自定义/交换窗口位置），
@@ -56,7 +64,10 @@ CommandCenter/
   **标题栏"系统设置"按钮显隐开关**（`ShowSettingsButton`，默认 true；生产现场写 false
   可隐藏按钮防误操作，布局自动紧凑，改回只需改 json）
 - 图像：保存根目录、**存图目录结构**（可视化逐级配置，默认 年月日/SN号/OK|NG，点位号进文件名，
-  在设置窗体点"配置目录结构..."编辑）、FTP 监听
+  在设置窗体点"配置目录结构..."编辑）、FTP 监听目录。
+  ⚠️ **FTP 取图依赖上位机自行部署 FTP 服务器**：程序只监听目录、不自带 FTP 服务，
+  没装 FTP 服务器则 Ftp 模式的图永远不到（会等图超时记取像失败）；Tcp 取图模式无此依赖。
+  **存图重名防覆盖（V1.8.3）**：同 SN/判定目录里同点位二次拍照自动追加 `_2/_3…` 序号，不丢历史图。
 - 扫码枪：**多台扫码枪列表**（每台：启用开关、方式 串口/以太网无协议 Tcp、串口参数、
   IP/端口），设置窗体"扫码枪列表"表格可视化增删改；任何一台扫到的条码更新当前序列号
   （按项目约定：停止位存 "1"/"15"/"2"，校验位存标准枚举名）
