@@ -1,5 +1,75 @@
 # 版本改动记录
 
+## V1.12.13（2026-08-12）从站通讯逻辑审查修复：配方/通用读写状态如实化
+
+> 上一版修好"监听起不来"后，全面审查了 PLC 通讯逻辑（含并发安全、DataStore 容量、
+> 寄存器偏移）。确认核心无隐患（DataStore 默认覆盖 0~65535、业务 `_lock` + NModbus
+> `PointSource._syncRoot` 双层并发保护、配方先写号再置标志位无中间态），但发现三处
+> "界面/测试信息失真"问题并修复——从站模式写本地 DataStore 恒成功，导致旧的返回值
+> 语义（true=已下发给 PLC）失效，界面会误报成功。
+
+### 改动范围
+- **`Services/PlcService.cs`**：
+  - `WriteRecipe` 返回真实状态：DataStore 未就绪→false（真没写进去）；写入成功但
+    `HasMasterConnected=false`（主站未连入）→false，界面如实提示"已缓存待拉取"；
+  - `ReadRegister`/`WriteRegister`：DataStore 未就绪时返回 false（此前恒 true，功能测试
+    在从站没起来时也会误报"成功/读到 0"）；
+  - `WriteRecipe` 的 RecipeLen 按 1~20 截断（防异常配置分配超大数组+写越界被静默吞）。
+- **`Views/MainForm.cs`**：`SwitchRecipe` 失败分支改黄色提示"配方已缓存，PLC 主站未连入
+  （连入后自动拉取）"，不再误报红色"下发 PLC 失败"。
+- **`Views/DevTestForm.cs`**：配方下发日志文案同步区分"已写入且可拉取 / 已缓存待主站拉取"。
+
+### 为什么这么改
+- 从站模式下"写本地寄存器区"永远成功，旧 bool 返回值误导操作员（以为配方已切到 PLC）；
+  结合 `HasMasterConnected` 让状态与 PLC 三态灯语义一致（黄=等待主站）。
+
+### 审查确认无问题（不修）
+- DataStore 默认容量 0~65535，D100~D112 不会越界；
+- 业务 `_lock` 与 NModbus `PointSource._syncRoot` 双层锁：业务侧、PLC 网络线程并发读写安全；
+- 从站监听启动/重建/Dispose 清理链完整，有 `_disposed` + 限时抢锁兜底。
+
+### 待现场确认
+- **D 地址 ↔ 协议地址 0/1-based 偏移**：当前 `D100→start=100→协议 40101`；若汇川映射为
+  `D100→40100`（start=99）全表错位一位，联调首件事验证 D100 写读对齐。
+- 联调注意：DevTestForm 与主流程共享同一 PlcService 与同一握手寄存器区（D100~D112），
+  测试页操作握手区会与后台 Coordinator 轮询争抢（清 D100 可能吞真实到位信号），
+  业务流程运行时不要在测试页操作 D100~D112。
+
+## V1.12.12（2026-08-12）修复从站监听启动失败 + PLC 灯三态显示主站连入状态
+
+> 现场反馈：从站模式（V1.12.11）下界面一直获取不到 PLC 连接信息，PLC 灯恒红。
+> 排查定位两处同类 bug：`new ModbusSlave(unitId, dataStore, null)` 与
+> `new ModbusTcpSlaveNetwork(listener, factory, null)` 的 `handlers`/`logger` 参数
+> 在 NModbus 3.0.83 中要求非 null，传 null 抛 `ArgumentNullException`，导致**从站监听从未
+> 启动成功**（日志"PLC 从站监听启动失败 0.0.0.0:502，原因：值不能为 null。参数名: handlers"）。
+> 与网络无关（ping PLC 通只代表网络层通）；监听没起来，PLC 主站自然连不进来。
+>
+> 修复后顺手补齐从站模式的"主站连入"信息：从站不能主动连 PLC，`IsConnected` 只表示监听
+> 就绪，无法看出主站是否真的在通讯。利用 NModbus 从站网络的 `Masters`（已连入的 TCP 主站
+> 列表）做 1s 轮询，把 PLC 灯升级为三态，界面可直接看出"主站是否已连入"。
+
+### 改动范围
+- **`Services/PlcService.cs`**：
+  - 修复：`_slave`/`_network` 改用 `factory.CreateSlave(unitId, dataStore)` /
+    `factory.CreateSlaveNetwork(listener)` 创建——工厂内部自动挂载默认功能服务（03/06/10/15/16）
+    与非 null logger，不再手写 `new ...(…, null)`；
+  - 新增：`HasMasterConnected` 属性 + `MasterConnectionChanged` 事件，后台 1s 轮询
+    `_network.Masters.Count > 0` 做边沿检测（`MasterPollTick`），监听启动后启用、重建/Dispose 停止。
+- **`Views/MainForm.cs`**：PLC 灯改三态（红=监听失败 / 黄=监听就绪等待主站 / 绿=主站已连入），
+  悬停 ToolTip 说明当前状态含义与排查方向（端口占用/防火墙/PLC 主站程序与指向）；
+  `UpdatePlcStatus` 统一刷新（订阅 ConnectionChanged + MasterConnectionChanged）。
+- **`Views/DevTestForm.cs`**：PLC 状态区同步三态文案（主站已连入 / 监听就绪等待主站 / 监听失败），
+  订阅 MasterConnectionChanged 实时刷新。
+
+### 为什么这么改
+- 直接 new NModbus 从站对象时对"不可空参数传 null"是本库常见坑，改用工厂方法是最简正确姿势；
+- 从站模式下"监听就绪"与"主站连入"是两回事，三态灯把两者分开，联调时能一眼定位问题在
+  上位机侧（红/黄）还是 PLC 侧（黄且 PLC 不连）。
+
+### 待现场联调确认
+- 监听 502 需 Windows 防火墙放行入站；若 PLC 主站连入后灯仍黄，检查 PLC 主站程序与指向
+  （应指向本机 IP:502、UnitId=1）。
+
 ## V1.12.11（2026-08-12）PLC 通讯角色反转：上位机做 Modbus TCP 从站
 
 > 现场确认：汇川 PLC 做 Modbus TCP 主站，上位机做从站。原方案上位机做主站主动

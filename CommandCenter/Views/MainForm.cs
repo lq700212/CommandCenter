@@ -30,6 +30,8 @@ namespace CommandCenter.Views
     /// 标题栏：左起信息字段（按配置开关）→ 配方下拉框（显示+切换合一）→ 系统设置按钮 → 连接指示灯；
     ///   - 连接指示灯从右到左：●相机N..●相机1 → ●扫码枪 → ●PLC（Dock.Right 先 Add 靠左）。
     ///     扫码枪灯显示"扫码枪：已连接/未连接"，绿=已连接、红=未连接（V1.12.6，聚合刷新）；
+    ///     PLC 灯三态（V1.12.11 从站模式）：绿=主站已连入 / 黄=监听就绪等待主站 / 红=监听失败
+    ///     （悬停 ToolTip 给出状态含义与排查方向，见 UpdatePlcStatus）。
     ///   - OK/NG 计数默认"实心彩色色块 + 白字"高亮（绿底=OK、红底=NG），关闭
     ///     DisplayConfig.TitleOkNgHighlight 则回退普通彩色文字；
     /// 底部栏：仅状态文本，固定在左下角。
@@ -54,6 +56,7 @@ namespace CommandCenter.Views
         private Label _lblCamAggregate;             // 相机总连接状态标签（≥3台模式）：全部连接才绿色，否则红色
         private Panel _pnlCamOverview;              // ≥3台模式的容器：把总标签+下拉框装一起，统一垂直居中
         private ToolTip _camTip;                    // 总状态标签的悬停明细提示（列出每台相机连/断）
+        private ToolTip _plcTip;                    // PLC 灯悬停提示（说明三态灯当前含义，V1.12.11）
         private bool _recipeComboInit;    // 组合框程序内初始化/刷新时防误触 SelectedIndexChanged
         private int _recipeSwitchVer;     // 配方下发任务的版本号：只让"最新一次切换"的结果更新状态条（丢弃过期提示）
         private CameraDisplayControl[] _windows;
@@ -574,13 +577,16 @@ namespace CommandCenter.Views
                     {
                         lblStatus.ForeColor = Color.FromArgb(46, 158, 107); // 成功 → 绿
                         lblStatus.Text = $"配方切换完成: {recipe.Name}";
-                        LogHelper.Info($"配方切换完成并已成功下发 PLC：[{recipe.Id}] {recipe.Name}");
+                        LogHelper.Info($"配方切换完成并已下发 PLC：[{recipe.Id}] {recipe.Name}");
                     }
                     else
                     {
-                        lblStatus.ForeColor = Color.FromArgb(229, 72, 77);  // 失败 → 红
-                        lblStatus.Text = $"配方下发 PLC 失败: {recipe.Name}（请检查 PLC 通讯）";
-                        LogHelper.Warn($"配方切换但 PLC 下发失败：[{recipe.Id}] {recipe.Name}");
+                        // 从站模式（V1.12.13）：WriteRecipe 返回 false = PLC 主站未连入，
+                        // 配方已写入本地寄存器区、等主站连入后轮询拉取（也可能从站监听未就绪）。
+                        // 黄色=中间态（同 PLC 三态灯的"等待主站"语义），不再误报"下发 PLC 失败"。
+                        lblStatus.ForeColor = Color.FromArgb(240, 173, 78);  // 黄：配方已缓存待拉取
+                        lblStatus.Text = $"配方已缓存，PLC 主站未连入: {recipe.Name}（连入后自动拉取）";
+                        LogHelper.Warn($"配方切换但 PLC 主站未连入（已缓存待拉取）：[{recipe.Id}] {recipe.Name}");
                     }
                 }));
             });
@@ -712,7 +718,10 @@ namespace CommandCenter.Views
             // 连接状态指示灯（V1.10.0 双模式）：
             //   ≤2台：每台一个灯，断连变红、重连回绿（UpdateDeviceStatus）；
             //   ≥3台：每台灯不存在（_lblCamStatuses 为 null），改为刷新"总状态标签+下拉圆点"。
-            _plc.ConnectionChanged += (s, c) => UpdateDeviceStatus(lblPlcStatus, c);
+            // PLC 灯（V1.12.11 起三态，见 UpdatePlcStatus）：监听就绪 + 主站连入 + 监听失败 三态区分。
+            _plc.ConnectionChanged += (s, c) => UpdatePlcStatus();
+            _plc.MasterConnectionChanged += (s, c) => UpdatePlcStatus();
+            UpdatePlcStatus(); // 初始按当前状态上色（构造/热更后立即反映真实三态）
             for (int i = 0; i < _cameras.Count; i++)
             {
                 int idx = i; // 闭包锁定下标，避免循环变量被所有事件共享
@@ -758,6 +767,48 @@ namespace CommandCenter.Views
             }
             lbl.ForeColor = connected ? Color.FromArgb(46, 158, 107) // 绿
                                       : Color.FromArgb(229, 72, 77);  // 红
+        }
+
+        /// <summary>
+        /// 刷新标题栏"● PLC"连接灯（V1.12.11 起三态，对应从站模式的三种真实状态）：
+        ///   红 = 监听失败/未启动（IsConnected=false）：上位机从站 502 都没起来，
+        ///        检查端口是否被占用、是否绑定错误、Windows 防火墙是否放行入站；
+        ///   黄 = 监听就绪但主站未连入（IsConnected && !HasMasterConnected）：等在等汇川主站来连，
+        ///        说明 PLC 侧还没建立 TCP 会话——检查 PLC 主站程序是否运行、连的 IP/端口是否为本机 502；
+        ///   绿 = 主站已连入（IsConnected && HasMasterConnected）：PLC 主站已 TCP 连上本机 502，通讯建立。
+        /// 颜色与现场 OK/NG 习惯一致：绿=正常、红=故障，新增黄色=中间态（等待主站）。
+        /// 同时把状态含义挂到悬停气泡上，现场鼠标放上去即可看到原因与排查方向。
+        /// </summary>
+        private void UpdatePlcStatus()
+        {
+            if (IsDisposed || lblPlcStatus == null) return;
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(UpdatePlcStatus));
+                return;
+            }
+
+            string tipText;
+            if (_plc.IsConnected)
+            {
+                if (_plc.HasMasterConnected)
+                {
+                    lblPlcStatus.ForeColor = Color.FromArgb(46, 158, 107);   // 绿：主站已连入
+                    tipText = $"PLC 主站已连入（{_plc.IpLabel}），通讯正常";
+                }
+                else
+                {
+                    lblPlcStatus.ForeColor = Color.FromArgb(240, 173, 78);   // 黄：监听就绪、等待主站
+                    tipText = $"从站监听就绪，等待 PLC 主站连入 {_plc.IpLabel}\n检查：PLC 主站程序是否运行、是否指向本机 502 端口";
+                }
+            }
+            else
+            {
+                lblPlcStatus.ForeColor = Color.FromArgb(229, 72, 77);        // 红：监听失败
+                tipText = $"PLC 从站监听未就绪（{_plc.IpLabel}）\n检查：端口占用 / 绑定 IP / 防火墙放行 502";
+            }
+            _plcTip = _plcTip ?? new ToolTip();
+            _plcTip.SetToolTip(lblPlcStatus, tipText);
         }
 
         /// <summary>

@@ -7,7 +7,6 @@ using CommandCenter.Models;
 using CommandCenter.Utils;
 using NModbus;
 using NModbus.Data;
-using NModbus.Device;
 
 namespace CommandCenter.Services
 {
@@ -57,8 +56,8 @@ namespace CommandCenter.Services
 
         // ──────────────── Modbus TCP 从站资源（NModbus 3.0.83 API）────────────────
         private TcpListener _listener;
-        private ModbusTcpSlaveNetwork _network;
-        private ModbusSlave _slave;
+        private IModbusTcpSlaveNetwork _network; // 由 factory.CreateSlaveNetwork 创建（自带非 null logger）
+        private IModbusSlave _slave;   // 由 factory.CreateSlave 创建（自带默认功能服务），不直接 new（见 EnsureConnected）
         private SlaveDataStore _dataStore;        // 直接持有 DataStore，便于业务层读写
         private CancellationTokenSource _cts;
         private Thread _listenThread;
@@ -66,6 +65,15 @@ namespace CommandCenter.Services
 
         /// <summary>连接状态变化事件（UI 订阅刷新指示灯；语义=从站监听是否就绪）</summary>
         public event EventHandler<bool> ConnectionChanged;
+
+        /// <summary>主站连入状态变化事件（V1.12.11 三态灯数据源；语义=汇川主站是否已 TCP 连入本机 502）</summary>
+        public event EventHandler<bool> MasterConnectionChanged;
+
+        /// <summary>当前是否已有 PLC 主站 TCP 会话连入（由后台轮询 Masters 维护，见 MasterPollTick）</summary>
+        public bool HasMasterConnected { get; private set; }
+
+        /// <summary>轮询"主站是否连入"的后台定时器（1s；从站网络 Masters 列表随主站连接/断开变化）</summary>
+        private System.Threading.Timer _masterPollTimer;
 
         /// <summary>当前是否已就绪（从站监听已启动）。语义等价于原来的"已连上 PLC"。</summary>
         public bool IsConnected { get; private set; }
@@ -92,6 +100,7 @@ namespace CommandCenter.Services
                 // 先清旧资源
                 try { _cts?.Cancel(); } catch { }
                 try { _listener?.Stop(); } catch { }
+                StopMasterPoll();   // 停旧轮询，重建成功后重新启动（防旧 Timer 读半新 _network）
                 _cts = null; _listener = null; _network = null; _slave = null; _dataStore = null;
 
                 try
@@ -102,13 +111,23 @@ namespace CommandCenter.Services
                         : IPAddress.Parse(_cfg.IpAddress);
                     _listener = new TcpListener(ip, _cfg.Port);
 
-                    // 建从站数据区 + 从站实例（handlers 传 null：用 NModbus 默认功能码处理）
+                    // 建从站数据区 + 从站实例
                     _dataStore = new SlaveDataStore();
-                    _slave = new ModbusSlave(_cfg.UnitId, _dataStore, null);
-
-                    // 建从站网络（一个监听端口可挂多个 UnitId 从站，本现场单从站够用）
+                    // ★ 不能 new ModbusSlave(unitId, dataStore, null) 直接 new：
+                    //   NModbus 3.0.83 构造函数第三参 handlers(IEnumerable<IModbusFunctionService>)
+                    //   要求非 null，传 null 会抛 ArgumentNullException → 从站监听启动失败、
+                    //   界面永远没有 PLC 连接信息（日志表现"值不能为 null。参数名: handlers"）。
+                    //   改用 factory.CreateSlave(unitId, dataStore)：工厂内部自动挂载全部默认
+                    //   功能服务（03 读保持寄存器/06 写单个/10 写多个/15/16 等），
+                    //   等价于旧注释"handlers 传 null 用默认功能码"的本意。
                     var factory = new ModbusFactory();
-                    _network = new ModbusTcpSlaveNetwork(_listener, factory, null);
+                    _slave = factory.CreateSlave(_cfg.UnitId, _dataStore);
+
+                    // 建从站网络（一个监听端口可挂多个 UnitId 从站，本现场单从站够用）。
+                    // ★ 用 factory.CreateSlaveNetwork(listener) 创建：工厂内部自动带上非 null 的
+                    //   IModbusLogger，避免直接 new ModbusTcpSlaveNetwork(listener, factory, null)
+                    //   因 logger 为 null 抛 ArgumentNullException（与上方 handlers 同类的坑）。
+                    _network = factory.CreateSlaveNetwork(_listener);
                     _network.AddSlave(_slave);
 
                     // 启动监听（后台线程承载 ListenAsync，Cancel 控制停止）
@@ -123,12 +142,14 @@ namespace CommandCenter.Services
 
                     _lastFailed = false;
                     SetConnected(true);
+                    StartMasterPoll();   // 启动"主站连入"轮询（界面三态灯的数据源）
                     LogHelper.Info($"PLC 从站监听已启动 {ip}:{_cfg.Port}（UnitId={_cfg.UnitId}），等待汇川主站连入");
                     return true;
                 }
                 catch (Exception ex)
                 {
                     SetConnected(false);
+                    StopMasterPoll();
                     try { _cts?.Cancel(); } catch { }
                     try { _listener?.Stop(); } catch { }
                     _cts = null; _listener = null; _network = null; _slave = null; _dataStore = null;
@@ -175,6 +196,50 @@ namespace CommandCenter.Services
             }
         }
 
+        // ════════════════ 主站连入检测（V1.12.11，三态灯数据源）════════════════
+
+        /// <summary>
+        /// 轮询"PLC 主站是否已连入"（后台 1s）：从站网络内部维护已连入的 TCP 主站列表（Masters），
+        /// 边沿变化时触发 MasterConnectionChanged 事件并记日志，UI 据此点亮三态灯。
+        /// 【为什么需要它】从站模式下 IsConnected 只表示"监听已就绪"，主站连没连进来是另一回事；
+        ///   没有这个检测，界面永远无法知道"PLC 主站是否真的在通讯"（无法主动 ping/连 PLC）。
+        /// </summary>
+        private void MasterPollTick(object state)
+        {
+            if (_disposed) return;
+            bool has = false;
+            try
+            {
+                var nw = _network;
+                if (nw != null && nw.Masters != null && nw.Masters.Count > 0) has = true;
+            }
+            catch { /* 网络对象可能正被重建，下个周期再读 */ }
+
+            if (has != HasMasterConnected)
+            {
+                HasMasterConnected = has;
+                MasterConnectionChanged?.Invoke(this, has);
+                LogHelper.Info(has
+                    ? $"PLC 主站已连入从站（{IpLabel}），通讯建立"
+                    : $"PLC 主站连接已断开（{IpLabel}），等待主站重新连入");
+            }
+        }
+
+        /// <summary>启动"主站连入"轮询（监听启动成功后调用；1s 周期）。</summary>
+        private void StartMasterPoll()
+        {
+            if (_masterPollTimer == null)
+                _masterPollTimer = new System.Threading.Timer(MasterPollTick, null, 0, 1000);
+            else
+                _masterPollTimer.Change(0, 1000);
+        }
+
+        /// <summary>停止"主站连入"轮询（资源重建/Dispose 时调用，防残留后台轮询读已释放对象）。</summary>
+        private void StopMasterPoll()
+        {
+            try { _masterPollTimer?.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite); } catch { }
+        }
+
         // ════════════════ 业务握手方法（签名不变，底层改读写自己 DataStore）════════════════
 
         /// <summary>
@@ -208,7 +273,9 @@ namespace CommandCenter.Services
         public bool WriteRecipe(int recipeId)
         {
             string text = recipeId.ToString();
-            int len = Math.Max(1, (int)_cfg.RecipeLen);
+            // RecipeLen 配置支持 1~20（AppConfig 注释约定）；超界按 20 截断，
+            // 防异常配置（如手改成 65535）分配超大数组 + 写入越界被静默吞掉（V1.12.13）。
+            int len = Math.Max(1, Math.Min(20, (int)_cfg.RecipeLen));
             ushort[] regs = new ushort[len]; // 先填空格，再写 ASCII
             for (int i = 0; i < len; i++)
             {
@@ -220,11 +287,16 @@ namespace CommandCenter.Services
             }
             lock (_lock)
             {
+                // 从站未就绪（监听没起来/DataStore 为 null）：配方根本没写进去，返回 false
+                if (_dataStore?.HoldingRegisters == null) return false;
                 // 先写配方号，再置标志位（顺序重要：避免 PLC 读到标志位=1 时配方号还没写完）
                 WriteLocalMulti(_cfg.RecipeAddress, regs);
                 WriteLocal(_cfg.RecipeFlagAddress, 1);
             }
-            return true;
+            // 从站模式：写入本地 DataStore 一定成功，但"PLC 能否立即拉取"取决于主站是否已连入。
+            // 主站未连入时返回 false，让界面如实提示"已缓存待拉取"（而非误报"已下发 PLC"），
+            // 否则操作员会误以为配方已切到 PLC 而实际主站断着（V1.12.13）。
+            return HasMasterConnected;
         }
 
         /// <summary>
@@ -245,22 +317,28 @@ namespace CommandCenter.Services
         // 从站模式下"读/写 PLC 任意寄存器"改为读写上位机自己 DataStore 寄存器区，
         // 验证从站数据存储读写正常（PLC 主站随后会读到这些值）。
 
-        /// <summary>通用读：读取指定 D 地址的单个保持寄存器（自己 DataStore）。返回 true 表示成功。</summary>
+        /// <summary>通用读：读取指定 D 地址的单个保持寄存器（自己 DataStore）。
+        /// 从站未就绪（DataStore 为 null）返回 false，避免功能测试误报"读到 0"为成功（V1.12.13）。</summary>
         public bool ReadRegister(ushort dAddress, out ushort value)
         {
             lock (_lock)
             {
+                if (_dataStore?.HoldingRegisters == null) { value = 0; return false; }
                 value = ReadLocal(dAddress);
                 return true;
             }
         }
 
-        /// <summary>通用写：写入指定 D 地址的单个保持寄存器（自己 DataStore）。</summary>
+        /// <summary>通用写：写入指定 D 地址的单个保持寄存器（自己 DataStore）。
+        /// 从站未就绪（DataStore 为 null）返回 false，避免功能测试误报写入成功（V1.12.13）。</summary>
         public bool WriteRegister(ushort dAddress, ushort value)
         {
             lock (_lock)
+            {
+                if (_dataStore?.HoldingRegisters == null) return false;
                 WriteLocal(dAddress, value);
-            return true;
+                return true;
+            }
         }
 
         // ════════════════ 本地 DataStore 读写（核心：不发起 Modbus 请求）════════════════
@@ -338,6 +416,7 @@ namespace CommandCenter.Services
             _listening = false;
             try { _cts?.Cancel(); } catch { }
             try { _listener?.Stop(); } catch { }
+            StopMasterPoll();
             _cts = null; _listener = null; _network = null; _slave = null; _dataStore = null;
         }
 
@@ -361,7 +440,9 @@ namespace CommandCenter.Services
                 LogHelper.Warn("PLC Dispose 未能拿到锁（后台监听繁忙），改走锁外强停");
                 try { _cts?.Cancel(); } catch { }
                 try { _listener?.Stop(); } catch { }
+                StopMasterPoll();
             }
+            try { _masterPollTimer?.Dispose(); } catch { }
         }
     }
 }

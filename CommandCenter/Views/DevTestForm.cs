@@ -112,7 +112,12 @@ namespace CommandCenter.Views
         /// </summary>
         private void WireEvents()
         {
-            if (_plc != null) _plc.ConnectionChanged += (s, v) => SafeInvoke(() => RefreshStates());
+            if (_plc != null)
+            {
+                _plc.ConnectionChanged += (s, v) => SafeInvoke(() => RefreshStates());
+                // V1.12.11：从站模式下还要看"主站是否真的连入"，订阅主站连入事件实时刷新状态
+                _plc.MasterConnectionChanged += (s, v) => SafeInvoke(() => RefreshStates());
+            }
             foreach (var cam in _cameras)
                 cam.ConnectionChanged += (s, v) => SafeInvoke(() => RefreshStates());
 
@@ -220,13 +225,24 @@ namespace CommandCenter.Views
             btnScannerTrigger.Enabled = !busy;
         }
 
-        /// <summary>刷新 PLC/相机/扫码枪连接状态标签（绿=已连接/已打开，红=断连）。</summary>
+        /// <summary>刷新 PLC/相机/扫码枪连接状态标签（绿=已连接/已打开，红=断连）。
+        /// PLC 为从站模式（V1.12.11），显示三态：主站已连入(绿) / 监听就绪等待主站(橙) / 监听失败(红)。</summary>
         private void RefreshStates()
         {
-            lblPlcState.Text = _plc != null
-                ? (_plc.IsConnected ? "● 已连接" : "○ 断连")
-                : "无 PLC 服务";
-            lblPlcState.ForeColor = _plc != null && _plc.IsConnected ? Color.Green : Color.Red;
+            if (_plc != null)
+            {
+                lblPlcState.Text = _plc.HasMasterConnected ? "● 主站已连入"
+                    : _plc.IsConnected ? "● 监听就绪（等待主站）"
+                    : "○ 监听失败";
+                lblPlcState.ForeColor = _plc.HasMasterConnected ? Color.Green
+                    : _plc.IsConnected ? Color.Orange
+                    : Color.Red;
+            }
+            else
+            {
+                lblPlcState.Text = "无 PLC 服务";
+                lblPlcState.ForeColor = Color.Gray;
+            }
 
             var cam = SelectedCamera();
             lblCamState.Text = cam != null
@@ -423,7 +439,11 @@ namespace CommandCenter.Views
                 bool ok = _plc.WriteRecipe(recipeId);
                 SafeInvoke(() =>
                 {
-                    AppendLog(ok ? "← 配方下发成功" : "← 配方下发失败（PLC 通讯异常）");
+                    // 从站模式（V1.12.13）：WriteRecipe 返回 false = PLC 主站未连入（配方已缓存待拉取）
+                    // 或从站监听未就绪。文案如实区分，不再一律报"下发成功"。
+                    AppendLog(ok
+                        ? "← 配方已写入且 PLC 主站可拉取"
+                        : "← 配方已缓存，PLC 主站未连入（连入后由主站轮询拉取）");
                     FinishOp();
                 });
             });
