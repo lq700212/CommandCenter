@@ -34,7 +34,7 @@
 - **扫码枪触发指令（V1.12.1，基恩士 SR 无协议）**：Tcp 模式下扫码枪**不是连上就回数据**，上位机须先发一条打开激光/开始读取的指令（`ScanConfig.TriggerCommand`，默认 `LON`）才读码。`ScannerTcpService.TryConnect` 每次连接/重连成功后**自动发送一次**（发送时自动补 `\r\n` 帧结束符），配置留空则不发送。`IScanner.SendTrigger()` 供界面手动重发。串口扫码枪上电即读码、无需触发（串口实现 SendTrigger 为空操作）。改动扫码枪通讯必须同步 `docs/通讯接入.md` 的"扫码枪"章节与默认配置。
 - **UI 线程禁做网络 IO（V1.0.1 血泪）**：轮询/连接/读写 PLC 与相机一律放后台线程（`System.Threading.Timer`），TCP 连接必须 `BeginConnect + WaitOne` 强制超时。禁止在 UI 线程同步 `TcpClient.Connect` 或 `ReadHoldingRegisters`——对不可达 IP 会冻结整个界面（表现为"点按钮半天才响应"）。
 - **显示窗口矩阵用 TableLayoutPanel 百分比等分**：窗口数量由 `display.rows/columns` 配置，所有窗口尺寸由容器等分自动保持一致，禁止写死像素布局。
-- **PLC 寄存器约定（V1.12.11 起从站模式）**：现场 PLC(汇川)做 Modbus 主站、上位机做从站监听本机 502；配置里一律存 **D 地址**（NModbus 从站 `SlaveDataStore.HoldingRegisters.ReadPoints/WritePoints(start,…)` 的 start 即 D 地址，0-based，与原主站 `ReadHoldingRegisters` 一致，无需 +40001）。握手寄存器沿用 D100~D112、读写方向反转（PLC 写到位进来，上位机写完成/计数/配方出去给 PLC 读），配方下发用 D108 标志位握手（上位机写自己区+PLC 轮询拉取+写 0 回执）。改动 PLC 或相机通讯必须同步 `docs/通讯接入.md`。
+- **PLC 寄存器约定（V1.12.11 起从站模式）**：现场 PLC(汇川)做 Modbus 主站、上位机做从站监听本机 502；配置里一律存 **D 地址**（NModbus 从站 `SlaveDataStore.HoldingRegisters.ReadPoints/WritePoints(start,…)` 的 start 即 D 地址，0-based，与原主站 `ReadHoldingRegisters` 一致，无需 +40001）。握手寄存器沿用 D100~D112、读写方向反转（PLC 写到位进来，上位机写完成/计数/配方出去给 PLC 读），配方下发用 D108 标志位握手（上位机写自己区+PLC 轮询拉取+写 0 回执）。**两阶段流程（V1.12.16）**：产线是"先扫码、后拍照"——`ProductionCoordinator` 是状态机（等"扫码到位"→触发扫码等 SN →等"相机到位"→拍图→上报→回扫码阶段）；"扫码枪到位信号"寄存器字段 `PlcConfig.ScanMoveDoneAddress`（占位 D99，**地址待现场定稿，现场只需改 json 数值**）由 `PlcService.ReadScanMoveDone/ClearScanMoveDone` 读写；扫码枪列表经 `_coordinator.AttachScanners()` 注入（协调器比扫码枪先创建，用方法注入不用构造）。改动 PLC 或相机通讯或两阶段流程必须同步 `docs/通讯接入.md`。
 - **删除/清理旧代码的自检纪律（必须遵守，2026-08 血泪总结）**：删除"旧配置兼容/冗余判断"这类代码时，先分清两类再动手：
   - **真·旧配置兼容**（可删）：为"旧版本缺字段/旧格式"写的兜底，项目未上线时是死代码；
   - **防 NRE 的空安全**（不可删，否则留坑）：`obj.Prop.Trim()`、`obj.Method()` 这类链式调用，删掉外层判空后，配置被手改成 null/空值时直接崩溃。
@@ -53,7 +53,7 @@
 | 文件 | 作用 |
 | --- | --- |
 | `CommandCenter/Views/MainForm.cs` | 主窗体：标题栏 + 窗口矩阵 + 事件接线 |
-| `CommandCenter/Services/ProductionCoordinator.cs` | 生产流程编排（到位→触发→等图→上报循环），业务核心 |
+| `CommandCenter/Services/ProductionCoordinator.cs` | 生产流程编排（两阶段状态机：扫码到位→扫SN→相机到位→拍到图→上报→循环），业务核心 |
 | `CommandCenter/Services/ConnectionMonitor.cs` | 连接健康监控：后台心跳 + 断连自动重连 + 边沿日志（对齐 AgingTestSystem） |
 | `CommandCenter/Services/PlcService.cs` | 汇川 PLC Modbus TCP 读写（NModbus 3.0.83） |
 | `CommandCenter/Services/KeyenceIV4Camera.cs` | 基恩士 IV4 TCP 无协议触发 + 读取判定（T1/T2/RT指令） |

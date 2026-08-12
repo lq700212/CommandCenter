@@ -243,7 +243,7 @@ namespace CommandCenter.Services
         // ════════════════ 业务握手方法（签名不变，底层改读写自己 DataStore）════════════════
 
         /// <summary>
-        /// 读取到位信号寄存器（D 地址，现读自己 DataStore）。
+        /// 读取相机到位信号寄存器（D 地址，现读自己 DataStore）。
         /// 返回 true 表示 PLC 主站已写 1 告知"相机运动到位"。读到后应尽快 ClearMoveDone() 复位。
         /// </summary>
         public bool ReadMoveDone()
@@ -257,6 +257,24 @@ namespace CommandCenter.Services
         {
             lock (_lock)
                 WriteLocal(_cfg.MoveDoneAddress, 0);
+        }
+
+        /// <summary>
+        /// 读取"扫码枪运动到位"信号（V1.12.16 两阶段流程新增，D 地址，读自己 DataStore）。
+        /// 返回 true 表示 PLC 主站已写 1 告知"机器人带扫码枪到位、可以扫码"。
+        /// 读到并扫完 SN 后应尽快 ClearScanMoveDone() 复位，流程才进入"等相机到位"阶段。
+        /// </summary>
+        public bool ReadScanMoveDone()
+        {
+            lock (_lock)
+                return ReadLocal(_cfg.ScanMoveDoneAddress) != 0;
+        }
+
+        /// <summary>把"扫码枪到位"信号写 0 复位（自己 DataStore），防止同一信号被重复处理。</summary>
+        public void ClearScanMoveDone()
+        {
+            lock (_lock)
+                WriteLocal(_cfg.ScanMoveDoneAddress, 0);
         }
 
         /// <summary>通知 PLC 开始工作（开始信号置 1，写自己 DataStore，PLC 来读）。</summary>

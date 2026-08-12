@@ -10,31 +10,33 @@ using CommandCenter.Utils;
 namespace CommandCenter.Services
 {
     /// <summary>
-    /// 生产流程协调器：把 PLC 到位信号、多台相机触发、图像监听、结果上报串成一个循环。
+    /// 生产流程协调器：把 PLC 到位信号、扫码得 SN、多台相机触发、图像监听、结果上报串成循环。
     ///
-    /// 【V1.12.11 角色反转】现场 PLC(汇川)做 Modbus 主站、上位机做从站。本类的 _plc 调用
-    ///   全部保留原签名，底层已改为读写上位机自己 DataStore 寄存器区（不发起 Modbus 请求）：
-    ///   "到位信号"由 PLC 主站写入上位机 D100，本类轮询读自己 DataStore；完成/计数/配方
-    ///   由本类写自己 DataStore，PLC 主站轮询来读。业务流程不变，只是数据来源/去向从远端
-    ///   PLC 寄存器变成本地 DataStore。
-    ///
-    /// 【主流程(与现场要求一致)】
-    ///   ① 空闲期后台轮询到位寄存器（自己 DataStore 的 D100，PLC 主站写入 1 表示到位）；
-    ///   ② 读到"到位"→ 立即清复位 → 【对所有已配置相机并行触发（V1.8.3 起）】；
-    ///   ③ 每台相机独立：IV4 指令 T2 直接回 OK/NG（未开启时退化为"图到即 OK"），记各自判定；
-    ///   ④ 取图（V1.7.0 每台相机按 ImageSource 二选一）：
+    /// 【V1.12.16 两阶段流程（与现场需求一致）】完整产线节奏是"先扫码、后拍照"：
+    ///   ① 空闲期后台轮询"扫码枪到位"(D99，PLC 主站写 1)；
+    ///   ② 读到扫码到位→清复位→触发扫码枪读码（有扫码枪时 SendTrigger + 等 SerialNumberScanned
+    ///      事件到位；无扫码枪时 SN 走手动输入，扫码到位即通过）→ 进入等相机阶段；
+    ///   ③ 空闲期后台轮询"相机到位"(D100)；
+    ///   ④ 读到相机到位→清复位→【对所有已配置相机并行触发（V1.8.3 起）】；
+    ///   ⑤ 每台相机独立：IV4 指令 T2 直接回 OK/NG（未开启时退化为"图到即 OK"），记各自判定；
+    ///   ⑥ 取图（V1.7.0 每台相机按 ImageSource 二选一）：
     ///      - Ftp（默认）：等相机 FTP 新图上传（共用总超时 = 各相机 ImageWaitMs 的最大值）；
     ///      - Tcp：触发后立即发 BR 指令在同一连接上同步读回最新图像（免 FTP 落盘中转）；
     ///      每个点位各存各的图（目录按模板：年/月/日/SN/OK|NG，文件名按点位号）→ Done=1(完成)；
     ///      某相机图超时/触发或取图失败→该点位标失败，全部失败才 Done=2(取像异常)；
-    ///   ⑤ 回到①循环。
+    ///   ⑦ 回到①（扫码阶段）循环。
+    ///
+    /// 【V1.12.11 角色反转】现场 PLC(汇川)做 Modbus 主站、上位机做从站。本类的 _plc 调用
+    ///   全部保留原签名，底层已改为读写上位机自己 DataStore 寄存器区（不发起 Modbus 请求）：
+    ///   "到位信号"由 PLC 主站写入上位机 D100/D99，本类轮询读自己 DataStore；完成/计数/配方
+    ///   由本类写自己 DataStore，PLC 主站轮询来读。业务流程不变，只是数据来源/去向从远端
+    ///   PLC 寄存器变成本地 DataStore。
     ///
     /// 【多相机】CameraConfig 配几台就触几台。一台"到位"= 一排点位一次检测，
     ///   每台相机的新图（各自 FTP 目录）到齐后才整体收尾；图以独立 WindowData 逐个抛给 UI
     ///   （每个点位一个 WindowData，刷新一个显示窗口）。
     ///
-    /// 【线程】
-    ///   轮询、等待均在后台线程执行，通过事件把结果抛给 UI（由订阅方 Invoke 到界面线程）。
+    /// 【线程】轮询、等待均在后台线程执行，通过事件把结果抛给 UI（由订阅方 Invoke 到界面线程）。
     ///   本类不接触任何控件，纯业务编排，便于换界面复用。
     /// </summary>
     public class ProductionCoordinator : IDisposable
@@ -51,6 +53,23 @@ namespace CommandCenter.Services
         private volatile int _busy;      // 忙碌标志：0=空闲，1=处理中（Interlocked 原子，跨线程安全）
         private volatile bool _running;  // 总开关
         private int _seqNo;              // 全局检测序号
+
+        // ── V1.12.16 两阶段流程状态（先扫码得 SN，再拍照）──
+        // _phase 只在 PositionTimer 后台线程读写，但相机拍照收尾（FinishAll）在 FTP/超时线程
+        // 会把它重置回"等扫码"阶段，因此声明为 volatile 保证跨线程可见、不读旧缓存值。
+        private const int PhaseScanWait = 0;    // 空闲：等"扫码枪到位"信号（D99）
+        private const int PhaseScanPending = 1; // 已扫到位、正在等 SN（SerialNumberScanned 事件）
+        private const int PhaseCameraWait = 2;  // 空闲：等"相机到位"信号（D100）
+        private volatile int _phase = PhaseScanWait;
+
+        /// <summary>扫码等待 SN 的超时（毫秒）：扫码到位后产品迟迟没被扫到（没贴码/扫码枪没读到），
+        /// 超时仍进入拍照阶段（SN 沿用当前 LatestSerialNumber），避免流程被卡死。</summary>
+        private const int ScanWaitMs = 30000;
+
+        private readonly List<IScanner> _scanners = new List<IScanner>(); // 扫码枪列表（由 MainForm.AttachScanners 注入）
+        private volatile bool _serialReceived;  // 本次扫码到位后是否已收到 SN（SerialNumberScanned 置位）
+        private bool _scanHooked;               // 是否已订阅扫码枪事件（防重复订阅）
+        private DateTime _scanArriveUtc;        // 扫码到位时间戳（判断 SN 等待是否超时）
         private int _nextWindowIndex = 1;  // 下一个要刷新的窗口（1..rows*cols 环形），初始 1 保证"第一个拍照位=点位1"
         private readonly int _windowCount; // 显示窗口总数 = rows*cols
 
@@ -108,12 +127,13 @@ namespace CommandCenter.Services
         }
 
         /// <summary>
-        /// 开始运行：给每台相机注册 FTP 监听 + 启动 PLC 到位轮询。
+        /// 开始运行：给每台相机注册 FTP 监听 + 订阅扫码枪事件 + 启动 PLC 到位轮询。
         /// </summary>
         public void Start()
         {
             _running = true;
             _imageStore.FtpFileArrived += OnFtpFileArrived;
+            HookScannerEvents(); // 订阅扫码枪 SerialNumberScanned（记"SN 已到"标志，供两阶段推进）
             // 每台相机各建监听：目录优先相机自己的 FtpUploadDir，为空回退全局 FtpRootDir。
             // TCP/BR 直读取图模式的相机不注册 FTP 监听（图由 BR 指令同步读回，见触发循环），
             // 避免它在 FTP 目录里的任何历史文件被误当作本次新图。
@@ -126,7 +146,45 @@ namespace CommandCenter.Services
                 _imageStore.AddMonitor(dir, i);
             }
             SafeChange(_positionTimer, 0, PollMs); // 立即首轮，之后每 200ms
-            SetState("等待 PLC 主站到位信号");
+            SetState("等待 PLC 扫码枪到位信号");
+        }
+
+        /// <summary>
+        /// 注入扫码枪列表（V1.12.16，MainForm 在 BuildServices 里创建完扫码枪后调用）。
+        /// 只在 Start 前调用一次；热更时新协调器会注入新列表、旧协调器 Dispose 已退订旧事件。
+        /// 若本协调器之前已订阅过旧列表（热更复用实例场景），先退订再换新列表，防事件叠加。
+        /// </summary>
+        public void AttachScanners(IEnumerable<IScanner> scanners)
+        {
+            UnhookScannerEvents(); // 先退订旧列表事件，防重复订阅
+            _scanners.Clear();
+            if (scanners != null)
+                _scanners.AddRange(scanners);
+        }
+
+        /// <summary>订阅每台扫码枪的 SerialNumberScanned：只记"SN 已到"标志（最新值由 UI 订阅方维护）。</summary>
+        private void HookScannerEvents()
+        {
+            if (_scanHooked) return;
+            _scanHooked = true;
+            foreach (var sc in _scanners)
+                sc.SerialNumberScanned += OnScannerCode;
+        }
+
+        /// <summary>退订扫码枪事件（Dispose 或换列表时调用），防热更/关闭时事件叠加或悬挂。</summary>
+        private void UnhookScannerEvents()
+        {
+            if (!_scanHooked) return;
+            _scanHooked = false;
+            foreach (var sc in _scanners)
+                sc.SerialNumberScanned -= OnScannerCode;
+        }
+
+        /// <summary>扫码枪读码事件（工作线程）：置"本次 SN 已到"标志，两阶段状态机据此推进等相机阶段。
+        /// 只置标志、不在此更新 LatestSerialNumber（文本由 MainForm.OnSerialScanned 统一维护）。</summary>
+        private void OnScannerCode(object sender, string code)
+        {
+            _serialReceived = true;
         }
 
         /// <summary>暂停流程（界面手动暂停时调用，保留在 Idle）。</summary>
@@ -144,7 +202,7 @@ namespace CommandCenter.Services
             {
                 _running = true;
                 SafeChange(_positionTimer, 0, PollMs);
-                SetState("等待 PLC 主站到位信号");
+                SetState(_phase == PhaseCameraWait ? "等待 PLC 相机到位信号" : "等待 PLC 扫码枪到位信号");
             }
         }
 
@@ -165,24 +223,76 @@ namespace CommandCenter.Services
             // 已连上：恢复快速轮询
             SafeChange(_positionTimer, PollMs, PollMs);
 
-            // 忙碌中忽略新信号，避免"等待取像"期间重复触发另一轮拍照
-            if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
+            // ── V1.12.16 两阶段：先扫码得 SN，再相机拍照 ──
+            // 阶段① 等"扫码枪到位"(D99)：读到→触发扫码→复位信号→等 SN
+            if (_phase == PhaseScanWait)
             {
-                SetState("已触发，等待相机取像...");
+                if (_plc.ReadScanMoveDone())
+                {
+                    _plc.ClearScanMoveDone();               // 复位握手，防反复触发
+                    _serialReceived = false;
+                    _scanArriveUtc = DateTime.UtcNow;
+                    if (_scanners.Count > 0)
+                    {
+                        // 有扫码枪：发触发指令开始读码（TCP 场景重发 LON 开激光；串口为空操作），
+                        // 下一步轮询等 SerialNumberScanned 事件置 _serialReceived。
+                        foreach (var sc in _scanners)
+                        {
+                            try { sc.SendTrigger(); }
+                            catch (Exception ex) { LogHelper.Warn("扫码枪触发异常：" + ex.Message); }
+                        }
+                        _phase = PhaseScanPending;
+                        SetState("扫码枪到位，等待扫码...");
+                    }
+                    else
+                    {
+                        // 无扫码枪：SN 走手动输入/模拟，扫码到位即视为通过，直接等相机到位
+                        _phase = PhaseCameraWait;
+                        SetState("等待 PLC 相机到位信号");
+                    }
+                }
                 return;
             }
 
-            try
+            // 阶段② 等 SN：扫到即进入等相机阶段；超时兜底（产品没贴码/扫码枪没读到）不卡流程
+            if (_phase == PhaseScanPending)
             {
-                if (!_plc.ReadMoveDone())
+                if (_serialReceived)
                 {
-                    // 还没到位：归还空闲标志，下一轮再查
-                    Interlocked.Exchange(ref _busy, 0);
+                    _phase = PhaseCameraWait;
+                    SetState("扫码完成，等待 PLC 相机到位信号");
+                }
+                else if ((DateTime.UtcNow - _scanArriveUtc).TotalMilliseconds >= ScanWaitMs)
+                {
+                    LogHelper.Warn("扫码等待 SN 超时（" + ScanWaitMs + "ms），继续拍照（SN 沿用当前值）");
+                    ErrorRaised?.Invoke("扫码等待 SN 超时：未取得序列号，继续拍照（SN 沿用当前值）");
+                    _phase = PhaseCameraWait;
+                    SetState("等待 PLC 相机到位信号");
+                }
+                return;
+            }
+
+            // 阶段③ 等"相机到位"(D100)：读到→并行触发拍照（原主流程逻辑保留）
+            if (_phase == PhaseCameraWait)
+            {
+                // 忙碌中忽略新信号，避免"等待取像"期间重复触发另一轮拍照
+                if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
+                {
+                    SetState("已触发，等待相机取像...");
                     return;
                 }
 
-                SetState("相机到位，触发拍照");
-                _plc.ClearMoveDone();                   // 复位握手，否则会反复触发
+                try
+                {
+                    if (!_plc.ReadMoveDone())
+                    {
+                        // 还没到位：归还空闲标志，下一轮再查
+                        Interlocked.Exchange(ref _busy, 0);
+                        return;
+                    }
+
+                    SetState("相机到位，触发拍照");
+                    _plc.ClearMoveDone();                   // 复位握手，否则会反复触发
 
                 // ===== 对所有相机并行触发（V1.8.3 起），各自记录判定/失败原因 =====
                 _pends = new List<PendingCamera>();
@@ -238,10 +348,11 @@ namespace CommandCenter.Services
             }
             catch (Exception ex)
             {
-                LogHelper.Error("到位处理异常", ex);
+                LogHelper.Error("相机到位处理异常", ex);
                 Interlocked.Exchange(ref _busy, 0);
-                SetState("等待 PLC 主站到位信号");
+                SetState("等待 PLC 相机到位信号");
             }
+            } // 关闭 if (_phase == PhaseCameraWait)
         }
 
         /// <summary>
@@ -421,7 +532,8 @@ namespace CommandCenter.Services
                 SafeChange(_imageWaitTimer, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
                 Interlocked.Exchange(ref _busy, 0);
                 Interlocked.Exchange(ref _finished, 0);
-                SetState("等待 PLC 主站到位信号");
+                _phase = PhaseScanWait; // 相机阶段收尾完成 → 回到等"扫码到位"阶段，开始下一循环
+                SetState("等待 PLC 扫码枪到位信号");
             }
         }
 
@@ -563,6 +675,7 @@ namespace CommandCenter.Services
             // 在下一处检查/Change 时会自行退出，不会在已 Dispose 的 Timer 上继续调度。
             _disposed = true;
             _running = false;
+            UnhookScannerEvents(); // 退订扫码枪事件，防热更/关闭后悬挂或叠加
             _positionTimer?.Dispose();
             _imageWaitTimer?.Dispose();
             _imageStore.FtpFileArrived -= OnFtpFileArrived;

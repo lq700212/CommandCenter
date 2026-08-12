@@ -189,6 +189,14 @@ namespace CommandCenter.Models
 
         // ─── 寄存器地址映射（与现场 PLC 程序确认后调整；方向见类注释） ───
 
+        /// <summary>
+        /// PLC→上位机：扫码枪运动到位信号（V1.12.16 两阶段流程新增，D 地址）。
+        /// 位 1=机器人/机械臂带着扫码枪运动到位、可以扫码；上位机读到后清 0 复位。
+        /// ⚠️ **地址为占位待定稿（默认 D99）**：与现场 PLC 程序核对后统一替换本值即可，
+        ///    不必改程序（其余字段同理，见 docs/通讯接入.md §3.2）。
+        /// </summary>
+        public ushort ScanMoveDoneAddress { get; set; } = 99;
+
         /// <summary>PLC→上位机：相机运动到位信号（D 地址，PLC 写 1，上位机读后清 0）</summary>
         public ushort MoveDoneAddress { get; set; } = 100;
 

@@ -115,6 +115,10 @@ namespace CommandCenter.Views
             _scanners = new List<IScanner>();
             foreach (var sc in _config.Scanners ?? new List<ScanConfig>())
                 _scanners.Add(BuildScanner(sc));
+
+            // V1.12.16 两阶段流程：把扫码枪注入协调器，供"扫码到位→触发扫码→等SN"阶段使用
+            // （协调器在 BuildServices 里比扫码枪先创建，故用方法注入而非构造参数）。
+            _coordinator.AttachScanners(_scanners);
         }
 
         /// <summary>

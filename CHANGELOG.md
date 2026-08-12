@@ -1,5 +1,39 @@
 # 版本改动记录
 
+## V1.12.16（2026-08-12）打通"两阶段"业务流程：先扫码得 SN、再相机拍照 + 寄存地址占位
+
+> 与现场核对完整产线节奏后的流程实现：**机器人带扫码枪到位 → 上位机扫码得 SN → 机器人带相机到位
+> → 上位机触发拍照 → 取像保存并显示在对应点位窗口 → 通知 PLC 完成 → PLC 走下一工位**。
+> 在保住原有"相机到位→拍照→等图→上报"闭环不变的前提下，把流程串成"先扫码、后拍照"两阶段。
+> PLC 通讯寄存地址尚未定稿，全部沿用现代码占位（新增"扫码枪到位信号"用 D99 占位、已代码接入），
+> 现场地址定了只改 json 数值即可。
+
+### 改动范围
+- **`Models/AppConfig.cs`**（`PlcConfig`）：新增 **`ScanMoveDoneAddress`（PLC→上位机"扫码枪运动到位"
+  信号，占位 D99）**，注释标明"占位待定稿、现场定稿后只改此值"。
+- **`Services/PlcService.cs`**：新增 **`ReadScanMoveDone()` / `ClearScanMoveDone()`**，读写自己
+  DataStore 的扫码到位寄存器（与现有 ReadMoveDone/ClearMoveDone 同风格、同锁，从站模式无外部请求）。
+- **`Services/ProductionCoordinator.cs`**（核心，两阶段状态机）：
+  - 新增 `AttachScanners(IEnumerable<IScanner>)` 注入扫码枪、`HookScannerEvents/UnhookScannerEvents`
+    订阅退订 `SerialNumberScanned`（置"SN 已到"标志，不重复维护文本）、阶段常量与 `_phase` 状态；
+  - `PositionTimer_Tick` 改为按 `_phase` 分发 **①等"扫码到位"(D99)→ 复位+SendTrigger 触发扫码 →
+    ②等 SN（`_serialReceived` 推进；超时 `ScanWaitMs`=30s 兜底不卡流程）→ ③等"相机到位"(D100)→
+    并行触发拍照（原逻辑原样保留）**；无扫码枪时扫码到位即视为通过、直接等相机；
+  - `FinishAll` 收尾后 `_phase` 复位回"等扫码到位"、状态文案同步改为"等待 PLC 扫码枪到位信号"；
+  - `Dispose` 退订扫码枪事件（防热更/关闭悬挂）。
+- **`Views/MainForm.cs`**：`BuildServices` 建完扫码枪后调用 `_coordinator.AttachScanners(_scanners)`。
+- **文档同步**：`docs/通讯接入.md`（§3.2 寄存表加扫码到位、§3.3 完整时序、§3.4 实现说明、版本表）、
+  `README.md`、`CHANGELOG.md` 更新。
+
+### 为什么这么改
+- 现场真实节奏是"扫码枪与相机分两个机构、分两段到位"，不是单一"相机到位"信号；先拿到 SN 再
+  拍照，存图目录才能按 SN 归档、判定结果才能与产品一一对应。
+- 地址未定稿，故扫码到位用占位 D99 接入、其余沿用占位，只留"明天定地址改 json 数值"一个动作，
+  避免地址定了再改代码判断逻辑。
+
+### 验证
+- Debug 构建通过（`CommandCenter.exe` 正常生成、无 error）；冒烟启动进程存活、无崩溃。
+
 ## V1.12.15（2026-08-12）PLC 状态文案对齐从站语义 + 显示窗口双击放大/还原
 
 > 两个现场体验优化：
