@@ -347,7 +347,9 @@ namespace CommandCenter.Services
         /// 读自己 DataStore 的保持寄存器（单个）。
         /// ★ 地址偏移：NModbus PointSource.ReadPoints(start, count) 的 start 是 0-based 协议地址，
         ///   与原主站 ReadHoldingRegisters(UnitId, address, 1) 的 address 一致，故直接传 address（不加 1）。
-        ///   【待现场联调确认】若 PLC 侧实际偏移与此不符，统一在此处调整，业务层无感。
+        ///   【V1.12.14 现场实测确认】汇川主站读地址与 D 地址一一对应、零偏移（写 D101 读 101 即见），
+        ///   此处直接传 D 地址即为正确做法，无需任何 +40001/±1 换算；若将来换 PLC 出现错位，
+        ///   统一在此处调整，业务层无感。
         /// </summary>
         private ushort ReadLocal(ushort address)
         {
