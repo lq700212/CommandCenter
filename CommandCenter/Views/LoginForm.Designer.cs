@@ -304,11 +304,12 @@ namespace CommandCenter.Views
             // 
             // lblPwdHint
             // 改密码提示（灰色小字）：提醒长度与"改完需用新密码登录"
+            // y=135：上方"确认密码框"底部 129（间距 6）与下方"按钮行顶"158（间距 6）等距居中。
             // 
             this.lblPwdHint.AutoSize = true;
             this.lblPwdHint.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
             this.lblPwdHint.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(150)))), ((int)(((byte)(150)))), ((int)(((byte)(150)))));
-            this.lblPwdHint.Location = new System.Drawing.Point(114, 140);
+            this.lblPwdHint.Location = new System.Drawing.Point(114, 135);
             this.lblPwdHint.Name = "lblPwdHint";
             this.lblPwdHint.Size = new System.Drawing.Size(220, 17);
             this.lblPwdHint.TabIndex = 8;
