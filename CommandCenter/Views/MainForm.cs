@@ -585,9 +585,25 @@ namespace CommandCenter.Views
             LogHelper.Info("配置已保存并热生效（服务层已按新配置重建）");
         }
 
-        /// <summary>打开系统设置：保存后写盘并热生效（V1.6.0 起免重启）。</summary>
+        /// <summary>
+        /// 打开系统设置：保存后写盘并热生效（V1.6.0 起免重启）。
+        /// 【V1.9.0 管理员登录】每次点击先校验管理员账号（SecurityConfig.AdminEnabled=true 时，
+        /// 弹 LoginForm 登录，只有验证通过才放行打开设置窗体），
+        /// 防止现场操作员随意改 IP/寄存器/存图/点位等关键配置。
+        /// </summary>
         private void OpenSettings()
         {
+            // 管理员登录校验（V1.9.0）：启用时每次点都要求登录，无"记住登录状态"。
+            // 传整个 _config：LoginForm 里不仅能登录，还能修改管理员密码（改后直接写盘）。
+            if (_config.Security.AdminEnabled)
+            {
+                using (var login = new LoginForm(_config))
+                {
+                    if (login.ShowDialog(this) != DialogResult.OK)
+                        return; // 取消/连续失败：不进系统设置
+                }
+            }
+
             using (var dlg = new SettingsForm(_config))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;

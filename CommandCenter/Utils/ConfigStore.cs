@@ -39,6 +39,7 @@ namespace CommandCenter.Utils
                     if (cfg.Scanners == null) cfg.Scanners = new List<Models.ScanConfig>();
                     if (cfg.Display == null) cfg.Display = new Models.DisplayConfig();
                     if (cfg.Image == null) cfg.Image = new Models.ImageConfig();
+                    if (cfg.Security == null) cfg.Security = new Models.SecurityConfig();
 
                     // 保证窗口→存图点位映射长度与窗口总数一致（缺的补默认、多的截断）
                     EnsureStationMap(cfg);

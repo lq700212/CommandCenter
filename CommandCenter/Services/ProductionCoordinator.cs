@@ -289,7 +289,7 @@ namespace CommandCenter.Services
                     {
                         p.ImageBytes = img.ImageData;   // 图已在内存
                         p.IsSnapped = true;             // 等效 FTP 模式"新图已到"
-                        LogHelper.Info($"相机[{idx}] TCP 取图成功：{img.DataSize}B（属性={img.DataAttr}）");
+                        LogHelper.Info($"相机[{idx}] TCP 取图成功：{img.DataSize}B（触发编号={img.DataTriggerNo}）");
                     }
                     else
                     {

@@ -41,6 +41,8 @@
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Data" />
     <Reference Include="System.Deployment" />
+    <!-- DPAPI（ProtectedData）：登录对话框"记住密码"用，加密落盘到 %LOCALAPPDATA%（框架自带程序集） -->
+    <Reference Include="System.Security" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
@@ -73,6 +75,13 @@
          Visual Studio 窗体设计器可视化维护；数据填充与保存逻辑仍在 SettingsForm.cs -->
     <Compile Include="Views\SettingsForm.Designer.cs">
       <DependentUpon>SettingsForm.cs</DependentUpon>
+    </Compile>
+    <!-- LoginForm：管理员登录对话框（V1.9.0，控制系统设置使用权限，SHA-256 校验） -->
+    <Compile Include="Views\LoginForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Views\LoginForm.Designer.cs">
+      <DependentUpon>LoginForm.cs</DependentUpon>
     </Compile>
     <!-- DirTreeEditForm：图片存储目录结构可视化配置对话框（逐级编辑目录名/规则 + 文件名规则 + 实时预览） -->
     <Compile Include="Views\DirTreeEditForm.cs">
@@ -107,6 +116,7 @@
     <Compile Include="Services\ConnectionMonitor.cs" />
     <Compile Include="Utils\ConfigStore.cs" />
     <Compile Include="Utils\LogHelper.cs" />
+    <Compile Include="Utils\SecurityUtil.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

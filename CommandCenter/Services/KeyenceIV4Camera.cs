@@ -15,15 +15,23 @@ namespace CommandCenter.Services
     /// 【对接方式】
     ///   基恩士 IV4 内置以太网支持：EtherNet/IP、PROFINET CC-B、TCP/IP 无协议通信（最多 2 路）。
     ///   上位机作为 TCP 客户端连接相机的 CommandPort，发送 ASCII 控制指令，相机回 ASCII 响应帧。
-    ///   指令以 CR(0x0D) 终止，响应以 CR 结尾的一/多行。
+    ///
+    /// 【CR 语义（数据包结束标记，务必理解）】
+    ///   基恩士 TCP/IP 无协议通信中，CR（回车符 '\r'，0x0D）是数据包结束标记：
+    ///   指令以 CR 结尾发送，相机以 CR（或 CRLF）结尾回帧，双方靠 CR 识别帧边界。
+    ///   例：触发指令发 "T1[CR]"，相机回显 "T1[CR]" 作为确认；T2 则回 "RT,xxx[CR]"[判定]。
+    ///   程序发指令一律补 "\r"；收帧按 CR/LF 截断（兼容 CR 与 CRLF 两种结尾，见
+    ///   SendCommandAndReadLine）。这是 V1.0.1 血泪教训修复的核心：收帧不以 CR 正确切行，
+    ///   残留换行符会污染下一次读取导致"隔一次判定失败"。
     ///
     /// 【IV4 指令表（见 docs/通讯接入.md，以《IV4 通信、连接指南》为准）】
-    ///   T1[CR]              触发拍摄；响应 T1[CR]（回显）
+    ///   T1[CR]              触发拍摄；响应 T1[CR]（回显确认）
     ///   RT[CR]              读取判定结果；响应 RT, 工具结果(标准)[CR]
     ///                       或 RT, 工具结果(详细)[CR]
     ///   T2[CR]              触发＋读取判定结果；响应同 RT
-    ///   BR,m[CR]            读取最新图像（V1.7.0，24bit 位图）；响应：
-    ///                       BR, nnnnnnnnnn, ddddddd, 图像数据
+    ///   BR,m[CR]            读取最新图像（V1.7.0，24bit 位图）；m=压缩率(0=无压缩,1=1/2)；
+    ///                       响应 BR, nnnnnnnnnn, ddddddd, 图像数据
+    ///                       （nnnnnnnnnn=合计触发编号，ddddddd=图像数据的数据长度；V1.9.1 修正）
     ///   工具结果(标准) = 8 位字符，每位一个工具：'0'=OK、'1'=NG、'4'=未进行、'-'=该工具未启用
     ///
     /// 【本服务提供的入口】
@@ -90,7 +98,9 @@ namespace CommandCenter.Services
 
         /// <summary>
         /// 仅触发拍摄（T1）。返回 true 表示已发出并收到相机回显。
-        /// 用于 ReadResultFromCamera=false 的退化模式（判定不详，FTP 图到即记 OK）。
+        /// 相机对 T1 的回帧就是回显 "T1"（以 CR 结尾的确认帧），收到任意非空响应即视为触发成功；
+        /// 回显内容无需解析（不像 T2 要读判定）。用于 ReadResultFromCamera=false 的退化模式
+        /// （判定不详，FTP 图到即记 OK）。
         /// </summary>
         public bool SendTrigger()
         {
@@ -157,20 +167,31 @@ namespace CommandCenter.Services
         /// <summary>
         /// 读取相机最新图像（V1.7.0，Tcp 取图模式）。指令：BR,m[CR]；响应：
         ///   BR,nnnnnnnnnn,ddddddd,&lt;图像数据&gt;
-        ///     nnnnnnnnnn = 图像数据字节数（10 位十进制，前导零）
-        ///     ddddddd    = 图像属性（7 位十进制，含义以《IV4 通信、连接指南》为准，此处仅透出供现场对照）
-        ///     逗号后紧跟的二进制即图像数据（24bit 位图，期望是完整 BMP 文件：BM 头 + 像素）。
+        ///     nnnnnnnnnn = 合计触发编号（10 位十进制；计数模式时固定 999999999）
+        ///     dddddddd    = 图像数据的数据长度（决定后续要读的字节数）
+        ///     逗号后紧跟的二进制即图像数据（24bit 位图，期望是完整 BMP 文件：BM 头 + 像素）
+        ///
+        /// 【V1.9.1 修正——两个字段含义此前理解反了，务必注意】
+        ///   《IV4 通信、连接指南》原文：
+        ///     BR,m[CR]          读取图像数据
+        ///     响应 BR,nnnnnnnnnn,ddddddd,图像数据
+        ///     nnnnnnnnnn = 合计触发编号（固定长度 0~DWORD_MAX-1；通过计数模式时 = 999999999）
+        ///     dddddddd   = 图像数据的数据长度
+        ///   V1.9.0 之前的实现把"合计触发编号"误当成图像字节数、把"数据长度"当成属性，
+        ///   正好颠倒 → 会用触发编号去读图像（长度校验几乎必失败 / 多读少读），
+        ///   已在 ReadImage 里按"触发编号→数据长度"正确顺序重新解析。
+        ///   触发编号仅作日志/现场对照透出，不参与读取。
         ///
         /// 【为什么用状态机逐字节解析响应头，而不是按"行"读】
         ///   图像数据是二进制，可能包含任意字节值（含 0x0D/0x0A，恰好会骗过"读到换行就停"的逻辑）；
-        ///   必须先精确读完 ASCII 头部（BR,长度,属性,），再按长度字段精确读 N 字节，才不丢不截。
+        ///   必须先精确读完 ASCII 头部（BR,触发编号,长度,），再按长度字段精确读 N 字节，才不丢不截。
         ///
         /// 【连接复用】本方法与 TriggerAndRead 同走 EnsureConnected 的短连接缓存：同一次流程里
         ///   T2（触发+判定）紧接 BR（取图）会用同一条 TCP 连接，避免多占相机 2 路连接上限。
         ///
-        /// 【V1.8.3 修复】响应解析各阶段（前缀/长度/属性/图像数据）遇对端关闭（ReadByte 返回 -1
-        ///   或 Read 返回 0）时，一律 MarkDisconnected 清理连接——此前只判失败不标记，坏流残留，
-        ///   下一次动作复用已关闭的连接持续失败（与 SendCommandAndReadLine 的断连处理对齐）。
+        /// 【无最新图像时的错误】《IV4 通信、连接指南》说明：在没有最新图像的状态下试图读取
+        ///   会出错。此时相机响应不是正常 "BR,..." 帧（可能直接断连/回错误码），
+        ///   前缀校验不过即判失败，配合断连标记自动走重连，不会误取错数据。
         ///
         /// 【耗时说明】一张 24bit BMP 通常数百 KB~几 MB，读取是同步的（会占用调用线程），
         ///   因此绝不能在 UI 线程调用；主流程在后台线程串行触发+取图，可接受。
@@ -182,7 +203,8 @@ namespace CommandCenter.Services
                 if (!EnsureConnected())
                     return ReadImageOutcome.Fail("相机连接失败");
 
-                // 拼指令：ReadImageCommand 默认 "BR"，ReadImageMode 默认 "1" → "BR,1"，末尾补 CR
+                // 拼指令：ReadImageCommand 默认 "BR"，ReadImageMode 默认 "1" → "BR,1"，末尾补 CR。
+                // 参数 m = 压缩率：0=无压缩，1=1/2（数据量减半、传输更快，默认取 1）。
                 string cmd = (_cfg.ReadImageCommand ?? "BR").Trim() + "," + (_cfg.ReadImageMode ?? "1");
                 byte[] sendBuf = Encoding.ASCII.GetBytes(cmd + "\r");
                 _stream.Write(sendBuf, 0, sendBuf.Length);
@@ -197,14 +219,31 @@ namespace CommandCenter.Services
                 while (pos < 3)
                 {
                     int b = _stream.ReadByte();
-                    if (b < 0) { MarkDisconnected(); return ReadImageOutcome.Fail("读取响应前缀超时/连接断开"); }
+                    if (b < 0) { MarkDisconnected(); return ReadImageOutcome.Fail("读取响应前缀超时/连接断开（可能相机无最新图像）"); }
                     if (b == '\r' || b == '\n') continue; // 跳过空行（此阶段没有图像数据，不会误吞）
                     prefix[pos++] = (char)b;
                 }
                 if (prefix[0] != 'B' || prefix[1] != 'R' || prefix[2] != ',')
-                    return ReadImageOutcome.Fail($"响应前缀异常：\"{new string(prefix)}\"（期望 BR,）");
+                    return ReadImageOutcome.Fail($"响应前缀异常：\"{new string(prefix)}\"（期望 BR,，可能无最新图像）");
 
-                // ── 阶段1：长度字段 nnnnnnnnnn（数字读到逗号为止，兼容前导零/变长） ──
+                // ── 阶段1：合计触发编号 nnnnnnnnnn（数字读到逗号为止，仅透出日志，不用于读取） ──
+                long triggerNo = 0;
+                int trigDigitCount = 0;
+                while (true)
+                {
+                    int b = _stream.ReadByte();
+                    if (b < 0) { MarkDisconnected(); return ReadImageOutcome.Fail("读取合计触发编号超时/连接断开"); }
+                    if (b == ',') break;
+                    if (b < '0' || b > '9')
+                        return ReadImageOutcome.Fail($"合计触发编号含非数字字符：{(char)b}");
+                    triggerNo = triggerNo * 10 + (b - '0');
+                    trigDigitCount++;
+                }
+                if (trigDigitCount == 0)
+                    return ReadImageOutcome.Fail("合计触发编号为空");
+
+                // ── 阶段2：图像数据的数据长度 ddddddd（数字读到逗号为止） ──
+                // 这是真正决定"后面读多少字节"的字段（V1.9.1 修正：此前误用触发编号当长度）。
                 long size = 0;
                 int digitCount = 0;
                 while (true)
@@ -213,26 +252,13 @@ namespace CommandCenter.Services
                     if (b < 0) { MarkDisconnected(); return ReadImageOutcome.Fail("读取图像长度字段超时/连接断开"); }
                     if (b == ',') break;
                     if (b < '0' || b > '9')
-                        return ReadImageOutcome.Fail($"长度字段含非数字字符：{(char)b}");
+                        return ReadImageOutcome.Fail($"图像长度字段含非数字字符：{(char)b}");
                     size = size * 10 + (b - '0');
                     digitCount++;
                 }
                 // 防御：长度必须 >0 且不超过 64MB（IV4 视场图不会超过，防异常响应把内存吃爆）
                 if (digitCount == 0 || size <= 0 || size > 64L * 1024 * 1024)
                     return ReadImageOutcome.Fail($"图像长度非法：{size}");
-
-                // ── 阶段2：属性字段 ddddddd（数字读到逗号为止） ──
-                // 属性含义以手册为准，这里只读出来放进结果，供日志/现场对照，不参与后续逻辑。
-                long attr = 0;
-                while (true)
-                {
-                    int b = _stream.ReadByte();
-                    if (b < 0) { MarkDisconnected(); return ReadImageOutcome.Fail("读取属性字段超时/连接断开"); }
-                    if (b == ',') break;
-                    if (b < '0' || b > '9')
-                        return ReadImageOutcome.Fail($"属性字段含非数字字符：{(char)b}");
-                    attr = attr * 10 + (b - '0');
-                }
 
                 // ── 阶段3：精确读取 size 字节图像数据 ──
                 // 分块读（8KB/块）避免逐字节低效；单次 Read 的最长等待由 ReadTimeout 兜底，
@@ -261,9 +287,9 @@ namespace CommandCenter.Services
                 {
                     if (data[0] != (byte)'B' || data[1] != (byte)'M')
                         LogHelper.Warn($"相机 BR 取回数据不以 BMP 文件头(BM) 开头，可能需按现场格式调整：大小={size}");
-                    LogHelper.Info($"相机 BR 取图成功：大小={size}B 属性={attr} 首2字节=0x{data[0]:X2}0x{data[1]:X2}");
+                    LogHelper.Info($"相机 BR 取图成功：触发编号={triggerNo} 大小={size}B 首2字节=0x{data[0]:X2}0x{data[1]:X2}");
                 }
-                return ReadImageOutcome.Ok(size, attr, data);
+                return ReadImageOutcome.Ok(size, triggerNo, data);
             }
             catch (Exception ex)
             {
@@ -527,17 +553,17 @@ namespace CommandCenter.Services
         /// </summary>
         public byte[] ImageData { get; private set; }
 
-        /// <summary>响应头长度字段 nnnnnnnnnn（图像数据字节数）</summary>
+        /// <summary>响应头第二个字段：图像数据的数据长度 ddddddd（决定读取的字节数）</summary>
         public long DataSize { get; private set; }
 
-        /// <summary>响应头属性字段 ddddddd（含义以《IV4 通信、连接指南》为准，此处仅透出供日志对照）</summary>
-        public long DataAttr { get; private set; }
+        /// <summary>响应头第一个字段：合计触发编号 nnnnnnnnnn（计数模式固定 999999999，仅透出日志对照）</summary>
+        public long DataTriggerNo { get; private set; }
 
         /// <summary>失败原因（通讯失败/响应格式异常/数据不完整等）</summary>
         public string Detail { get; private set; }
 
-        public static ReadImageOutcome Ok(long size, long attr, byte[] data) =>
-            new ReadImageOutcome { Succeeded = true, ImageData = data, DataSize = size, DataAttr = attr };
+        public static ReadImageOutcome Ok(long size, long triggerNo, byte[] data) =>
+            new ReadImageOutcome { Succeeded = true, ImageData = data, DataSize = size, DataTriggerNo = triggerNo };
 
         public static ReadImageOutcome Fail(string detail) =>
             new ReadImageOutcome { Detail = detail };

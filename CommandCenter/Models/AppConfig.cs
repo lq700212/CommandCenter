@@ -37,6 +37,13 @@ namespace CommandCenter.Models
         /// （进标题栏与 {SN} 存图目录）。一台也够用——配置里只留一行即可。
         /// </summary>
         public List<ScanConfig> Scanners { get; set; } = new List<ScanConfig>();
+
+        /// <summary>
+        /// 管理员登录安全配置（V1.9.0）：控制"系统设置"按钮的使用权限。
+        /// 启用后点系统设置必须先登录管理员账号（每次点都校验，不记忆登录状态），
+        /// 防止现场操作员随意修改设备/相机/存图等关键配置。
+        /// </summary>
+        public SecurityConfig Security { get; set; } = new SecurityConfig();
     }
 
     /// <summary>
@@ -108,14 +115,16 @@ namespace CommandCenter.Models
 
         /// <summary>
         /// 读取图像数据指令名（仅 ImageSource=="Tcp" 时使用）：IV4 手册原文 "BR,m[CR]"，
-        /// BR 读"最新图像"（24bit 位图格式），响应 "BR,nnnnnnnnnn,ddddddd,图像数据"。
+        /// BR 读"最新图像"（24bit 位图格式），响应 "BR,nnnnnnnnnn,ddddddd,图像数据"，
+        /// 其中 nnnnnnnnnn=合计触发编号（仅透出日志），ddddddd=图像数据的数据长度。
         /// 此字段只存指令名（默认 "BR"），参数 m 见 ReadImageMode，发送时拼成 "BR,m"。
         /// </summary>
         public string ReadImageCommand { get; set; } = "BR";
 
         /// <summary>
-        /// BR 指令的数据格式参数 m（拼成 "BR,m" 发送）。手册原文为 "BR,m"，
-        /// m 的确切取值与含义以《IV4 通信、连接指南》为准，现场实测后在此调整。
+        /// BR 指令的数据格式参数 m（拼成 "BR,m" 发送）。m=压缩率：
+        ///   "0"=无压缩（原图，数据量大、传输慢）；
+        ///   "1"=1/2 压缩（数据量减半，现场默认，取图更快）。
         /// </summary>
         public string ReadImageMode { get; set; } = "1";
 
@@ -336,5 +345,41 @@ namespace CommandCenter.Models
 
         /// <summary>扫码枪 TCP 端口（仅 Mode=Tcp 使用，基恩士 SR 无协议默认端口，现场确认）</summary>
         public int Port { get; set; } = 9005;
+    }
+
+    /// <summary>
+    /// 管理员登录安全配置（V1.9.0）。
+    ///
+    /// 【作用】控制系统设置的使用权限：只有登录管理员账号才能打开"系统设置"窗体
+    /// （主界面 MainForm.OpenSettings 每次点击都弹 LoginForm 校验，校验通过才放行）。
+    ///
+    /// 【安全存储】密码不存明文，只存 SHA-256 哈希（Utils.SecurityUtil.HashPassword）。
+    ///   登录时把用户输入做同样哈希再比对，配置里即使被看到也无法反推出明文密码。
+    ///
+    /// 【默认账号】出厂默认 admin / admin123，管理员首次登录后在登录对话框的
+    ///   "修改密码"面板改掉（验证原密码 → 新密码两次一致且 ≥6 位 → 保存即时生效）。
+    ///
+    /// 【为什么每次点都要求登录】现场"系统设置"是高风险入口（改 IP/寄存器/存图/点位），
+    ///   若登录一次长期有效，操作员容易忘记退出、旁人不费劲就能改配置；
+    ///   每次点都校验，权限控制最严格、无记忆状态可钻空子。
+    /// </summary>
+    public class SecurityConfig
+    {
+        /// <summary>
+        /// 是否启用管理员登录校验。true=点"系统设置"需先登录；false=直接打开（等同于旧版行为，
+        /// 现场不需要防护时可关）。默认 true（需求即"只有登录管理员才能用系统设置"）。
+        /// </summary>
+        public bool AdminEnabled { get; set; } = true;
+
+        /// <summary>管理员用户名（默认 "admin"，登录时大小写不敏感比对）</summary>
+        public string AdminUser { get; set; } = "admin";
+
+        /// <summary>
+        /// 管理员密码的 SHA-256 哈希（hex 小写）。默认值是 "admin123" 的哈希，
+        /// 即出厂默认密码 admin123（见 SecurityUtil.HashPassword 注释）。
+        /// 配置里绝不存明文；改密码在登录对话框的"修改密码"面板操作，此处只落哈希。
+        /// </summary>
+        public string AdminPasswordHash { get; set; }
+            = "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9";
     }
 }
