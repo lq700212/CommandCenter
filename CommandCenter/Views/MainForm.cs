@@ -47,7 +47,11 @@ namespace CommandCenter.Views
         private ProductionCoordinator _coordinator;
         private ConnectionMonitor _monitor;
         private List<IScanner> _scanners = new List<IScanner>();   // 扫码枪列表（多台各一个实例，V1.8.1 起支持多台；串口/基恩士 TCP 无协议按各自 Mode 二选一）
-        private Label[] _lblCamStatuses;            // 每个相机一个连接指示灯（按相机下标对齐）
+        private Label[] _lblCamStatuses;            // 每台相机一个连接指示灯（≤2台模式，按相机下标对齐）
+        private ComboBox _cmbCamOverview;           // 相机下拉列表（≥3台模式）：下拉查看每台名字+状态圆点
+        private Label _lblCamAggregate;             // 相机总连接状态标签（≥3台模式）：全部连接才绿色，否则红色
+        private Panel _pnlCamOverview;              // ≥3台模式的容器：把总标签+下拉框装一起，统一垂直居中
+        private ToolTip _camTip;                    // 总状态标签的悬停明细提示（列出每台相机连/断）
         private bool _recipeComboInit;    // 组合框程序内初始化/刷新时防误触 SelectedIndexChanged
         private int _recipeSwitchVer;     // 配方下发任务的版本号：只让"最新一次切换"的结果更新状态条（丢弃过期提示）
         private CameraDisplayControl[] _windows;
@@ -170,8 +174,8 @@ namespace CommandCenter.Views
 
         /// <summary>
         /// 按配置开关设置标题栏各字段/按钮的可见性（V1.9.9 从 InitTitleBarFields 抽出复用）。
-        /// 为什么抽出来：RelayoutTitleBar 在空间不足时会临时隐藏低价值字段（.Visible=false），
-        /// 窗口变大/热更后重排需要"先恢复配置应显示的字段再压缩"，共用同一份配置判定避免两处漂移。
+        /// 为什么抽出来：InitTitleBarFields（热更）与 RelayoutTitleBar（重排）都依赖同一份
+        /// "哪些字段该显示"的判定，共用此方法避免两处漂移。
         /// cmbRecipe 默认始终显示（暂无独立开关，保持既有行为）。
         /// </summary>
         private void ApplyConfigVisibility()
@@ -188,11 +192,21 @@ namespace CommandCenter.Views
         }
 
         /// <summary>
-        /// 重建标题栏每台相机的连接指示灯（构造与热更都会调用）。
-        /// 先移除旧的（热更后相机台数可能变化，必须整套重建），再按当前台数正序 Add：
-        /// Dock.Right 布局是"先 Add 的靠左、后 Add 的靠右"，正序循环得到
-        /// 相机1..相机N 依次排在 PLC 灯右侧（V1.7.1 起：相机1 在相机2 左边，相机3 继续往右排）。
-        /// lblCamPlaceholder 是设计器视觉提示，隐藏后 Dock 空间让给循环生成的真灯。
+        /// 重建标题栏相机连接状态区（构造与热更都会调用）。按相机台数分两种模式（V1.10.0）：
+        ///
+        /// 【≤2 台】保持既有逻辑：每台相机一个独立指示灯"● 相机N"，直接显示在标题栏，
+        /// 绿=已连接、红=断连。先移除旧的（热更后相机台数可能变化，必须整套重建），
+        /// 再按当前台数正序 Add：Dock.Right 布局是"先 Add 的靠左、后 Add 的靠右"，
+        /// 正序循环得到 相机1..相机N 依次排在 PLC 灯右侧。
+        ///
+        /// 【≥3 台】聚拢成两个控件（现场相机多时 96px/台 的灯阵会占满标题栏）：
+        ///   - _lblCamAggregate（总状态标签）：只有所有相机都连接才绿色，任一断连就红色；
+        ///   - _cmbCamOverview（下拉列表）：默认收起只显示一个入口，点开看每台相机
+        ///     名字+连接状态（OwnerDraw 自绘圆点，绿=OK、红=断连）。
+        /// 两者装进 _pnlCamOverview（Dock.Right）统一垂直居中（ComboBox 直接 Dock.Right
+        /// 会被拉满 48px 高、文字偏上，与左侧"● PLC"标签不对齐）；总标签字体与 PLC 标签
+        /// 一致（微软雅黑 10F Bold）。RelayoutTitleBar 统计右侧 Dock 区时把容器按整体宽度计入。
+        /// lblCamPlaceholder 是设计器视觉提示，隐藏后 Dock 空间让给运行时生成的控件。
         /// </summary>
         private void BuildCameraStatusLights()
         {
@@ -200,33 +214,217 @@ namespace CommandCenter.Views
                 foreach (var lbl in _lblCamStatuses)
                     if (lbl != null) pnlTitleBar.Controls.Remove(lbl);
 
-            lblCamPlaceholder.Visible = false;
-            _lblCamStatuses = new Label[_cameras.Count];
-            for (int i = 0; i < _cameras.Count; i++)
+            if (_cmbCamOverview != null)
             {
-                var lbl = new Label
+                pnlTitleBar.Controls.Remove(_cmbCamOverview);
+                _cmbCamOverview.Dispose();
+                _cmbCamOverview = null;
+            }
+            if (_lblCamAggregate != null)
+            {
+                pnlTitleBar.Controls.Remove(_lblCamAggregate);
+                _lblCamAggregate.Dispose();
+                _lblCamAggregate = null;
+            }
+            if (_pnlCamOverview != null)
+            {
+                // 容器里的子控件（总标签+下拉框）先移除再释放，避免残留
+                _pnlCamOverview.Controls.Clear();
+                pnlTitleBar.Controls.Remove(_pnlCamOverview);
+                _pnlCamOverview.Dispose();
+                _pnlCamOverview = null;
+            }
+
+            lblCamPlaceholder.Visible = false;
+
+            if (_cameras.Count <= 2)
+            {
+                // 小台数模式：每台一个独立指示灯（与历史行为一致）
+                _lblCamStatuses = new Label[_cameras.Count];
+                for (int i = 0; i < _cameras.Count; i++)
+                {
+                    var lbl = new Label
+                    {
+                        Dock = DockStyle.Right,
+                        Width = 96,
+                        TextAlign = ContentAlignment.MiddleRight,
+                        Text = $"● 相机{i + 1}",
+                        ForeColor = Color.FromArgb(150, 150, 150),
+                        Font = new Font("Microsoft YaHei", 10F, FontStyle.Bold)
+                    };
+                    pnlTitleBar.Controls.Add(lbl);
+                    _lblCamStatuses[i] = lbl;
+                }
+            }
+            else
+            {
+                // 大台数模式：总状态标签 + 相机下拉列表。
+                // 两个控件都装进 _pnlCamOverview（Dock.Right）统一垂直居中：
+                // ComboBox 如果直接 Dock.Right 会被容器拉伸到 48px 高、显示文字偏上，
+                // 与左侧"● PLC"标签（MiddleRight 垂直居中）不对齐；放容器里手动定位可精确居中。
+                // 字体统一用与 PLC 标签一致的"微软雅黑 10F Bold"（见 Designer 的 lblPlcStatus.Font）。
+                var camFont = new Font("微软雅黑", 10F, FontStyle.Bold);
+                _lblCamAggregate = new Label
+                {
+                    AutoSize = true,
+                    TextAlign = ContentAlignment.MiddleRight,
+                    Text = "● 相机", // V1.10.0：不显示台数，纯状态圆点+相机字样
+                    ForeColor = Color.FromArgb(150, 150, 150),
+                    Font = camFont
+                };
+                _cmbCamOverview = new ComboBox
+                {
+                    DropDownStyle = ComboBoxStyle.DropDownList, // 只能选不能输，防止误改
+                    Font = camFont,
+                    DrawMode = DrawMode.OwnerDrawFixed,          // 自绘：每项画"状态圆点+相机名"
+                    ItemHeight = 24
+                };
+                _cmbCamOverview.DrawItem += CmbCamOverview_DrawItem;
+                for (int i = 0; i < _cameras.Count; i++)
+                    _cmbCamOverview.Items.Add(CamOverviewLabel(i)); // 显示文案，画圆点时按下标找状态
+                if (_cmbCamOverview.Items.Count > 0) _cmbCamOverview.SelectedIndex = 0;
+
+                // 容器：Dock.Right，宽度=标签+间距+下拉框，其余由 pnlTitleBar 高度决定
+                _pnlCamOverview = new Panel
                 {
                     Dock = DockStyle.Right,
-                    Width = 96,
-                    TextAlign = ContentAlignment.MiddleRight,
-                    Text = $"● 相机{i + 1}",
-                    ForeColor = Color.FromArgb(150, 150, 150),
-                    Font = new Font("Microsoft YaHei", 10F, FontStyle.Bold)
+                    BackColor = pnlTitleBar.BackColor // 与标题栏同色，视觉上"隐形"
                 };
-                pnlTitleBar.Controls.Add(lbl);
-                _lblCamStatuses[i] = lbl;
+                // 先算出下拉框的布局宽度（文本取最长项，_cameras 可能为空则用默认宽）
+                int cmbW = 160;
+                if (_cmbCamOverview.Items.Count > 0)
+                    cmbW = TextRenderer.MeasureText((string)_cmbCamOverview.Items[_cmbCamOverview.Items.Count - 1], camFont).Width + 40;
+                int lblW = _lblCamAggregate.PreferredWidth;
+                _cmbCamOverview.Width = cmbW;
+                _pnlCamOverview.Width = lblW + 8 + cmbW;
+
+                // 垂直居中：标题栏高 48，控件 y = (48 - 控件高)/2
+                int barH = pnlTitleBar.ClientSize.Height;
+                int lblY = (barH - _lblCamAggregate.PreferredHeight) / 2;
+                int cmbY = (barH - _cmbCamOverview.Height) / 2;
+                _lblCamAggregate.Location = new Point(0, lblY);
+                _cmbCamOverview.Location = new Point(lblW + 8, cmbY);
+                _pnlCamOverview.Controls.Add(_lblCamAggregate);
+                _pnlCamOverview.Controls.Add(_cmbCamOverview);
+
+                _camTip = _camTip ?? new ToolTip();
+                _camTip.SetToolTip(_lblCamAggregate, "相机连接状态明细");
+
+                pnlTitleBar.Controls.Add(_pnlCamOverview);
+
+                RefreshCameraAggregateStatus(); // 初始按当前连接状态上色
             }
+        }
+
+        /// <summary>
+        /// 生成下拉列表第 i 台相机的显示文案："相机N  IP"（V1.10.0：只显示 IP，不显示端口）。
+        /// 状态用圆点表达（不混进文字），由 CmbCamOverview_DrawItem 自绘。
+        /// </summary>
+        private string CamOverviewLabel(int i)
+        {
+            return $"相机{i + 1}  {_cameras[i].IpAddressOnly}";
+        }
+
+        /// <summary>
+        /// 相机下拉列表的项绘制（OwnerDraw）：
+        /// 每项左边画一个"状态圆点"（绿=已连接、红=断连），圆点右侧画相机名+IP。
+        /// 高亮行用系统选中色背景，圆点颜色保持语义不变。
+        /// </summary>
+        private void CmbCamOverview_DrawItem(object sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0 || e.Index >= _cameras.Count) return;
+            bool connected = _cameras[e.Index].IsConnected;
+            Color dotColor = connected ? Color.FromArgb(46, 158, 107)  // 绿=OK
+                                       : Color.FromArgb(229, 72, 77);   // 红=断连
+            e.DrawBackground();
+
+            // 圆点：垂直居中，半径约 5px
+            int dotSize = 10;
+            int dotX = e.Bounds.Left + 6;
+            int dotY = e.Bounds.Top + (e.Bounds.Height - dotSize) / 2;
+            using (var b = new SolidBrush(dotColor))
+                e.Graphics.FillEllipse(b, dotX, dotY, dotSize, dotSize);
+
+            // 相机名+IP 文本，用系统前景色（选中行高亮时可读）
+            TextRenderer.DrawText(e.Graphics, CamOverviewLabel(e.Index), e.Font,
+                new Point(dotX + dotSize + 8, e.Bounds.Top + (e.Bounds.Height - e.Font.Height) / 2),
+                e.ForeColor);
+            e.DrawFocusRectangle();
+        }
+
+        /// <summary>
+        /// 刷新相机总连接状态标签（≥3台模式，后台线程事件触发，BeginInvoke 切回 UI 线程）。
+        /// 规则：所有相机都 IsConnected → 绿色；只要有一台断连 → 红色。
+        /// 同时更新悬停明细文本（每台相机名 + 连/断），并让下拉框重绘当前状态圆点。
+        /// </summary>
+        private void RefreshCameraAggregateStatus()
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(RefreshCameraAggregateStatus));
+                return;
+            }
+            if (_lblCamAggregate == null) return;
+
+            bool allOk = _cameras.Count > 0 && _cameras.All(c => c.IsConnected);
+            _lblCamAggregate.ForeColor = allOk ? Color.FromArgb(46, 158, 107)   // 全部连接 → 绿
+                                               : Color.FromArgb(229, 72, 77);    // 任一断连 → 红
+            _lblCamAggregate.Text = "● 相机";
+
+            // 悬停明细：列出每台"名字+状态"，方便现场快速定位是哪台断了（只显示 IP，不带端口）
+            var lines = _cameras.Select((c, i) => $"相机{i + 1} {c.IpAddressOnly}：" + (c.IsConnected ? "已连接" : "断连"));
+            if (_camTip != null) _camTip.SetToolTip(_lblCamAggregate, string.Join("\n", lines));
+
+            if (_cmbCamOverview != null) _cmbCamOverview.Invalidate(); // 重绘各下拉项的状态圆点
         }
 
         /// <summary>
         /// 窗体首次显示完成（自动缩放已应用）：执行标题栏紧凑重排。
         /// 若在构造函数里重排，AutoScaleMode.Font 会在后续布局中按设计器基准缩放
         /// 控件（覆盖我们赋的 Location），表现为"字段仍停在设计器写死坐标"。
+        /// 启动全屏由 Designer 的 WindowState=Maximized 保证（保留边框与关闭按钮，
+        /// V1.11.1：客户要能正常关软件，不做无边框铺屏）。
         /// </summary>
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
+
+            // 铺满窗体所在屏幕的工作区（保留任务栏），等效全屏。
+            // 为什么手动铺满而不是 WindowState.Maximized（V1.11.0 关键）：
+            // Maximized 状态会被 Windows 强制切换成"可调整边框"，边缘拖拽缩放照常开放；
+            // 而 Normal + FixedSingle 的边框是真正固定、没有可调热区的，配合 WndProc
+            // 拦截双保险，按钮缩放、拖拽缩放、最大化窗口边缘缩放全部失效。
+            var work = Screen.FromControl(this).WorkingArea;
+            Bounds = new Rectangle(work.Location, work.Size);
+
             RelayoutTitleBar();
+        }
+
+        /// <summary>
+        /// 拦截鼠标命中测试（WM_NCHITTEST），禁止窗口边缘拖拽缩放（V1.11.0）。
+        /// 背景：仅设 FormBorderStyle=FixedSingle + MaximizeBox=false 不够——Windows 10/11
+        /// 对"最大化窗口"有系统级特性，即使固定边框，鼠标移到窗口边缘/四角仍会出现
+        /// 双箭头光标并允许拖拽调整大小，客户照样能拉出小窗。
+        /// 做法：把系统返回的"调整大小热区"（左/右/上/下/四角，HTLEFT..HTBOTTOMRIGHT）
+        /// 全部改写为 HTCLIENT（客户区），Windows 就不会进入 resize 拖拽流程；
+        /// 最小化/关闭按钮（HTMINBUTTON/HTCLOSE）与标题栏拖动（HTCAPTION）不受影响。
+        /// </summary>
+        protected override void WndProc(ref Message m)
+        {
+            const int WM_NCHITTEST = 0x0084;
+            if (m.Msg == WM_NCHITTEST)
+            {
+                base.WndProc(ref m);
+                int hit = m.Result.ToInt32();
+                // 这些命中码 = 窗口边缘/四角的调整大小热区，一律当作客户区处理
+                if (hit >= 10 && hit <= 17) // HTLEFT(10) HTRIGHT(11) HTTOP(12) HTTOPLEFT(13)
+                {                           // HTTOPRIGHT(14) HTBOTTOM(15) HTBOTTOMLEFT(16) HTBOTTOMRIGHT(17)
+                    m.Result = new IntPtr(1); // HTCLIENT：当作点击客户区，不进入缩放
+                }
+                return;
+            }
+            base.WndProc(ref m);
         }
 
         /// <summary>
@@ -241,61 +439,50 @@ namespace CommandCenter.Views
         /// 自己这一半——相机灯多（每台占 96px，Dock.Right）时右侧总体宽度变大，
         /// 挤占了画面，把"系统设置"按钮等最右侧字段推进灯区并被盖住。
         /// 修复：先统计右侧所有 Dock.Right 控件的总宽 rightDockWidth，把左侧字段的
-        /// 最大 X 限制为 标题栏宽 - 右内边距 - rightDockWidth；空间不足时按优先级
-        /// （hidePriority：产品型号→配方→序列号→计数→分隔线）逐个隐藏低价值字段
-        /// 再重排，保证"系统设置"按钮始终可见、不被灯盖住。
-        /// 注意：这里的隐藏只是运行时"放不下才让位"，不改 ShowXxx 配置；
-        /// 热更（InitTitleBarFields）会按配置值重新设置可见性再调用本方法。
+        /// 最大 X 限制为 标题栏宽 - 右内边距 - rightDockWidth。
+        ///
+        /// 【V1.10.0：去掉"空间不足隐藏字段让位"逻辑】
+        /// 早期版本在放不下时会按 hidePriority（产品→配方→序列号→计数→分隔线）逐个
+        /// 隐藏低价值字段再重排，保证按钮可见。但相机台数多时会把 cmbRecipe（配方
+        /// 下拉框）等字段直接藏掉，现场"配方显示不出来"即由此而来。V1.10.0 相机区已
+        /// 聚拢成"总标签+下拉框"固定宽度容器，右侧不再随台数膨胀，无需再隐藏任何字段。
+        /// 现在所有可见字段一律完整排布，宽度超出右侧灯区边界时停止排布（不隐藏）。
+        /// 注意：这里只负责排布，不改 ShowXxx 配置；字段可见性由 ApplyConfigVisibility 决定。
         /// </summary>
         private void RelayoutTitleBar()
         {
             const int barHeight = 48; // 标题栏固定高度（见 Designer 的 pnlTitleBar.Size）
 
-            // 先恢复配置可见性：上次重排可能因空间不足临时隐藏了低价值字段，
-            // 窗口拉大/热更后必须把"配置说该显示"的字段先亮回来，再按当前空间压缩。
+            // 按配置开关恢复字段可见性（配置说该显示的字段必须显示，不再被压缩隐藏）。
             ApplyConfigVisibility();
 
             // 排布顺序固定：产品前缀 → 配方下拉框 → 序列号标题 → 序列号框 → | → 总数 → OK → NG → | → 系统设置按钮
             Control[] seq = { lblProductPrefix, cmbRecipe, lblSerialTitle, lblSerial, lblSep1,
                               lblTotal, lblOk, lblNg, lblSep2, btnSettings };
 
-            // 字段"让位"优先级（低→高）：空间不足时从低往高隐藏，系统设置按钮永远保留。
-            // 为什么产品/配方先让位：它们只是上下文提示，丢了不影响操作；计数、按钮是刚需。
-            Control[] hidePriority = { lblProductPrefix, cmbRecipe, lblSerialTitle, lblSerial,
-                                       lblSep1, lblTotal, lblOk, lblNg, lblSep2, btnSettings };
-
-            // 右侧 Dock 区（PLC 灯 + 全部相机灯）占用的总宽：Dock.Right 控件从右往左叠，
-            // 每个灯之间留 6px 视觉间距（灯间距是内在间距，宽幅估算 ±几像素不影响正确性）。
+            // 右侧 Dock 区（PLC 灯 + 相机聚拢容器）占用的总宽：Dock.Right 控件从右往左叠，
+            // 每个控件之间留 6px 视觉间距（间距是内在间距，宽幅估算 ±几像素不影响正确性）。
             int rightDockWidth = 0;
             foreach (Control c in pnlTitleBar.Controls)
                 if (c.Dock == DockStyle.Right && c.Visible)
                     rightDockWidth += c.Width + 6;
-            // 左侧字段可用的最大 X（标题栏宽 - 右内边距 - 右侧灯区宽）。
+            // 左侧字段可用的最大 X（标题栏宽 - 右内边距 - 右侧 Dock 区宽）。
             int maxX = pnlTitleBar.ClientSize.Width - 12 - rightDockWidth;
 
-            while (true)
+            // 单次从左往右排布：所有可见字段都摆放，放不下（越过右边界）就停，不隐藏任何字段。
+            int x = 12; // 与设计器 Padding(12,0,12,0) 左内边距保持一致
+            foreach (var c in seq)
             {
-                int x = 12; // 与设计器 Padding(12,0,12,0) 左内边距保持一致
-                bool fits = true;
-                foreach (var c in seq)
-                {
-                    if (!c.Visible) continue;
-                    int w = 0;
-                    if (c is Button)      w = c.Width + 12;
-                    else if (c is ComboBox) w = c.Width + 12;
-                    else if (c == lblSerial) w = c.Width + 18;        // 固定宽度显示框
-                    else                  w = ((Label)c).PreferredWidth + 18;
-                    if (x + w > maxX) { fits = false; break; }          // 放不下→本次排布报废
-                    int y = (barHeight - c.Height) / 2;                 // 垂直居中
-                    c.Location = new Point(x, y);
-                    x += w;
-                }
-                if (fits) return; // 全部可见字段都放下，完成
-
-                // 放不下：隐藏下一个"最可让位"的可见字段后重排（按钮最后，永不主动隐藏它）
-                var toHide = hidePriority.FirstOrDefault(h => h.Visible);
-                if (toHide == null) return; // 已无可让位字段（极端情况），按当前可见性排到哪算哪
-                toHide.Visible = false;
+                if (!c.Visible) continue;
+                int w = 0;
+                if (c is Button)         w = c.Width + 12;
+                else if (c is ComboBox)  w = c.Width + 12;
+                else if (c == lblSerial) w = c.Width + 18;        // 固定宽度显示框
+                else                     w = ((Label)c).PreferredWidth + 18;
+                if (x + w > maxX) break;                          // 越过右边界：停止排布，不隐藏
+                int y = (barHeight - c.Height) / 2;               // 垂直居中
+                c.Location = new Point(x, y);
+                x += w;
             }
         }
 
@@ -513,12 +700,19 @@ namespace CommandCenter.Views
                 sc.Open(); // 串口打开失败 / TCP 连不上都不影响主流程，后台持续重连
             }
 
-            // 连接状态指示灯：PLC 与每台相机 断连时 UI 实时变红，重连成功回绿
+            // 连接状态指示灯（V1.10.0 双模式）：
+            //   ≤2台：每台一个灯，断连变红、重连回绿（UpdateDeviceStatus）；
+            //   ≥3台：每台灯不存在（_lblCamStatuses 为 null），改为刷新"总状态标签+下拉圆点"。
             _plc.ConnectionChanged += (s, c) => UpdateDeviceStatus(lblPlcStatus, c);
             for (int i = 0; i < _cameras.Count; i++)
             {
                 int idx = i; // 闭包锁定下标，避免循环变量被所有事件共享
-                _cameras[i].ConnectionChanged += (s, c) => UpdateDeviceStatus(_lblCamStatuses[idx], c);
+                _cameras[i].ConnectionChanged += (s, c) =>
+                {
+                    if (_lblCamStatuses != null && idx < _lblCamStatuses.Length && _lblCamStatuses[idx] != null)
+                        UpdateDeviceStatus(_lblCamStatuses[idx], c);   // ≤2台：更新对应灯
+                    RefreshCameraAggregateStatus();                    // ≥3台：刷新聚合（≤2台时内部直接返回）
+                };
             }
 
             _monitor?.Start();

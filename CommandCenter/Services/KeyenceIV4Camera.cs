@@ -71,6 +71,9 @@ namespace CommandCenter.Services
         /// <summary>日志/界面区分用标签：IP:端口（多相机时能分清断开的是哪台）</summary>
         public string IpLabel => $"{_cfg.IpAddress}:{_cfg.CommandPort}";
 
+        /// <summary>仅 IP 地址（V1.10.0：标题栏相机下拉列表只显示 IP，不显示端口）</summary>
+        public string IpAddressOnly => _cfg.IpAddress;
+
         private bool _lastFailed; // 上一次连接是否失败（日志降噪）
 
         /// <summary>

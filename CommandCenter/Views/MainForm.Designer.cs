@@ -287,6 +287,18 @@ namespace CommandCenter.Views
             this.Font = new System.Drawing.Font("微软雅黑", 10F);
             this.Name = "MainForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
+            // V1.11.0 默认全屏 + 禁用所有缩放手段（按钮 + 拖拽）：
+            //   - FixedSingle：固定单线边框，Normal 状态下窗口边缘没有可调热区（不可拖拽）；
+            //   - 注意：不能用 WindowState.Maximized！最大化状态会被 Windows 强行切换成
+            //     可调整边框，边缘拖拽缩放照常开放（WndProc 拦截也挡不住系统这一层）。
+            //     铺满屏幕由 MainForm.OnShown 里手动 Bounds=WorkingArea 实现（等效全屏）；
+            //   - MaximizeBox=false：中间的"最大化/还原"按钮禁用（变灰不可点）；
+            //   - MinimizeBox=true：最小化按钮保留可用；
+            //   - 关闭按钮完整保留，客户可正常退出。
+            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedSingle;
+            this.MaximizeBox = false;
+            this.MinimizeBox = true;
+            this.WindowState = System.Windows.Forms.FormWindowState.Normal;
             this.Text = "CommandCenter - 相机/PLC 命令中心";
             this.pnlTitleBar.ResumeLayout(false);
             this.pnlTitleBar.PerformLayout();
