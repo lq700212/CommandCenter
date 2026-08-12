@@ -315,10 +315,12 @@ namespace CommandCenter.Views
             this.lblPwdHint.Text = "新密码至少 6 位，改后需用新密码登录";
             // 
             // LoginForm
+            // 【V1.9.4】窗体高度 280→256：下方空白过多，两个面板内容（按钮行最高点 ~196）
+            //   在 208 高的面板里仍有余量，不会裁切；横幅 48 + 面板 208 = 256。
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 19F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(380, 280);
+            this.ClientSize = new System.Drawing.Size(380, 256);
             this.Controls.Add(this.pnlLogin);
             this.Controls.Add(this.pnlChangePwd);
             this.Controls.Add(this.pnlHeader);

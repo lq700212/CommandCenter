@@ -242,6 +242,8 @@ namespace CommandCenter.Views
         /// BackColor 用配置色（绿=OK、红=NG），ForeColor 白色，字号 11F→12F，
         /// 四周留 padding 让色块饱满；AutoSize 保持 true，色块宽度随数字自动伸缩，
         /// RelayoutTitleBar 的 PreferredWidth 布局照常工作、垂直居中公式不变。
+        /// 【V1.9.2】客户反馈色块不够醒目，左右 padding 由 6→14、上下 2→3，整体加宽放大；
+        /// 【V1.9.3】客户仍嫌不够醒目，左右 padding 再 14→22、上下 3→5，继续加宽放大。
         /// </summary>
         /// <param name="lbl">要样式化的标题栏计数标签（lblOk / lblNg）</param>
         /// <param name="color">色块底色（DisplayConfig.OkColor / NgColor）</param>
@@ -250,7 +252,7 @@ namespace CommandCenter.Views
             lbl.BackColor = color;
             lbl.ForeColor = Color.White;
             lbl.Font = new Font("微软雅黑", 12F, FontStyle.Bold);
-            lbl.Padding = new Padding(6, 2, 6, 2);
+            lbl.Padding = new Padding(22, 5, 22, 5);
             lbl.TextAlign = ContentAlignment.MiddleCenter;
         }
 
