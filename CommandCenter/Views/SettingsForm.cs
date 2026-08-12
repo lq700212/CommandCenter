@@ -190,38 +190,14 @@ namespace CommandCenter.Views
             // 添加一台相机：直接往表格追加一行默认值，现场改 IP/端口/取图方式即可
             btnAddCam.Click += (s, e) => gridCameras.Rows.Add("192.168.1.1", 8500, "", "Ftp");
             // 删除选中：把当前选中的行整行移除；没有选中行则什么都不做
-            btnDelCam.Click += (s, e) =>
-            {
-                // IsNewRow（AllowUserToAddRows 附带的"新行"）不算真实相机行，删不了也没必要删；
-                // 其余选中的行逐个移除
-                var rows = gridCameras.SelectedRows.Cast<DataGridViewRow>()
-                    .Where(r => !r.IsNewRow).ToList();
-                if (rows.Count == 0)
-                {
-                    // 没有可删的选中行（含只点了"新行"的情况），提示一句让操作员先点选中
-                    MessageBox.Show("请先点击表格中要删除的相机行（整行高亮），再点\"删除选中\"。",
-                        "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
-                foreach (var r in rows)
-                    gridCameras.Rows.Remove(r);
-            };
+            // 【V1.8.4 修复】末尾"新行"（AllowUserToAddRows 附带的 * 占位行）不在 SelectedRows 里，
+            //   用户点击该空白行再点删除，原来会误报"未选中行"——现改为：删除=放弃该占位行。
+            btnDelCam.Click += (s, e) => DeleteSelectedRows(gridCameras, "相机");
+
             // 添加一台扫码枪：追加一行默认串口配置（V1.8.1 多台）
             btnAddScanner.Click += (s, e) => gridScanners.Rows.Add(false, "Serial", "COM3", 115200, "1", "None", "192.168.1.110", 9005);
-            // 删除选中的扫码枪行（与相机同样的"先选中再删"交互）
-            btnDelScanner.Click += (s, e) =>
-            {
-                var rows = gridScanners.SelectedRows.Cast<DataGridViewRow>()
-                    .Where(r => !r.IsNewRow).ToList();
-                if (rows.Count == 0)
-                {
-                    MessageBox.Show("请先点击表格中要删除的扫码枪行（整行高亮），再点\"删除选中\"。",
-                        "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
-                foreach (var r in rows)
-                    gridScanners.Rows.Remove(r);
-            };
+            // 删除选中的扫码枪行（与相机同样的"先选中再删"交互；V1.8.4 同相机修复空白行误报）
+            btnDelScanner.Click += (s, e) => DeleteSelectedRows(gridScanners, "扫码枪");
             // 保存：把界面值回写内存配置，返回 DialogResult.OK（上层负责写盘与提示）
             btnSave.Click += OnSave;
             // 打开目录结构可视化配置对话框；改的是同一 _cfg.Image 实例，返回后刷新预览
@@ -247,7 +223,59 @@ namespace CommandCenter.Views
             };
         }
 
-        /// <summary>把界面值回写内存配置（V1.6.0：保存后由 MainForm 热生效，免重启）。</summary>
+        /// <summary>
+        /// 删除 DataGridView 中选中的真实数据行（相机/扫码枪共用，V1.8.4 修复）。
+        ///
+        /// 【V1.8.4 修复的 bug】表格开了 AllowUserToAddRows=true，末尾会有一个"新行"
+        /// （DataGridViewRow.IsNewRow，显示为带 * 的空白行）供用户直接输入新增。但：
+        ///   ① 用户点击这个末尾空白行时，DataGridView 不把它放进 SelectedRows 集合；
+        ///   ② 新行本身也无法用 Rows.Remove 删除（Remove 对它抛 ArgumentOutOfRange）。
+        ///   因此旧实现"SelectedRows 为空就弹'未选中行'"对用户点末尾空白行再点删除的场景
+        ///   是误报——用户明明选中了一行却提示没选中。
+        /// 本方法的三段式处理：
+        ///   1) 优先删 SelectedRows 中的真实行（整行高亮选中的正常场景）；
+        ///   2) 若 SelectedRows 为空但光标（CurrentRow）停在一个真实行上，按"当前行"删除
+        ///      （点中单元格即视为选中该行，与 FullRowSelect 的直觉一致）；
+        ///   3) 若光标停在末尾新行上，说明用户想删的是"这个空白占位行"：临时把
+        ///      AllowUserToAddRows 置 false 再恢复 true，新行会随之为空重建，等效"删掉了空白行"，
+        ///      不再误报"未选中行"。
+        /// 真实数据行一个都不剩时，删除后表格自然只留新行；保存时 OnSave 对空行有兜底。
+        /// </summary>
+        /// <param name="grid">要操作的目标表格（gridCameras / gridScanners）</param>
+        /// <param name="rowName">提示文案里的行名（"相机" / "扫码枪"），便于区分两台表格</param>
+        private void DeleteSelectedRows(DataGridView grid, string rowName)
+        {
+            // 1) 选中集合里的真实行（排除新行——新行删不了）
+            var rows = grid.SelectedRows.Cast<DataGridViewRow>()
+                .Where(r => !r.IsNewRow).ToList();
+
+            // 2) 没整行选中时，光标所在真实行也算"选中"（点单元格即选中行）
+            if (rows.Count == 0 && grid.CurrentRow != null && !grid.CurrentRow.IsNewRow)
+                rows.Add(grid.CurrentRow);
+
+            if (rows.Count > 0)
+            {
+                foreach (var r in rows)
+                    grid.Rows.Remove(r);
+                return;
+            }
+
+            // 3) 到这里说明 SelectedRows 与 CurrentRow 都是空的/新行——用户点的是末尾空白占位行。
+            //    临时关闭自动新行再恢复：新行随之为空重建，即"删除空白行"，不再误报。
+            if (grid.CurrentRow != null && grid.CurrentRow.IsNewRow)
+            {
+                grid.AllowUserToAddRows = false;
+                grid.AllowUserToAddRows = true;
+                return;
+            }
+
+            // 兜底：确实没有可删的行（表格没有焦点/没有任何行）才提示
+            MessageBox.Show($"请先点击表格中要删除的{rowName}行（整行高亮），再点\"删除选中\"。",
+                "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        /// <summary>
+        /// 把界面值回写内存配置（V1.6.0：保存后由 MainForm 热生效，免重启）。</summary>
         private void OnSave(object sender, EventArgs e)
         {
             _cfg.Plc.IpAddress = txtPlcIp.Text.Trim();
