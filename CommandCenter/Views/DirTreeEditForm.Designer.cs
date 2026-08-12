@@ -70,7 +70,7 @@ namespace CommandCenter.Views
             this.txtSaveRootDir.Name = "txtSaveRootDir";
             this.txtSaveRootDir.Size = new System.Drawing.Size(420, 25);
             this.txtSaveRootDir.TabIndex = 1;
-            this.txtSaveRootDir.Text = "D:\\CommandCenter\\Images";
+            this.txtSaveRootDir.Text = "E:\\Images";
             //
             // btnBrowse
             //

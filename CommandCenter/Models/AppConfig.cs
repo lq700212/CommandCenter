@@ -168,8 +168,8 @@ namespace CommandCenter.Models
     /// </summary>
     public class PlcConfig
     {
-        /// <summary>PLC IP（如 192.168.1.10）</summary>
-        public string IpAddress { get; set; } = "192.168.1.10";
+        /// <summary>PLC IP（当前现场为 19.87.6.1）</summary>
+        public string IpAddress { get; set; } = "19.87.6.1";
 
         /// <summary>Modbus TCP 端口，标准 502</summary>
         public int Port { get; set; } = 502;
@@ -305,7 +305,7 @@ namespace CommandCenter.Models
     public class ImageConfig
     {
         /// <summary>图像保存根目录（不在则自动创建）</summary>
-        public string SaveRootDir { get; set; } = @"D:\CommandCenter\Images";
+        public string SaveRootDir { get; set; } = @"E:\Images";
 
         /// <summary>
         /// 目录层级列表（可视化配置的主数据）：每个元素是一级目录名或生成规则，

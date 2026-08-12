@@ -14,7 +14,11 @@ Config/*.json
 .vs/
 
 # opencode 工具本地状态（node_modules 依赖 + 会话计划/记忆，不入库）
-.opencode/
+# 例外：skills/ 沉淀的调试经验技能要入库共享，其余（node_modules/package.json
+# 等）由 .opencode/.gitignore 负责忽略。
+.opencode/*
+!.opencode/skills/
+!.opencode/skills/**
 
 # NuGet 包缓存目录（项目依赖已拷入 CommandCenter/libs/ 直接引用，不靠 restore）
 packages/

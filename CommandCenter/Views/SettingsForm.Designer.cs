@@ -113,7 +113,7 @@ namespace CommandCenter.Views
             this.txtPlcIp.Name = "txtPlcIp";
             this.txtPlcIp.Size = new System.Drawing.Size(150, 25);
             this.txtPlcIp.TabIndex = 1;
-            this.txtPlcIp.Text = "192.168.1.100";
+            this.txtPlcIp.Text = "19.87.6.1";
             //
             // lblPlcPort
             //
@@ -191,7 +191,7 @@ namespace CommandCenter.Views
             this.txtSaveDir.Name = "txtSaveDir";
             this.txtSaveDir.Size = new System.Drawing.Size(570, 25);
             this.txtSaveDir.TabIndex = 9;
-            this.txtSaveDir.Text = "D:\\CommandCenter\\Images";
+            this.txtSaveDir.Text = "E:\\Images";
             //
             // btnEditDirs
             // 打开"图片存储目录结构配置"对话框（DirTreeEditForm），可视化编辑目录层级与文件名规则。
