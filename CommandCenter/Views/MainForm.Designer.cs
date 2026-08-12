@@ -322,7 +322,7 @@ namespace CommandCenter.Views
             this.MaximizeBox = false;
             this.MinimizeBox = true;
             this.WindowState = System.Windows.Forms.FormWindowState.Normal;
-            this.Text = "CommandCenter - 相机/PLC 命令中心";
+            this.Text = "上位机控制中心";
             this.pnlTitleBar.ResumeLayout(false);
             this.pnlTitleBar.PerformLayout();
             this.pnlStatusBar.ResumeLayout(false);
