@@ -24,10 +24,12 @@ namespace CommandCenter.Views
     /// │            │ 192…   │8500│ Ftp/Tcp  │ D:\…\ftp\cam1          │ │
     /// │            └────────┴────┴──────────┴────────────────────────┘ │
     /// │            [添加一台] [删除选中]                               │
-    /// │ 扫码枪列表: ┌────┬────────┬────────┬────┬────────┬─────┬─────┐ │
-    /// │              │启用 │ 方式    │ IP     │端口 │串口名  │波特率│停止位│ │
-    /// │              │√  │ Tcp     │192…    │9005│ COM3   │115200│ 1   │ │
-    /// │              └────┴────────┴────────┴────┴────────┴─────┴─────┘ │
+    /// │ 扫码枪列表: ┌────┬────────┬────────────────────┬────────────────────┐ │
+    /// │              │启用 │ 方式    │ 串口参数(Serial)   │ 网络参数(Tcp)       │ │
+    /// │              │√  │ Tcp     │ 串口名/波特率/停止位│ IP/端口/触发指令    │ │
+    /// │              └────┴────────┴────────────────────┴────────────────────┘ │
+    /// │            按"方式"列自动显隐：全 Tcp 只显示网络参数列，全 Serial 只显示 │
+    /// │            串口参数列，混用则全显示（DataGridView 列显隐是整列范围的）  │
     /// │            [添加一台] [删除选中]  [保存] [取消]                   │
     /// └─────────────────────────────────────────────────────────────┘
     /// 布局（静态控件）在 SettingsForm.Designer.cs 里可视化维护；
@@ -132,7 +134,9 @@ namespace CommandCenter.Views
         }
 
         /// <summary>给扫码枪表格建好列结构（V1.8.1 起，列固定，运行时加一次即可）。
-        /// 列对齐 ScanConfig 字段：启用/方式/串口参数/网络参数，一台扫码枪一行。</summary>
+        /// 列对齐 ScanConfig 字段：启用/方式/串口参数/网络参数，一台扫码枪一行。
+        /// 【V1.12.2】"方式"列切换时会按当前行的方式动态隐藏/显示不相关列组合
+        /// （选 Tcp 就隐藏串口列，选 Serial 就隐藏网络列），见 ApplyScannerModeColumns。</summary>
         private void SetupScannerGridColumns()
         {
             if (gridScanners.Columns["Mode"] == null)
@@ -166,22 +170,91 @@ namespace CommandCenter.Views
                 // 网络参数（Mode=Tcp 用）
                 gridScanners.Columns.Add("IpAddress", "IP");
                 gridScanners.Columns.Add("Port", "端口");
+                // 触发指令（仅 Tcp 用，V1.12.0）：基恩士 SR 连接后需发 LON 才读码，
+                // 留空则不发（对应扫码枪设成"上电自动读码"模式）
+                gridScanners.Columns.Add("TriggerCommand", "触发指令");
+
+                // V1.12.2：ComboBox 列的值要等 CommitEdit 后才触发 CellValueChanged，
+                // 因此在 CurrentCellDirtyStateChanged（单元格"变脏"即值被改）时主动提交，
+                // 才能收到"方式列从 Serial↔Tcp 切换"的通知，从而驱动列显隐刷新。
+                gridScanners.CurrentCellDirtyStateChanged += (s, e) =>
+                {
+                    if (gridScanners.IsCurrentCellDirty
+                        && gridScanners.CurrentCell?.OwningColumn?.Name == "Mode")
+                    {
+                        gridScanners.CommitEdit(DataGridViewDataErrorContexts.Commit);
+                        // CommitEdit 会导致当前单元格结束编辑，此时再调用列显隐刷新
+                        ApplyScannerModeColumns();
+                    }
+                };
             }
         }
 
-        /// <summary>把现有扫码枪配置逐行填进表格（V1.8.1）。空列表则留一行默认串口配置当模板。</summary>
+        /// <summary>
+        /// 按"方式"列自动显隐串口/网络参数列（V1.12.2）。
+        /// 【为什么基于整列而非单行】DataGridView 的列可见性（Visible）是【整列】属性，
+        /// 不是每行独立——所以不能"这一行隐藏、那一行显示"。采用约定：
+        ///   - 表格全部行的方式都是 Tcp → 只显示网络列（IP/端口/触发指令），隐藏串口列；
+        ///   - 全部行都是 Serial → 只显示串口列，隐藏网络列；
+        ///   - 混用（有 Tcp 也有 Serial）→ 全部列都显示（否则某一行会看不到自己需要的列）；
+        ///   - 空表格（没数据行）→ 保持全部显示，方便现场加行。
+        /// 这样"全 Tcp 场景"（本项目现状：网口扫码枪）界面干干净净只有网络参数。
+        /// </summary>
+        private void ApplyScannerModeColumns()
+        {
+            bool hasSerial = false, hasTcp = false;
+            foreach (DataGridViewRow row in gridScanners.Rows)
+            {
+                if (row.IsNewRow) continue; // 跳过末尾"新行"占位行
+                object v = row.Cells["Mode"].Value;
+                string mode = v == null ? "" : v.ToString().Trim();
+                if (mode.Equals("Serial", StringComparison.OrdinalIgnoreCase)) hasSerial = true;
+                else if (mode.Equals("Tcp", StringComparison.OrdinalIgnoreCase)) hasTcp = true;
+            }
+
+            // 空表格（没有任何数据行）：全部显示，现场加行时自己看得见所有列
+            if (!hasSerial && !hasTcp)
+            {
+                SetScannerColsVisible("IpAddress", true);  SetScannerColsVisible("Port", true);
+                SetScannerColsVisible("TriggerCommand", true);
+                SetScannerColsVisible("PortName", true);   SetScannerColsVisible("BaudRate", true);
+                SetScannerColsVisible("StopBits", true);   SetScannerColsVisible("Parity", true);
+                return;
+            }
+
+            // 非混用：以唯一方式显隐对应列组；混用则全部显示兜底
+            bool showNet = hasTcp && !hasSerial;   // 全 Tcp（或只有网络列被用）才显示网络列
+            bool showSerial = hasSerial && !hasTcp; // 全 Serial 才显示串口列
+            SetScannerColsVisible("IpAddress", showNet);
+            SetScannerColsVisible("Port", showNet);
+            SetScannerColsVisible("TriggerCommand", showNet);
+            SetScannerColsVisible("PortName", showSerial);
+            SetScannerColsVisible("BaudRate", showSerial);
+            SetScannerColsVisible("StopBits", showSerial);
+            SetScannerColsVisible("Parity", showSerial);
+        }
+
+        /// <summary>设置扫码枪表格某列的可见性（列不存在时静默忽略，防 Column name 拼错崩窗）。</summary>
+        private void SetScannerColsVisible(string colName, bool visible)
+        {
+            var col = gridScanners.Columns[colName];
+            if (col != null) col.Visible = visible;
+        }
+
+        /// <summary>把现有扫码枪配置逐行填进表格（V1.8.1）。空列表则留一行默认 TCP 配置当模板。</summary>
         private void LoadScannerRows()
         {
             foreach (var s in _cfg.Scanners ?? new List<ScanConfig>())
             {
-                gridScanners.Rows.Add(s.Enabled,
-                    string.IsNullOrWhiteSpace(s.Mode) ? "Serial" : s.Mode,   // 旧配置 Mode 为空按串口兜底显示
+                gridScanners.Rows.Add(s.Enabled, s.Mode,
                     s.PortName, s.BaudRate, s.StopBits, s.Parity,
-                    s.IpAddress, s.Port);
+                    s.IpAddress, s.Port, s.TriggerCommand);
             }
-            // 至少留一行可见（默认值即 ScanConfig 模型默认）
+            // 至少留一行可见（默认值即 ScanConfig 模型默认；现场扫码枪实测 IP 19.87.6.100:9004，触发指令 LON）
             if (gridScanners.Rows.Count == 0)
-                gridScanners.Rows.Add(false, "Serial", "COM3", 115200, "1", "None", "192.168.1.110", 9005);
+                gridScanners.Rows.Add(false, "Tcp", "", 115200, "1", "None", "19.87.6.100", 9004, "LON");
+            // 行填完后再刷新一次列显隐（数据行刚加进来，列显隐要跟着实际方式走）
+            ApplyScannerModeColumns();
         }
 
         /// <summary>
@@ -198,10 +271,18 @@ namespace CommandCenter.Views
             //   用户点击该空白行再点删除，原来会误报"未选中行"——现改为：删除=放弃该占位行。
             btnDelCam.Click += (s, e) => DeleteSelectedRows(gridCameras, "相机");
 
-            // 添加一台扫码枪：追加一行默认串口配置（V1.8.1 多台）
-            btnAddScanner.Click += (s, e) => gridScanners.Rows.Add(false, "Serial", "COM3", 115200, "1", "None", "192.168.1.110", 9005);
+            // 添加一台扫码枪：追加一行默认配置（V1.8.1 多台；默认 TCP 现场实测 IP/触发指令，V1.12.0）
+            btnAddScanner.Click += (s, e) =>
+            {
+                gridScanners.Rows.Add(false, "Tcp", "", 115200, "1", "None", "19.87.6.100", 9004, "LON");
+                ApplyScannerModeColumns(); // V1.12.2：新行方式已知，立刻按它刷新列显隐
+            };
             // 删除选中的扫码枪行（与相机同样的"先选中再删"交互；V1.8.4 同相机修复空白行误报）
-            btnDelScanner.Click += (s, e) => DeleteSelectedRows(gridScanners, "扫码枪");
+            btnDelScanner.Click += (s, e) =>
+            {
+                DeleteSelectedRows(gridScanners, "扫码枪");
+                ApplyScannerModeColumns(); // V1.12.2：删行后方式组合可能变化（如唯一一台 Tcp 被删）
+            };
             // 保存：把界面值回写内存配置，返回 DialogResult.OK（上层负责写盘与提示）
             btnSave.Click += OnSave;
             // 打开目录结构可视化配置对话框；改的是同一 _cfg.Image 实例，返回后刷新预览
@@ -323,7 +404,7 @@ namespace CommandCenter.Views
             {
                 if (r.IsNewRow) continue; // 表格末尾的"新行"不算真实扫码枪
                 bool enabled = r.Cells["Enabled"].Value is bool b && b;
-                string mode = r.Cells["Mode"].Value == null ? "Serial" : r.Cells["Mode"].Value.ToString();
+                string mode = r.Cells["Mode"].Value?.ToString() ?? "";
                 string portName = r.Cells["PortName"].Value == null ? "" : r.Cells["PortName"].Value.ToString().Trim();
                 int baud = 115200;
                 string baudTxt = r.Cells["BaudRate"].Value == null ? "" : r.Cells["BaudRate"].Value.ToString();
@@ -331,21 +412,24 @@ namespace CommandCenter.Views
                 string stopBits = r.Cells["StopBits"].Value == null ? "" : r.Cells["StopBits"].Value.ToString().Trim();
                 string parity = r.Cells["Parity"].Value == null ? "" : r.Cells["Parity"].Value.ToString().Trim();
                 string ip = r.Cells["IpAddress"].Value == null ? "" : r.Cells["IpAddress"].Value.ToString().Trim();
-                int port = 9005;
+                int port = 9004;
                 string portTxt = r.Cells["Port"].Value == null ? "" : r.Cells["Port"].Value.ToString();
-                if (!int.TryParse(portTxt, out port)) port = 9005;
+                if (!int.TryParse(portTxt, out port)) port = 9004;
+                // V1.12.0 触发指令列：Tcp 模式用（基恩士 SR 的 LON），留空表示连上后不发指令
+                string trigger = r.Cells["TriggerCommand"].Value == null ? "" : r.Cells["TriggerCommand"].Value.ToString().Trim();
                 // 全空的模板行（什么都没填）忽略，避免保存一堆垃圾行
                 if (string.IsNullOrWhiteSpace(portName) && string.IsNullOrWhiteSpace(ip)) continue;
                 scanners.Add(new ScanConfig
                 {
                     Enabled = enabled,
-                    Mode = string.IsNullOrWhiteSpace(mode) ? "Serial" : mode.Trim(),
+                    Mode = mode.Trim(),
                     PortName = portName,
                     BaudRate = Math.Max(1, baud),
                     StopBits = string.IsNullOrWhiteSpace(stopBits) ? "1" : stopBits,
                     Parity = string.IsNullOrWhiteSpace(parity) ? "None" : parity,
-                    IpAddress = string.IsNullOrWhiteSpace(ip) ? "192.168.1.110" : ip,
-                    Port = Math.Max(1, port)
+                    IpAddress = string.IsNullOrWhiteSpace(ip) ? "19.87.6.100" : ip,
+                    Port = Math.Max(1, port),
+                    TriggerCommand = trigger
                 });
             }
             if (scanners.Count == 0) scanners.Add(new ScanConfig()); // 兜底：保留一条默认（未启用）

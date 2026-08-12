@@ -21,6 +21,14 @@ namespace CommandCenter.Services
         /// <summary>启动（打开串口 / 发起 TCP 连接与后台读取）。返回 false 表示启动失败
         /// （串口打不开等），不影响主流程（可手动输入序列号）；TCP 实现立即返回 true（连接在后台）。</summary>
         bool Open();
+
+        /// <summary>
+        /// 发送触发指令（V1.12.0）：基恩士 SR 系列扫码枪多数需先发一条"打开激光/开始读取"
+        /// 指令（如 LON）才开始读码。TCP 实现（ScannerTcpService）每次连接成功后会自动发送
+        /// 一次；本方法供界面手动重发（如测试时扫码枪突然不读，可点一下重新触发）。
+        /// 串口扫码枪上电即读码，无需触发，串口实现为空操作。返回 true 表示指令已发出。
+        /// </summary>
+        bool SendTrigger();
     }
 
     /// <summary>
@@ -121,6 +129,9 @@ namespace CommandCenter.Services
                 default: return Parity.None;
             }
         }
+
+        /// <summary>触发指令：串口扫码枪上电即读码，无需触发指令，直接返回 true（V1.12.0）。</summary>
+        public bool SendTrigger() => true;
 
         public void Dispose()
         {

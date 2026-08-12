@@ -43,6 +43,9 @@ namespace CommandCenter.Services
 
         public PlcService(PlcConfig cfg) => _cfg = cfg;
 
+        /// <summary>日志/界面区分用标签：IP:端口（多设备时能分清是哪台）</summary>
+        public string IpLabel => $"{_cfg.IpAddress}:{_cfg.Port}";
+
         private bool _lastFailed; // 上一次连接是否失败（用于日志降噪）
 
         /// <summary>
@@ -223,6 +226,17 @@ namespace CommandCenter.Services
             if (!(tOk && oOk && nOk))
                 LogHelper.Warn($"计数上报未全部成功：总数={tOk} OK={oOk} NG={nOk}（PLC 通讯不稳定或寄存器越界）");
         }
+
+        // ──────────────── 通用 D 地址读写（V1.12.0，功能测试窗体用）────────────────
+        // 功能测试窗体（DevTestForm）要"读/写任意 D 寄存器"验证 PLC 逻辑，
+        // 因此把内部 SafeRead/SafeWrite 以公开方法形式暴露，地址由调用方指定。
+        // 直接复用本服务已建立的连接（EnsureConnected），不额外建连。
+
+        /// <summary>通用读：读取指定 D 地址的单个保持寄存器。返回 true 表示通讯成功。</summary>
+        public bool ReadRegister(ushort dAddress, out ushort value) => SafeRead(dAddress, out value);
+
+        /// <summary>通用写：写入指定 D 地址的单个保持寄存器。返回 true 表示通讯成功。</summary>
+        public bool WriteRegister(ushort dAddress, ushort value) => SafeWrite(dAddress, value);
 
         private bool SafeRead(ushort address, out ushort value)
         {

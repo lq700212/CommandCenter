@@ -6,12 +6,36 @@ using CommandCenter.Utils;
 namespace CommandCenter.Views
 {
     /// <summary>
+    /// 登录角色（V1.12.0）：LoginForm 校验通过后置入 Role 属性，
+    /// MainForm.OpenSettings 据此决定打开哪个界面：
+    ///   Admin → 系统设置窗体 SettingsForm（改配置，权限最高）；
+    ///   Developer → 功能测试窗体 DevTestForm（相机/PLC 通讯验证，不碰业务配置）。
+    /// </summary>
+    public enum LoginRole
+    {
+        /// <summary>未登录/取消（默认值，调用方应忽略）</summary>
+        None,
+
+        /// <summary>管理员账号：进系统设置</summary>
+        Admin,
+
+        /// <summary>开发者账号：进功能测试</summary>
+        Developer
+    }
+
+    /// <summary>
     /// 管理员登录对话框（V1.9.0）：既是登录入口，也是改密码入口，账号管理都在这里完成，
     /// 不占用系统设置窗体的空间。
     ///
+    /// 【V1.12.0 双账号】新增开发者账号（SecurityConfig.DevUser，默认 dev/dev123）：
+    ///   登录后通过 Role 属性告知调用方角色，MainForm 据此分流：
+    ///   - 管理员 → 打开系统设置窗体（原有行为）；
+    ///   - 开发者 → 打开功能测试窗体 DevTestForm（PLC/相机通讯验证，不碰业务配置）。
+    ///   登录框标题/横幅跟随当前面板语义，不再写死"管理员"三个字。
+    ///
     /// 【界面布局】
     /// ┌────────────────────────────────────────────┐
-    /// │          ▓ 管理员登录（横幅）▓               │
+    /// │          ▓ 账号登录（横幅）▓                 │
     /// ├────────────────────────────────────────────┤
     /// │  用户名:  [txtUser（默认已填 admin）]        │
     /// │  密　码:  [txtPwd               ]          │
@@ -33,15 +57,20 @@ namespace CommandCenter.Views
     ///   - 登录：回车=登录（AcceptButton），校验通过 DialogResult=OK 关闭；
     ///   - 记住密码（chkRemember）：勾选后登录成功把"用户名+密码"用 Windows DPAPI
     ///     加密存到 %LOCALAPPDATA%\CommandCenter\remembered_login.dat，下次打开登录框
-    ///     自动回填（记录用户名必须与当前管理员账号一致才回填）；取消勾选则清掉旧记录；
-    ///   - 修改密码：需先验证【原密码】（即当前密码），新密码两次一致且 ≥6 位才保存；
-    ///     保存后写盘 appconfig.json（ConfigStore.Save）并即时生效，下次登录用新密码；
-    ///     同时若勾选了"记住密码"会把记住文件同步成新密码，否则清掉；
+    ///     自动回填（记录用户名必须与当前管理员账号一致才回填）；取消勾选则清掉旧记录。
+    ///     注意：记住密码只对管理员账号生效，开发者账号登录不会写/清记住文件；
+    ///   - 修改密码：仅管理员账号可用（开发者密码在配置里维护，界面不支持改）；
     ///   - 密码只存 SHA-256 哈希（SecurityUtil.HashPassword），配置里看不到明文。
     /// </summary>
     public partial class LoginForm : Form
     {
         private readonly AppConfig _config; // 持有整个配置：登录比对 + 改密码写盘都用它（改的是同一实例）
+
+        /// <summary>
+        /// 登录成功后的角色（V1.12.0）：调用方 ShowDialog 返回 OK 后据此分流。
+        /// 默认 None；BtnLogin_Click 校验通过时置为 Admin 或 Developer。
+        /// </summary>
+        public LoginRole Role { get; private set; } = LoginRole.None;
 
         public LoginForm(AppConfig config)
         {
@@ -95,13 +124,26 @@ namespace CommandCenter.Views
             pnlChangePwd.Visible = false;
             pnlLogin.Visible = true;
             pnlLogin.BringToFront();
-            lblBanner.Text = "管理员登录";
+            lblBanner.Text = "账号登录";
             AcceptButton = btnLogin;
         }
 
-        /// <summary>切到修改密码面板：隐藏登录面板，回车=保存，焦点给原密码框。</summary>
+        /// <summary>切到修改密码面板：隐藏登录面板，回车=保存，焦点给原密码框。
+        /// 【V1.12.0】仅管理员账号允许改密码；开发者账号（dev）的密码由配置维护，
+        /// 若用户名输入框里填的是开发者账号，点"修改密码"直接提示并留在登录面板。</summary>
         private void ShowChangePwdPanel(object sender, EventArgs e)
         {
+            // 开发者账号不支持界面改密码（其哈希在配置里维护，见 SecurityConfig.DevPasswordHash 注释）
+            bool isDev = _config.Security.DevEnabled
+                && string.Equals(txtUser.Text.Trim(), _config.Security.DevUser,
+                    StringComparison.OrdinalIgnoreCase);
+            if (isDev)
+            {
+                MessageBox.Show("开发者账号的密码在配置中维护，不支持在此修改。\n请用管理员账号修改或改配置文件。",
+                    "修改密码", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
             pnlLogin.Visible = false;
             pnlChangePwd.Visible = true;
             pnlChangePwd.BringToFront();
@@ -118,20 +160,33 @@ namespace CommandCenter.Views
         /// <summary>
         /// 点"登录"（或回车）：比对用户名 + 密码，通过则 DialogResult=OK 关闭。
         /// 用户名大小写不敏感（现场不用纠结 caps 键）；密码必须精确匹配。
+        /// 【V1.12.0 双账号】先比对管理员账号（_config.Security.AdminUser/AdminPasswordHash），
+        /// 不匹配再比对开发者账号（DevUser/DevPasswordHash，且 DevEnabled=true 才生效）。
+        /// 校验通过后按角色设置 Role 属性供调用方分流；记住密码只对管理员账号生效。
         /// </summary>
         private void BtnLogin_Click(object sender, EventArgs e)
         {
             string user = txtUser.Text.Trim();
             string pwdHash = SecurityUtil.HashPassword(txtPwd.Text);
 
-            bool userOk = string.Equals(user, _config.Security.AdminUser,
-                StringComparison.OrdinalIgnoreCase);
-            bool pwdOk = !string.IsNullOrEmpty(pwdHash)
+            // 管理员账号校验（原有逻辑）
+            bool isAdmin = string.Equals(user, _config.Security.AdminUser,
+                StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrEmpty(pwdHash)
                 && string.Equals(pwdHash, _config.Security.AdminPasswordHash,
                     StringComparison.OrdinalIgnoreCase);
 
-            if (userOk && pwdOk)
+            // 开发者账号校验（V1.12.0）：DevEnabled 关闭时直接不认
+            bool isDev = _config.Security.DevEnabled
+                && string.Equals(user, _config.Security.DevUser,
+                    StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrEmpty(pwdHash)
+                && string.Equals(pwdHash, _config.Security.DevPasswordHash,
+                    StringComparison.OrdinalIgnoreCase);
+
+            if (isAdmin)
             {
+                Role = LoginRole.Admin;
                 LogHelper.Info("管理员登录成功：" + _config.Security.AdminUser);
                 // 记住密码：勾选则 DPAPI 加密保存（下次自动回填），未勾选则清掉旧记录。
                 // 放在校验通过后才写，避免错误密码污染记住文件。
@@ -144,7 +199,17 @@ namespace CommandCenter.Views
                 return;
             }
 
-            LogHelper.Warn($"管理员登录失败（用户名={user}）");
+            if (isDev)
+            {
+                Role = LoginRole.Developer;
+                LogHelper.Info("开发者登录成功：" + _config.Security.DevUser);
+                // 开发者账号不参与"记住密码"：不回填、不清除管理员记住的记录，各自独立
+                DialogResult = DialogResult.OK;
+                Close();
+                return;
+            }
+
+            LogHelper.Warn($"登录失败（用户名={user}）");
             MessageBox.Show("用户名或密码错误，请重新输入。", "登录失败",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             txtPwd.Clear();

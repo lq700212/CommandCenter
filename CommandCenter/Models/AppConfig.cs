@@ -345,7 +345,7 @@ namespace CommandCenter.Models
         public bool Enabled { get; set; } = false;
 
         /// <summary>
-        /// 通讯方式（V1.8.0 新增，大小写不敏感，其他值按 Serial 兜底）：
+        /// 通讯方式（大小写不敏感）：
         ///   "Serial"：串口 RS-232 扫码枪（默认，扫完发一行条码+CR/LF）；
         ///   "Tcp"   ：基恩士 SR 系列扫码枪以太网 TCP/IP 无协议通讯——上位机作 TCP 客户端连扫码枪，
         ///              扫码枪读到条码后主动推送文本行，本程序按行切分（与串口行为一致）。
@@ -366,10 +366,19 @@ namespace CommandCenter.Models
 
         /// <summary>扫码枪 IP（仅 Mode=Tcp 使用）。基恩士 SR 系列无协议通讯的默认监听端口请查
         /// 《SR 系列通信指南》，常见 9005 左右，现场按扫码枪设置改。</summary>
-        public string IpAddress { get; set; } = "192.168.1.110";
+        public string IpAddress { get; set; } = "19.87.6.100";
 
         /// <summary>扫码枪 TCP 端口（仅 Mode=Tcp 使用，基恩士 SR 无协议默认端口，现场确认）</summary>
-        public int Port { get; set; } = 9005;
+        public int Port { get; set; } = 9004;
+
+        /// <summary>
+        /// TCP 模式连接成功后的"触发/启动读码"指令（V1.12.0 现场实测，仅 Mode=Tcp 使用）。
+        /// 基恩士 SR 系列无协议通讯：上位机连接后要先发打开激光/开始读取的指令，扫码枪才会
+        /// 开始读码并推送条码；本现场实测指令为 "LON"（Laser ON），帧尾补 CRLF。
+        /// 发送时自动在该指令后补 "\r\n" 帧结束符（读码端大小写不敏感，见 ScannerTcpService.SendTriggerCommand）。
+        /// 留空则不发送（对应扫码枪设为"上电自动连续读码"模式的场景）。
+        /// </summary>
+        public string TriggerCommand { get; set; } = "LON";
     }
 
     /// <summary>
@@ -406,5 +415,30 @@ namespace CommandCenter.Models
         /// </summary>
         public string AdminPasswordHash { get; set; }
             = "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9";
+
+        // ─────────────────── 开发者账号（V1.12.0，功能测试登录）───────────────────
+        //
+        // 【为什么加这个账号】PLC 业务逻辑未写完时，需要单独验证"相机↔上位机""PLC↔上位机"
+        //   的通讯链路。若用管理员账号登录会进系统设置（改配置风险高），也不符合角色职责。
+        //   开发者账号登录后进的是【功能测试窗体 DevTestForm】——只做通讯触发/读写验证，
+        //   复用主窗体已建好的连接（不重复建连），不碰业务配置。
+        //
+        // 【安全说明】与管理员密码同一套规则：只存 SHA-256 哈希、不存明文。
+        //   开发者密码暂不支持在界面上修改（改密码面板仅服务管理员），
+        //   如需变更请用 SecurityUtil.HashPassword 算好哈希后改本字段/配置文件。
+        //   开发者登录默认不参与"记住密码"（回填逻辑只认管理员账号）。
+
+        /// <summary>是否启用开发者账号登录（false 则开发者账号无法通过登录校验）</summary>
+        public bool DevEnabled { get; set; } = true;
+
+        /// <summary>开发者用户名（默认 "dev"，登录时大小写不敏感比对）</summary>
+        public string DevUser { get; set; } = "dev";
+
+        /// <summary>
+        /// 开发者密码的 SHA-256 哈希（hex 小写）。默认值是 "dev123" 的哈希，
+        /// 即出厂默认开发者密码 dev123。改密码请参考类注释说明，此处只落哈希。
+        /// </summary>
+        public string DevPasswordHash { get; set; }
+            = "87274af01876341455b32d805946f272871bb42effa6604dccf28bb027afa82b";
     }
 }

@@ -97,6 +97,13 @@
     <Compile Include="Views\WindowPointForm.Designer.cs">
       <DependentUpon>WindowPointForm.cs</DependentUpon>
     </Compile>
+    <!-- DevTestForm：功能测试窗体（V1.12.0，开发者账号 dev 登录进入，PLC/相机通讯手动验证） -->
+    <Compile Include="Views\DevTestForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Views\DevTestForm.Designer.cs">
+      <DependentUpon>DevTestForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="Controls\CameraDisplayControl.cs">
       <SubType>UserControl</SubType>
     </Compile>

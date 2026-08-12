@@ -79,7 +79,7 @@ namespace CommandCenter.Views
             this.lblBanner.Name = "lblBanner";
             this.lblBanner.Size = new System.Drawing.Size(380, 48);
             this.lblBanner.TabIndex = 0;
-            this.lblBanner.Text = "管理员登录";
+            this.lblBanner.Text = "账号登录";
             this.lblBanner.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
             // 
             // pnlLogin
@@ -331,7 +331,7 @@ namespace CommandCenter.Views
             this.MinimizeBox = false;
             this.Name = "LoginForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
-            this.Text = "管理员登录";
+            this.Text = "账号登录";
             this.pnlHeader.ResumeLayout(false);
             this.pnlLogin.ResumeLayout(false);
             this.pnlLogin.PerformLayout();

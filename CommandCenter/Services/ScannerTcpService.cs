@@ -12,8 +12,11 @@ namespace CommandCenter.Services
     ///
     /// 【对接方式（基恩士 SR 系列无协议通讯，以《SR 系列通信指南》为准）】
     ///   扫码枪在无协议模式下作为 TCP 服务器监听端口，上位机作为 TCP 客户端连入；
-    ///   扫码枪读到条码后把条码文本（通常 + CR/LF 分隔符）主动推送给连接的上位机。
-    ///   因此本服务与串口实现行为一致：连上后收文本行，一行 = 一条条码。
+    ///   但基恩士 SR 无协议模式并不是"连上就回数据"：多数机型需上位机先发一条
+    ///   **打开激光/开始读取**的指令（本现场实测为 `LON`，帧尾 CRLF 结束），扫码枪
+    ///   才会进入读码状态，之后每读到一条条码就主动推送一行文本（通常 + CR/LF）。
+    ///   因此本服务在**每次连接成功后自动发送触发指令**（ScanConfig.TriggerCommand，
+    ///   默认 "LON"）；断线自动重连后也会再次发送，保证扫码枪始终处于可读状态。
     ///
     /// 【线程模型】本类自持一个后台线程做"连接 + 阻塞读流"：
     ///   - Open() 只启动线程，立即返回，绝不在 UI 线程做网络 IO；
@@ -148,6 +151,9 @@ namespace CommandCenter.Services
                 _stream = stream;
                 _connectedEver = true;
                 LogHelper.Info($"扫码枪(TCP)已连接 {_cfg.IpAddress}:{_cfg.Port}");
+                // V1.12.0：连上即发触发指令（基恩士 SR 的 LON 打开激光），否则扫码枪不读码。
+                // 断开重连后也会再次发送（每次连上走一遍此分支），保证始终处于可读状态。
+                SendTrigger();
                 return stream;
             }
             catch
@@ -258,6 +264,42 @@ namespace CommandCenter.Services
             _stream = null;
             try { _tcp?.Close(); } catch { }
             _tcp = null;
+        }
+
+        /// <summary>
+        /// 发送触发指令（V1.12.0，实现 IScanner.SendTrigger）：
+        /// 向扫码枪写配置的 TriggerCommand（默认 "LON"）并补 "\r\n" 帧结束符。
+        /// 连接成功后会自动发送一次（见 TryConnect），本方法供界面手动重发（如扫码枪停止读码时点一下）。
+        /// 触发指令配置为空则不发送。返回 true 表示指令已发出（不代表扫码枪执行成功）。
+        /// </summary>
+        public bool SendTrigger()
+        {
+            if (_disposed || string.IsNullOrEmpty(_cfg.TriggerCommand)) return true;
+            NetworkStream stream;
+            lock (_lock)
+            {
+                stream = _stream;
+            }
+            if (stream == null)
+            {
+                LogHelper.Warn("扫码枪(TCP)触发指令发送跳过：尚未连接");
+                return false;
+            }
+            try
+            {
+                string cmd = _cfg.TriggerCommand.Trim() + "\r\n";
+                byte[] data = Encoding.ASCII.GetBytes(cmd);
+                stream.Write(data, 0, data.Length);
+                stream.Flush();
+                LogHelper.Info($"扫码枪(TCP)触发指令已发送：{cmd.Trim()}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Warn($"扫码枪(TCP)触发指令发送失败：{ex.Message}");
+                // 发送失败多半连接已断，交给读循环退出后自动重连（重连后会自动重发触发指令）
+                return false;
+            }
         }
     }
 }
