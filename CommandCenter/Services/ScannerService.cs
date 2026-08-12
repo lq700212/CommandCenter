@@ -15,6 +15,15 @@ namespace CommandCenter.Services
         /// <summary>扫到一条完整条码的事件（参数为条码文本，在工作线程触发，UI 需 Invoke）</summary>
         event EventHandler<string> SerialNumberScanned;
 
+        /// <summary>
+        /// 连接状态变化事件（V1.12.5）：true=已连接/已打开，false=断开/已关闭。
+        /// 边沿触发（状态没变不发事件），在工作线程触发，UI 订阅方需自行 Invoke。
+        /// 串口实现只在 Open/Dispose 时触发；TCP 实现每次连接成功/断线时触发。
+        /// 功能测试窗体靠它实时刷新扫码枪状态灯（此前 IScanner 没有此事件，状态灯
+        /// 只刷新一次、永远停在"断连"，导致"实际连上了界面还显示断连"的误判）。
+        /// </summary>
+        event EventHandler<bool> ConnectionChanged;
+
         /// <summary>设备是否已连接/已打开</summary>
         bool IsOpen { get; }
 
@@ -44,9 +53,13 @@ namespace CommandCenter.Services
         private readonly ScanConfig _cfg;
         private SerialPort _port;
         private readonly StringBuilder _buffer = new StringBuilder();
+        private bool _open; // 串口打开状态缓存，用于 ConnectionChanged 边沿检测（状态没变不发事件）
 
         /// <summary>扫到一条完整条码的事件（参数为条码文本，在工作线程触发，UI 需 Invoke）</summary>
         public event EventHandler<string> SerialNumberScanned;
+
+        /// <summary>连接（串口打开）状态变化事件：Open 成功 true / Dispose 关闭 false（边沿触发）。</summary>
+        public event EventHandler<bool> ConnectionChanged;
 
         /// <summary>串口是否已打开</summary>
         public bool IsOpen => _port != null && _port.IsOpen;
@@ -69,12 +82,23 @@ namespace CommandCenter.Services
                 };
                 _port.DataReceived += OnDataReceived;
                 _port.Open();
+                SetConnected(true); // 串口打开成功：通知订阅方状态变"已连接"（幂等，状态没变不发）
                 return true;
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine("扫码枪打开失败：" + ex.Message);
                 return false;
+            }
+        }
+
+        /// <summary>串口打开状态变化：仅在状态真正改变时触发一次 ConnectionChanged（对齐 PLC/相机的边沿语义）。</summary>
+        private void SetConnected(bool value)
+        {
+            if (_open != value)
+            {
+                _open = value;
+                ConnectionChanged?.Invoke(this, value);
             }
         }
 
@@ -140,6 +164,7 @@ namespace CommandCenter.Services
                 if (_port.IsOpen) _port.Close();
                 _port.Dispose();
             }
+            SetConnected(false); // 关闭串口：通知订阅方状态变"已关闭"（幂等，已 false 则不发）
         }
     }
 }

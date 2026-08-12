@@ -39,6 +39,7 @@ namespace CommandCenter.Services
         private readonly StringBuilder _line = new StringBuilder();
         private bool _connectedEver;   // 是否成功连上过（重连失败日志降噪）
         private volatile bool _disposed;
+        private bool _connected;        // 当前连接状态缓存，用于 ConnectionChanged 边沿检测（状态没变不发事件）
 
         /// <summary>重连节流间隔（毫秒）</summary>
         private const int ReconnectMs = 3000;
@@ -51,6 +52,14 @@ namespace CommandCenter.Services
 
         /// <summary>扫到一条完整条码的事件（参数为条码文本，工作线程触发，UI 需 Invoke）</summary>
         public event EventHandler<string> SerialNumberScanned;
+
+        /// <summary>
+        /// 连接状态变化事件（V1.12.5）：连接成功触发 true、断线触发 false（边沿检测，状态没变不发）。
+        /// 工作线程触发，UI 订阅方需自行 Invoke。功能测试窗体的扫码枪状态灯靠它实时刷新——
+        /// 此前 IScanner 没有此事件，状态灯只初始刷新一次永远停"断连"，用户会误以为连不上，
+        /// 实际已连上（例：调试助手占用端口时连不上，关掉后程序自动连上，界面上却仍显示断连）。
+        /// </summary>
+        public event EventHandler<bool> ConnectionChanged;
 
         public ScannerTcpService(ScanConfig cfg) => _cfg = cfg;
 
@@ -122,6 +131,20 @@ namespace CommandCenter.Services
         }
 
         /// <summary>
+        /// 连接状态变化（边沿检测）：仅状态真正改变时触发一次 ConnectionChanged（对齐 PLC/相机）。
+        /// 线程安全说明：可能由 Worker 线程（连接成功/断流）与 UI 线程（Dispose）调用，
+        /// 事件订阅方负责 Invoke；b 为最新的连接状态。
+        /// </summary>
+        private void SetConnected(bool value)
+        {
+            if (_connected != value)
+            {
+                _connected = value;
+                ConnectionChanged?.Invoke(this, value);
+            }
+        }
+
+        /// <summary>
         /// 尝试建立 TCP 连接（在 Worker 线程内调用，最多阻塞 ConnectTimeoutMs）。
         /// 成功返回流并缓存 _tcp/_stream；失败返回 null（日志降噪：只记首次失败）。
         /// </summary>
@@ -135,12 +158,17 @@ namespace CommandCenter.Services
                 IAsyncResult ar = tcp.BeginConnect(_cfg.IpAddress, _cfg.Port, null, null);
                 if (!ar.AsyncWaitHandle.WaitOne(ConnectTimeoutMs))
                 {
+                    // V1.12.6：连接失败也通知订阅方（对齐 PLC/相机"连接失败→状态灯变红"）。
+                    // 边沿检测：_connected 已是 false 时不重复发事件，无日志循环负担。
+                    SetConnected(false);
                     try { tcp.Close(); } catch { }
                     return null;
                 }
                 // 若连接期间被并发 Close（内部 socket 置 null），放弃 EndConnect 防空引用
                 if (tcp.Client == null)
                 {
+                    // V1.12.6：同超时分支，失败即通知（对齐 PLC/相机），边沿检测防重复事件。
+                    SetConnected(false);
                     try { tcp.Close(); } catch { }
                     return null;
                 }
@@ -151,6 +179,9 @@ namespace CommandCenter.Services
                 _stream = stream;
                 _connectedEver = true;
                 LogHelper.Info($"扫码枪(TCP)已连接 {_cfg.IpAddress}:{_cfg.Port}");
+                // V1.12.5：通知订阅方（功能测试窗体状态灯）连接已成功。放日志后、发触发指令前，
+                // 保证状态第一时间变绿；触发指令发送失败会走断流分支自动重连，状态灯随后转红。
+                SetConnected(true);
                 // V1.12.0：连上即发触发指令（基恩士 SR 的 LON 打开激光），否则扫码枪不读码。
                 // 断开重连后也会再次发送（每次连上走一遍此分支），保证始终处于可读状态。
                 SendTrigger();
@@ -161,10 +192,13 @@ namespace CommandCenter.Services
                 try { tcp?.Close(); } catch { }
                 _tcp = null;
                 _stream = null;
-                // 连接失败只记一条日志（重连期间静默，避免每 3s 刷一行）
-                if (!_connectedEver)
-                    LogHelper.Warn($"扫码枪(TCP)连接失败 {_cfg.IpAddress}:{_cfg.Port}（后台持续重连）");
-                return null;
+// 连接失败只记一条日志（重连期间静默，避免每 3s 刷一行）
+                    if (!_connectedEver)
+                        LogHelper.Warn($"扫码枪(TCP)连接失败 {_cfg.IpAddress}:{_cfg.Port}（后台持续重连）");
+                    // V1.12.6：失败也通知订阅方（对齐 PLC/相机"连接失败→状态灯变红"）。
+                    // 边沿检测：状态没变（已是 false）不发重复事件，重连期间无事件风暴。
+                    SetConnected(false);
+                    return null;
             }
         }
 
@@ -210,15 +244,30 @@ namespace CommandCenter.Services
             }
         }
 
-        /// <summary>清空失效连接引用（锁内幂等），下一轮 Worker 循环自动重连。</summary>
+        /// <summary>清空失效连接引用（锁内幂等），下一轮 Worker 循环自动重连。
+        /// 【V1.12.5 补充】断流时顺便：
+        ///   ① 清空半条条码缓存 _line——否则"条码读到一半断线"，残留的半截会与重连后
+        ///      新收到的条码拼接成脏数据（现实中一条码 40B 内一次读完概率高，但小概率
+        ///      断点在中间就会污染下一条码，属于低级但确实存在的边界 bug）；
+        ///   ② 从"已连接"首次变"断开"时打一条边沿日志（不是每次重连都刷日志），
+        ///      并触发 ConnectionChanged(false)，让功能测试窗体状态灯实时转红。
+        /// </summary>
         private void MarkDown()
         {
+            bool wasConnected = _connected;
             lock (_lock)
             {
                 try { _stream?.Dispose(); } catch { }
                 _stream = null;
                 try { _tcp?.Close(); } catch { }
                 _tcp = null;
+            }
+            _line.Clear(); // 半条码缓存清空（_line 只在读线程用，无需加锁）
+            // 边沿日志 + 事件：仅当"之前处于已连接"才提示断线（从未连上则不刷日志，连接失败日志已在 TryConnect 降噪）
+            if (wasConnected)
+            {
+                LogHelper.Warn("扫码枪(TCP)连接断开，3s 节流后自动重连");
+                SetConnected(false);
             }
         }
 
@@ -254,6 +303,7 @@ namespace CommandCenter.Services
             {
                 try { if (!t.Join(500)) { } } catch { }
             }
+            SetConnected(false); // 关闭即断开：通知订阅方状态复位（幂等，已 false 则不发事件）
             LogHelper.Info("扫码枪(TCP)已释放");
         }
 

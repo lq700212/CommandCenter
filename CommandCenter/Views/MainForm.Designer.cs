@@ -13,7 +13,7 @@ namespace CommandCenter.Views
     ///   ┌──────────────────────────────────────────────────────────────┐
     ///   │ 产品型号:[cmbRecipe▾] 序列号:[lblSerialTitle][lblSerial框]    │
     ///   │  | 总数:[lblTotal] OK:[lblOk] NG:[lblNg]                     │
-    ///   │          | [btnSettings系统设置]    ●[lblPlcStatus]          │
+    ///   │          | [btnSettings系统设置]    ●[lblPlcStatus] ●[lblScannerStatus]│
     ///   ├──────────────────────────────────────────────────────────────┤
     ///   │                 gridCameraWindows（TableLayoutPanel 等分）      │
     ///   ├──────────────────────────────────────────────────────────────┤
@@ -23,9 +23,9 @@ namespace CommandCenter.Views
     ///   - 标题栏面板 pnlTitleBar：Dock=Top，FixedHeight=48；内部字段用绝对坐标，
     ///     运行时由 MainForm.InitTitleBarRuntime/RelayoutTitleBar 按"显示开关"紧凑重排。
     ///   - lblProductPrefix 的文案与各信息字段的 Visible 由 Display 配置控制（运行时设置）。
-    ///   - 连接状态灯：PLC 灯在 Designer 中先 Add（Dock.Right 先加的靠左），
-    ///     相机动灯随后由 MainForm.cs 正序循环 Add（靠右）——相机1..相机N 从左到右排
-    ///     （V1.7.1 起：相机1 在相机2 左边，相机3 继续往右）。
+    ///   - 连接状态灯：PLC 灯在 Designer 中先 Add（Dock.Right 先加的靠左），扫码枪状态灯
+    ///     紧跟其后（第 2 位，位于 PLC 右侧），相机动灯随后由 MainForm.cs 正序循环 Add（靠右）
+    ///     ——相机1..相机N 依次排在扫码枪灯右侧（V1.7.1 起：相机1 在相机2 左边，相机3 继续往右）。
     ///   - gridCameraWindows 只做容器，行列数量、百分比分格、窗口填充全部由
     ///     MainForm.BuildWindowGrid 运行时重建，保证改 Rows/Columns 配置即可生效。
     /// </summary>
@@ -51,6 +51,7 @@ namespace CommandCenter.Views
         {
             this.pnlTitleBar = new System.Windows.Forms.Panel();
             this.lblPlcStatus = new System.Windows.Forms.Label();
+            this.lblScannerStatus = new System.Windows.Forms.Label();
             this.lblCamPlaceholder = new System.Windows.Forms.Label();
             this.btnSettings = new System.Windows.Forms.Button();
             this.lblSep2 = new System.Windows.Forms.Label();
@@ -73,6 +74,10 @@ namespace CommandCenter.Views
             // 
             this.pnlTitleBar.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(235)))), ((int)(((byte)(242)))), ((int)(((byte)(250)))));
             this.pnlTitleBar.Controls.Add(this.lblPlcStatus);
+            // 扫码枪状态灯（V1.12.6）：紧跟 PLC 灯 Add（Dock.Right 先 Add 靠左）→ 位于 PLC 右侧、
+            // 相机灯左侧；运行时相机灯最后 Add 排最右。未连接红色/已连接绿色由
+            // MainForm.RefreshScannerStatus 订阅每台扫码枪的 ConnectionChanged 聚合刷新。
+            this.pnlTitleBar.Controls.Add(this.lblScannerStatus);
             // 相机灯占位（灰色提示）：真实相机灯是运行时代码按相机台数动态生成的，
             // 设计器里看不到，所以用这个占位 Label 提醒"这里是相机灯区域"；
             // 运行时 InitTitleBarRuntime 生成真灯后会把占位隐藏（隐藏控件不占 Dock 空间）。
@@ -105,6 +110,24 @@ namespace CommandCenter.Views
             this.lblPlcStatus.TabIndex = 10;
             this.lblPlcStatus.Text = "● PLC";
             this.lblPlcStatus.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+            // 
+            // lblScannerStatus
+            // 
+            // 扫码枪连接状态灯（V1.12.6）：样式与 PLC/相机灯完全一致——"● 扫码枪"圆点灯，
+            // 位于标题栏右上 PLC 灯右侧。Dock.Right 布局"先 Add 的靠左"：本控件在 Controls.Add
+            // 顺序里紧跟 lblPlcStatus（第 2 位），运行时相机灯最后 Add 排最右，故顺序为
+            // ●PLC | ●扫码枪 | ●相机N。初始灰色（150,150,150，同 PLC/相机灯设计器默认），
+            // 已连接变绿/未连接变红由 MainForm.RefreshScannerStatus 根据每台扫码枪
+            // ConnectionChanged 事件聚合刷新（全部启用都已连接才绿色，任一未连接即红）。
+            this.lblScannerStatus.Dock = System.Windows.Forms.DockStyle.Right;
+            this.lblScannerStatus.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
+            this.lblScannerStatus.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(150)))), ((int)(((byte)(150)))), ((int)(((byte)(150)))));
+            this.lblScannerStatus.Location = new System.Drawing.Point(1292, 0);
+            this.lblScannerStatus.Name = "lblScannerStatus";
+            this.lblScannerStatus.Size = new System.Drawing.Size(96, 48);
+            this.lblScannerStatus.TabIndex = 14;
+            this.lblScannerStatus.Text = "● 扫码枪";
+            this.lblScannerStatus.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
             // lblCamPlaceholder
             // 相机连接状态灯的"设计器占位"：样式与动态相机灯一致（Dock=Right、96px、灰色）；
@@ -324,6 +347,7 @@ namespace CommandCenter.Views
         private Label lblSep2;
         private Button btnSettings;
         private Label lblPlcStatus;
+        private Label lblScannerStatus;
         private Label lblCamPlaceholder;
         private Panel pnlStatusBar;
         private Label lblStatus;

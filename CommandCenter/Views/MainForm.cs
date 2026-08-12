@@ -17,7 +17,7 @@ namespace CommandCenter.Views
     /// 【界面布局】
     /// ┌───────────────────────────────────────────────────────────────────┐
     /// │ 产品型号:[1]产品A▾ | 序列号:[框] | 总数:0 | [OK] | [NG] | [系统设置] │
-    /// │                                                        ●PLC ●相机1 ●相机2 │
+    /// │                                        ●PLC ●扫码枪 ●相机1 ●相机2   │
     /// ├───────────────────────────────────────────────────────────────────┤
     /// │  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐                  │
     /// │  │ W1   │ │ W2   │ │ W3   │ │ W4   │ │ W5   │                   │
@@ -28,11 +28,13 @@ namespace CommandCenter.Views
     /// │ 状态:等待PLC到位…（左下角；配方下发成功时变绿显示"配方切换完成"）          │
     /// └───────────────────────────────────────────────────────────────────┘
     /// 标题栏：左起信息字段（按配置开关）→ 配方下拉框（显示+切换合一）→ 系统设置按钮 → 连接指示灯；
+    ///   - 连接指示灯从右到左：●相机N..●相机1 → ●扫码枪 → ●PLC（Dock.Right 先 Add 靠左）。
+    ///     扫码枪灯显示"扫码枪：已连接/未连接"，绿=已连接、红=未连接（V1.12.6，聚合刷新）；
     ///   - OK/NG 计数默认"实心彩色色块 + 白字"高亮（绿底=OK、红底=NG），关闭
     ///     DisplayConfig.TitleOkNgHighlight 则回退普通彩色文字；
     /// 底部栏：仅状态文本，固定在左下角。
     /// 职责：只做界面呈现 + 事件绑定，业务编排在 ProductionCoordinator。
-    /// 静态布局控件（标题栏字段/配方下拉框/设置按钮/PLC灯/状态栏/窗口矩阵容器）在
+    /// 静态布局控件（标题栏字段/配方下拉框/设置按钮/PLC灯/扫码枪灯/状态栏/窗口矩阵容器）在
     /// MainForm.Designer.cs 中由设计器维护；动态控件（相机灯/窗口矩阵内容）在此运行时生成。
     /// 系统设置保存后不重启：ApplyRuntimeConfig 停旧服务层、按新配置全量重建服务与界面
     /// （V1.6.0，连接惰性 + 后台心跳自动按新 IP 重连，等效"断开重连"）。
@@ -699,6 +701,13 @@ namespace CommandCenter.Views
                 sc.SerialNumberScanned += OnSerialScanned;
                 sc.Open(); // 串口打开失败 / TCP 连不上都不影响主流程，后台持续重连
             }
+            // 扫码枪连接状态灯（V1.12.6）：订阅每台扫码枪的连接状态变化，聚合刷新标题栏右上角
+            // "● 扫码枪"圆点灯颜色（样式与 PLC/相机灯一致：绿=已连接、红=未连接；全部启用的
+            // 都已连接才绿，任一未连接即红）。事件在工作线程触发，RefreshScannerStatus 内部
+            // Invoke 回 UI 线程。
+            foreach (var sc in _scanners)
+                sc.ConnectionChanged += (s, c) => RefreshScannerStatus();
+            RefreshScannerStatus(); // 初始上色（构造/热更后立即按当前连接状态刷新一次）
 
             // 连接状态指示灯（V1.10.0 双模式）：
             //   ≤2台：每台一个灯，断连变红、重连回绿（UpdateDeviceStatus）；
@@ -749,6 +758,51 @@ namespace CommandCenter.Views
             }
             lbl.ForeColor = connected ? Color.FromArgb(46, 158, 107) // 绿
                                       : Color.FromArgb(229, 72, 77);  // 红
+        }
+
+        /// <summary>
+        /// 刷新标题栏右上角"● 扫码枪"状态灯颜色（V1.12.6，颜色显示逻辑与 PLC/相机灯完全一致）：
+        ///   文本固定"● 扫码枪"，只切颜色——已连接=绿(46,158,107)、未连接/断开=红(229,72,77)，
+        ///   与 UpdateDeviceStatus（PLC/相机灯统一上色）同色值；
+        ///   连接失败同样触发变红（V1.12.6 起 ScannerTcpService.TryConnect 失败也触发
+        ///   ConnectionChanged(false)，对齐 PLC/相机"连不上就红"，此前扫码枪一直连不上时灯不变化）。
+        /// 【多台聚合规则】对齐相机 ≥3 台的聚合语义：**只要有一台"启用"的扫码枪未连接就变红**，
+        /// 全部启用扫码枪都已连接才变绿；禁用（Enabled=false）不参与判定；
+        /// **没有任何启用的扫码枪时显示灰色**（同 PLC/相机灯"无设备/未判定"的初始灰），
+        /// 不表示故障也不表示断开。
+        /// 【数据源】_scanners[i] 与 _config.Scanners[i] 下标一一对应（BuildServices 按配置
+        /// 顺序创建实例，绝不跳过），"启用与否"以配置为准——因为 Enabled=false 的实例 Open()
+        /// 直接返回 false 不建连，IsOpen 恒 false，若不加过滤会误报红灯。
+        /// 【线程】事件来自扫码枪工作线程，统一 BeginInvoke 回 UI 线程。
+        /// </summary>
+        private void RefreshScannerStatus()
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(RefreshScannerStatus));
+                return;
+            }
+
+            var configs = _config.Scanners ?? new List<ScanConfig>();
+            bool connected = true; // 先假设全部已连接
+            bool anyEnabled = false;
+            for (int i = 0; i < _scanners.Count; i++)
+            {
+                bool enabled = i < configs.Count && configs[i].Enabled;
+                if (!enabled) continue; // 禁用的扫码枪不参与聚合判定
+                anyEnabled = true;
+                if (!_scanners[i].IsOpen) { connected = false; break; } // 任一启用未连接 → 红
+            }
+            if (!anyEnabled)
+            {
+                // 没有启用的扫码枪：灰色（同 PLC/相机灯初始灰，表示"无设备/未判定"而非故障）
+                lblScannerStatus.ForeColor = Color.FromArgb(150, 150, 150);
+                return;
+            }
+
+            lblScannerStatus.ForeColor = connected ? Color.FromArgb(46, 158, 107) // 绿=已连接
+                                                    : Color.FromArgb(229, 72, 77);  // 红=未连接
         }
 
         /// <summary>

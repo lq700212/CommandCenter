@@ -120,6 +120,13 @@ namespace CommandCenter.Views
             foreach (var sc in _scanners)
                 sc.SerialNumberScanned += OnScannerCode;
 
+            // 扫码枪连接状态（V1.12.5）：IScanner 新增 ConnectionChanged，状态灯随真实
+            // 连接实时变色。此前扫码枪没有连接事件，状态灯只在打开窗体时刷新一次、永远
+            // 停"断连"——即使后台已自动连上（如调试助手占用端口、关掉后自动连回），界面
+            // 也一直显示断连，给用户"连不上"的错觉。订阅后连上转绿、断开转红即时可见。
+            foreach (var sc in _scanners)
+                sc.ConnectionChanged += (s, v) => SafeInvoke(() => RefreshStates());
+
             // 发送触发指令按钮：基恩士 SR 连上后需发 LON 才读码；扫码枪突然不读时可手动重发
             btnScannerTrigger.Click += BtnScannerTrigger_Click;
         }
