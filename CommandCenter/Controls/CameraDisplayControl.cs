@@ -11,16 +11,15 @@ namespace CommandCenter.Controls
     /// │                                        │
     /// │             [ 图像显示区 ]            │  ← 中间：PictureBox，Zoom 居中显示照片
     /// │                                        │
-    /// │                                [OK]     │  ← 右下角：OK/NG 徽标（自绘矩形框）
     /// └────────────────────────────────────┘
     /// 说明：
     ///   - 图像区用 PictureBox.SizeMode=Zoom，等比缩放不裁剪；
-    ///   - OK/NG 徽标用自绘控件 OkNgBadge，边框与文字同色：
-    ///       OK = 绿色，NG = 红色（现场习惯，OK 即绿色、NG 即红色）；
     ///   - 控件默认浅蓝底（空态），收到图片后自动切图片显示；
     ///   - 本控件不显示存图点位（避免主界面信息冗余）；点位归属由
     ///     ProductionCoordinator 按"窗口→点位"映射计算，只通过设置界面的
     ///     WindowPointForm 查询/比对（见 DisplayConfig.WindowStationMap）。
+    ///   - V1.9.5：去掉右下角 OK/NG 徽标（现场嫌占画面），判定状态仍由
+    ///     主流程记录（IsOk/SetOkNgStatus 保留接口，只是不再叠加显示在画面上）。
     /// </summary>
     public class CameraDisplayControl : UserControl
     {
@@ -30,9 +29,6 @@ namespace CommandCenter.Controls
         /// <summary>窗口编号（从 1 开始，辅助现场定位第几路）</summary>
         private readonly Label _windowIndexLabel;
 
-        /// <summary>右下角 OK/NG 徽标</summary>
-        private readonly OkNgBadge _okNgBadge;
-
         /// <summary>当前结果：true=OK，false=NG</summary>
         private bool _isOk = true;
 
@@ -40,8 +36,8 @@ namespace CommandCenter.Controls
         private int _windowIndex;
 
         /// <summary>
-        /// 构造：创建图像区、编号标签、OK/NG 徽标并摆好位置。
-        /// 使用 Dock 覆盖思路做简易布局，右下角徽标用 Anchor 跟随窗口大小。
+        /// 构造：创建图像区、编号标签并摆好位置。
+        /// 使用 Dock 覆盖思路做简易布局。
         /// </summary>
         public CameraDisplayControl()
         {
@@ -71,25 +67,8 @@ namespace CommandCenter.Controls
             };
             Controls.Add(_windowIndexLabel);
 
-            // ③ OK/NG 徽标：右下角，Anchor 保证随控件缩放自动贴右下
-            _okNgBadge = new OkNgBadge
-            {
-                Size = new Size(52, 24),
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
-                Location = new Point(Width - 58, Height - 30),
-                IsOk = true
-            };
-            _okNgBadge.BringToFront();
-            Controls.Add(_okNgBadge);
-
-            // 控件尺寸变化时，刷新徽标右下角位置
-            Resize += (s, e) =>
-            {
-                _okNgBadge.Location = new Point(Math.Max(0, Width - _okNgBadge.Width - 6),
-                                                Math.Max(0, Height - _okNgBadge.Height - 6));
-                _windowIndexLabel.BringToFront();
-                _okNgBadge.BringToFront();
-            };
+            // 控件尺寸变化时，保证编号标签始终浮在最上层（不被图片盖住）
+            Resize += (s, e) => _windowIndexLabel.BringToFront();
         }
 
         /// <summary>
@@ -111,18 +90,16 @@ namespace CommandCenter.Controls
             if (_pictureBox.Image != null && !ReferenceEquals(_pictureBox.Image, _pictureBox.InitialImage))
                 _pictureBox.Image?.Dispose();
             _pictureBox.Image = image;
-            _pictureBox.BackColor = image == null ? Color.FromArgb(45, 45, 45)
-                                                  : Color.FromArgb(45, 45, 45);
+            _pictureBox.BackColor = Color.FromArgb(45, 45, 45);
         }
 
         /// <summary>
-        /// 设置检测结果并刷新徽标。
+        /// 设置检测结果（V1.9.5：仅记录状态，画面上已不叠加 OK/NG 徽标）。
         /// </summary>
-        /// <param name="isOk">true=OK(绿)，false=NG(红)</param>
+        /// <param name="isOk">true=OK，false=NG</param>
         public void SetOkNgStatus(bool isOk)
         {
             _isOk = isOk;
-            _okNgBadge.IsOk = isOk;
         }
 
         /// <summary>当前结果：true=OK，false=NG</summary>
