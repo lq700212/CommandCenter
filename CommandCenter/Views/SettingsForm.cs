@@ -114,7 +114,9 @@ namespace CommandCenter.Views
             }
         }
 
-        /// <summary>把现有相机配置逐行填进表格，方便现场看着改。</summary>
+        /// <summary>把现有相机配置逐行填进表格，方便现场看着改。
+        /// 空表格时按现场默认两台相机（V1.9.8，IP 写死 19.87.6.212 / 19.87.6.213）
+        /// 填两行模板行，保证打开设置就看到两台相机、直接改参数即可。</summary>
         private void LoadCameraRows()
         {
             foreach (var c in _cfg.Cameras ?? new List<CameraConfig>())
@@ -125,7 +127,8 @@ namespace CommandCenter.Views
             }
             // 至少留一行可见，别让表格空着无从下手
             if (gridCameras.Rows.Count == 0)
-                gridCameras.Rows.Add("192.168.1.100", 8500, "", "Ftp");
+                foreach (var c in CameraConfig.DefaultCameras())
+                    gridCameras.Rows.Add(c.IpAddress, c.CommandPort, c.FtpUploadDir, "Ftp");
         }
 
         /// <summary>给扫码枪表格建好列结构（V1.8.1 起，列固定，运行时加一次即可）。
@@ -187,8 +190,9 @@ namespace CommandCenter.Views
         /// </summary>
         private void WireButtonEvents()
         {
-            // 添加一台相机：直接往表格追加一行默认值，现场改 IP/端口/取图方式即可
-            btnAddCam.Click += (s, e) => gridCameras.Rows.Add("192.168.1.1", 8500, "", "Ftp");
+            // 添加一台相机：直接往表格追加一行默认值（默认 IP 用现场相机1，V1.9.8），现场改 IP/端口/取图方式即可
+            btnAddCam.Click += (s, e) => gridCameras.Rows.Add(
+                CameraConfig.DefaultCameras()[0].IpAddress, 8500, "", "Ftp");
             // 删除选中：把当前选中的行整行移除；没有选中行则什么都不做
             // 【V1.8.4 修复】末尾"新行"（AllowUserToAddRows 附带的 * 占位行）不在 SelectedRows 里，
             //   用户点击该空白行再点删除，原来会误报"未选中行"——现改为：删除=放弃该占位行。
@@ -308,7 +312,7 @@ namespace CommandCenter.Views
                     ImageSource = string.IsNullOrWhiteSpace(imgSrc) ? "Ftp" : imgSrc.Trim()
                 });
             }
-            if (cams.Count == 0) cams.Add(new CameraConfig()); // 兜底：至少一台相机
+            if (cams.Count == 0) cams.AddRange(CameraConfig.DefaultCameras()); // 兜底：至少现场两台默认相机
             _cfg.Cameras = cams;
 
             // 扫码枪（V1.8.1 多台）：逐行回写；未勾选"启用"的行也会保留进配置

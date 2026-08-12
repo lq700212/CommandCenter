@@ -35,7 +35,11 @@ namespace CommandCenter.Utils
                     var cfg = JsonConvert.DeserializeObject<Models.AppConfig>(json) ?? new Models.AppConfig();
 
                     // 空段兜底（json 缺字段/显式 null 时用模型默认），保证后续代码不 NRE
-                    if (cfg.Cameras == null) cfg.Cameras = new List<Models.CameraConfig>();
+                    // 相机列表缺省时用现场默认两台相机（V1.9.8：IP 写死，见 CameraConfig.DefaultCameras）
+                    // V1.9.9：兜底条件从"仅 null"放宽到"null 或空列表"——因 AppConfig.Cameras
+                    // 初始化器已改为空列表（避免 Newtonsoft 反序列化时向已存在实例 Add 而叠成 4 台），
+                    // json 没写相机时必须在此补上默认两台现场相机。
+                    if (cfg.Cameras == null || cfg.Cameras.Count == 0) cfg.Cameras = Models.CameraConfig.DefaultCameras();
                     if (cfg.Scanners == null) cfg.Scanners = new List<Models.ScanConfig>();
                     if (cfg.Display == null) cfg.Display = new Models.DisplayConfig();
                     if (cfg.Image == null) cfg.Image = new Models.ImageConfig();

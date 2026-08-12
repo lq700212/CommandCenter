@@ -15,9 +15,19 @@ namespace CommandCenter.Models
     {
         /// <summary>
         /// 相机通讯配置列表（基恩士 IV4 系列，支持多台）。
-        /// 【为什么是列表】现场可能有多台相机，每台的 IP/端口/FTP目录都独立配置；
+        /// 【为什么是列表】现场有多台相机，每台的 IP/端口/FTP目录都独立配置；
         /// 一次"到位"信号会对列表中每台都触发一次、各取各的图（见 ProductionCoordinator）。
         /// 注意：存图点位与相机无关，由 DisplayConfig.WindowStationMap（窗口→点位映射）统一管理。
+        ///
+        /// 【默认值（V1.9.8 现场定稿）】现场固定两台相机，IP 已确定——相机1=19.87.6.212、
+        /// 相机2=19.87.6.213，无配置/空配置时用 CameraConfig.DefaultCameras() 兜底这两台，
+        /// 设置窗体默认行 / 主窗体空配置兜底与这里保持一致（改现场 IP 只改这一处工厂方法即可）。
+        ///
+        /// 【为什么初始化器用空列表而不是 DefaultCameras()（V1.9.9 修复 4 台 bug）】
+        /// Newtonsoft 反序列化对"属性已有实例的集合"默认是复用该实例并 Add 进 json 元素，
+        /// 而不是整值替换。若这里预置 2 台默认，json 里又有 2 台，反序列化就会叠成 4 台
+        /// （实测 AppConfig.Cameras.Count == 4）。因此初始化器必须给空列表，默认两台相机
+        /// 统一交给 ConfigStore.Load 的"空/缺省兜底"与 MainForm/SettingsForm 的 Count==0 兜底。
         /// </summary>
         public List<CameraConfig> Cameras { get; set; } = new List<CameraConfig>();
 
@@ -57,8 +67,8 @@ namespace CommandCenter.Models
     /// </summary>
     public class CameraConfig
     {
-        /// <summary>相机 IP（如 192.168.1.100）</summary>
-        public string IpAddress { get; set; } = "192.168.1.100";
+        /// <summary>相机 IP（V1.9.8 现场定稿：默认=现场相机1 19.87.6.212，相机2 见 DefaultCameras）</summary>
+        public string IpAddress { get; set; } = "19.87.6.212";
 
         /// <summary>
         /// 该相机的 FTP 上传目录（相机作为 FTP 客户端把照片推到这台，独立监听）。
@@ -133,6 +143,21 @@ namespace CommandCenter.Models
         /// 上位机用 FileSystemWatcher 监听新图。
         /// </summary>
         public bool EnableFtpMonitor { get; set; } = true;
+
+        /// <summary>
+        /// 现场默认的两台相机（V1.9.8 定稿：IP 已写死，无需现场改 IP）。
+        /// 相机1=19.87.6.212、相机2=19.87.6.213，其余参数取模型默认。
+        /// 【为什么收敛成一个方法】三处需要"默认两台相机"（未配置时 AppConfig.Cameras 的
+        ///   初值、主窗体 BuildServices 的空配置兜底、设置窗体空表格默认行/添加行），
+        ///   若各自硬编码 IP，改现场 IP 要改好几个地方、极易漏。统一走本方法，
+        ///   现场换相机 IP 只改这一处即可。
+        /// 【注意】返回的是全新实例列表，调用方可直接 AddRange/遍历，不会与原来的配置共享引用。
+        /// </summary>
+        public static List<CameraConfig> DefaultCameras() => new List<CameraConfig>
+        {
+            new CameraConfig { IpAddress = "19.87.6.212" },
+            new CameraConfig { IpAddress = "19.87.6.213" }
+        };
     }
 
     /// <summary>

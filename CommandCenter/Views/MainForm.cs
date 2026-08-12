@@ -78,9 +78,13 @@ namespace CommandCenter.Views
             // 多相机：配置列几台就建几个相机服务实例，各自独立连接/触发/存图
             _cameras = new List<KeyenceIV4Camera>();
             var cams = _config.Cameras ?? new List<CameraConfig>();
-            if (cams.Count == 0) cams.Add(new CameraConfig()); // 空配置兜底一台，保证流程能跑
+            // 空配置兜底两台默认相机（V1.9.8：现场相机 IP 已写死，见 CameraConfig.DefaultCameras）。
+            // 注意 cams 是 _config.Cameras 的引用，AddRange 修改会直接生效到配置；仅空列表兜底，
+            // 不影响"用户在设置里配了几台就用几台"的既有行为。
+            if (cams.Count == 0) cams.AddRange(CameraConfig.DefaultCameras());
             foreach (var c in cams)
                 _cameras.Add(new KeyenceIV4Camera(c));
+            LogHelper.Info($"BuildServices：共创建 {_cameras.Count} 台相机：{string.Join(" / ", _cameras.ConvertAll(x => x.IpLabel))}");
 
             _imageStore = new ImageStore(_config.Image);
             _coordinator = new ProductionCoordinator(_plc, _cameras, cams, _imageStore, _config.Display,
@@ -142,20 +146,14 @@ namespace CommandCenter.Views
         /// </summary>
         private void InitTitleBarFields()
         {
-            // ① 产品型号 = 配方（V1.1.2 现场业务对应）：前缀文案走配置，开关控制整段显示
+            ApplyConfigVisibility();
+
+            // 产品型号前缀文案（V1.1.2 现场业务对应）：前缀文案走配置，开关控制整段显示
             lblProductPrefix.Text = _config.Display.ProductModelPrefix + ":";
-            lblProductPrefix.Visible = _config.Display.ShowProductModel;
             // 序列号：标题"序列号:"在显示框外（lblSerialTitle），框内只放值；
             // 有值显示值，没有则框内留空（不写"待扫码"），标题+框整体由开关控制显隐
             lblSerialTitle.Text = "序列号:";
-            lblSerialTitle.Visible = _config.Display.ShowSerialNumber;
             lblSerial.Text = _coordinator.LatestSerialNumber;
-            lblSerial.Visible = _config.Display.ShowSerialNumber;
-            lblTotal.Visible = _config.Display.ShowTotalCount;
-            lblOk.Visible = _config.Display.ShowOkCount;
-            lblNg.Visible = _config.Display.ShowNgCount;
-            // 系统设置按钮显隐（V1.8.4）：按配置隐藏后标题栏自动紧凑重排，隐藏期间配置只读
-            btnSettings.Visible = _config.Display.ShowSettingsButton;
 
             // ② 标题栏 OK/NG 计数高亮（V1.5.0 现场反馈"彩色数字不够醒目"）：
             // 默认把 OK/NG 做成"实心彩色色块 + 白字"（绿底=OK、红底=NG，配色走 DisplayConfig），
@@ -168,6 +166,25 @@ namespace CommandCenter.Views
 
             // ③ 动态相机连接指示灯：先 Add 的 Dock.Right 靠左，后 Add 的靠右。
             BuildCameraStatusLights();
+        }
+
+        /// <summary>
+        /// 按配置开关设置标题栏各字段/按钮的可见性（V1.9.9 从 InitTitleBarFields 抽出复用）。
+        /// 为什么抽出来：RelayoutTitleBar 在空间不足时会临时隐藏低价值字段（.Visible=false），
+        /// 窗口变大/热更后重排需要"先恢复配置应显示的字段再压缩"，共用同一份配置判定避免两处漂移。
+        /// cmbRecipe 默认始终显示（暂无独立开关，保持既有行为）。
+        /// </summary>
+        private void ApplyConfigVisibility()
+        {
+            lblProductPrefix.Visible = _config.Display.ShowProductModel;
+            cmbRecipe.Visible = true; // 配方下拉框暂不设独立开关（V1.9.9 保持既有行为）
+            lblSerialTitle.Visible = _config.Display.ShowSerialNumber;
+            lblSerial.Visible = _config.Display.ShowSerialNumber;
+            lblTotal.Visible = _config.Display.ShowTotalCount;
+            lblOk.Visible = _config.Display.ShowOkCount;
+            lblNg.Visible = _config.Display.ShowNgCount;
+            // 系统设置按钮显隐（V1.8.4）：按配置隐藏后标题栏自动紧凑重排，隐藏期间配置只读
+            btnSettings.Visible = _config.Display.ShowSettingsButton;
         }
 
         /// <summary>
@@ -217,23 +234,68 @@ namespace CommandCenter.Views
         /// 隐藏的字段（ShowXxx=false）跳过不占位，避免中间空缺或重叠。
         /// 所有控件垂直居中：标题栏高 48，y = (48 - 控件高度)/2，视觉上全部居中对齐。
         /// 设计器里的坐标只作为"全部可见"时的初始参照，最终以这里算出的为准。
+        ///
+        /// 【V1.9.9：防止右侧灯区压住字段的根因修复】
+        /// 标题栏里有两套互不知情的布局：左侧字段是"绝对坐标从左往右排"，右侧
+        /// PLC 灯 + 每台相机灯是"Dock.Right 从右往左排"。原来 RelayoutTitleBar 只算
+        /// 自己这一半——相机灯多（每台占 96px，Dock.Right）时右侧总体宽度变大，
+        /// 挤占了画面，把"系统设置"按钮等最右侧字段推进灯区并被盖住。
+        /// 修复：先统计右侧所有 Dock.Right 控件的总宽 rightDockWidth，把左侧字段的
+        /// 最大 X 限制为 标题栏宽 - 右内边距 - rightDockWidth；空间不足时按优先级
+        /// （hidePriority：产品型号→配方→序列号→计数→分隔线）逐个隐藏低价值字段
+        /// 再重排，保证"系统设置"按钮始终可见、不被灯盖住。
+        /// 注意：这里的隐藏只是运行时"放不下才让位"，不改 ShowXxx 配置；
+        /// 热更（InitTitleBarFields）会按配置值重新设置可见性再调用本方法。
         /// </summary>
         private void RelayoutTitleBar()
         {
             const int barHeight = 48; // 标题栏固定高度（见 Designer 的 pnlTitleBar.Size）
 
+            // 先恢复配置可见性：上次重排可能因空间不足临时隐藏了低价值字段，
+            // 窗口拉大/热更后必须把"配置说该显示"的字段先亮回来，再按当前空间压缩。
+            ApplyConfigVisibility();
+
             // 排布顺序固定：产品前缀 → 配方下拉框 → 序列号标题 → 序列号框 → | → 总数 → OK → NG → | → 系统设置按钮
             Control[] seq = { lblProductPrefix, cmbRecipe, lblSerialTitle, lblSerial, lblSep1,
                               lblTotal, lblOk, lblNg, lblSep2, btnSettings };
-            int x = 12; // 与设计器 Padding(12,0,12,0) 左内边距保持一致
-            foreach (var c in seq)
+
+            // 字段"让位"优先级（低→高）：空间不足时从低往高隐藏，系统设置按钮永远保留。
+            // 为什么产品/配方先让位：它们只是上下文提示，丢了不影响操作；计数、按钮是刚需。
+            Control[] hidePriority = { lblProductPrefix, cmbRecipe, lblSerialTitle, lblSerial,
+                                       lblSep1, lblTotal, lblOk, lblNg, lblSep2, btnSettings };
+
+            // 右侧 Dock 区（PLC 灯 + 全部相机灯）占用的总宽：Dock.Right 控件从右往左叠，
+            // 每个灯之间留 6px 视觉间距（灯间距是内在间距，宽幅估算 ±几像素不影响正确性）。
+            int rightDockWidth = 0;
+            foreach (Control c in pnlTitleBar.Controls)
+                if (c.Dock == DockStyle.Right && c.Visible)
+                    rightDockWidth += c.Width + 6;
+            // 左侧字段可用的最大 X（标题栏宽 - 右内边距 - 右侧灯区宽）。
+            int maxX = pnlTitleBar.ClientSize.Width - 12 - rightDockWidth;
+
+            while (true)
             {
-                if (!c.Visible) continue;
-                int y = (barHeight - c.Height) / 2; // 垂直居中（各控件高度不同：按钮30/下拉27/标签19/显示框24）
-                if (c is Button)    { c.Location = new Point(x, y); x += c.Width + 12; }
-                else if (c is ComboBox) { c.Location = new Point(x, y); x += c.Width + 12; }
-                else if (c == lblSerial) { c.Location = new Point(x, y); x += c.Width + 18; } // 固定宽度显示框
-                else                { c.Location = new Point(x, y); x += ((Label)c).PreferredWidth + 18; }
+                int x = 12; // 与设计器 Padding(12,0,12,0) 左内边距保持一致
+                bool fits = true;
+                foreach (var c in seq)
+                {
+                    if (!c.Visible) continue;
+                    int w = 0;
+                    if (c is Button)      w = c.Width + 12;
+                    else if (c is ComboBox) w = c.Width + 12;
+                    else if (c == lblSerial) w = c.Width + 18;        // 固定宽度显示框
+                    else                  w = ((Label)c).PreferredWidth + 18;
+                    if (x + w > maxX) { fits = false; break; }          // 放不下→本次排布报废
+                    int y = (barHeight - c.Height) / 2;                 // 垂直居中
+                    c.Location = new Point(x, y);
+                    x += w;
+                }
+                if (fits) return; // 全部可见字段都放下，完成
+
+                // 放不下：隐藏下一个"最可让位"的可见字段后重排（按钮最后，永不主动隐藏它）
+                var toHide = hidePriority.FirstOrDefault(h => h.Visible);
+                if (toHide == null) return; // 已无可让位字段（极端情况），按当前可见性排到哪算哪
+                toHide.Visible = false;
             }
         }
 
@@ -403,6 +465,10 @@ namespace CommandCenter.Views
         private void SubscribeEvents()
         {
             SubscribeRuntimeEvents();
+
+            // 窗口大小变化时重排标题栏（V1.9.9）：相机灯多时右侧 Dock 区很宽，
+            // 窗口缩窄会让左侧字段挤进灯区；Resize 时重新按"当前可用宽度"压缩/恢复字段。
+            Resize += (s, e) => RelayoutTitleBar();
 
             FormClosing += (s, e) =>
             {
