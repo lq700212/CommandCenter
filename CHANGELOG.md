@@ -1,6 +1,41 @@
 # 版本改动记录
 
-## V1.12.14（2026-08-12）现场实测确认：D 地址与协议地址一一对应，零偏移
+## V1.12.15（2026-08-12）PLC 状态文案对齐从站语义 + 显示窗口双击放大/还原
+
+> 两个现场体验优化：
+> ① 从站模式（V1.12.11 起 PLC 做主站）下，主界面左下角状态栏仍显示旧的"等待 PLC 到位信号"，
+>    与右上角三态灯（主站已连入/监听就绪/监听失败）语义不一致，改为"等待 PLC 主站到位信号"；
+> ② 客户想看某一路相机的画面细节，此前只能看小格窗。新增"鼠标左键双击任一显示窗口 → 全屏放大，
+>    再次双击 / 按 Esc → 还原"，放大期间画面仍随检测实时刷新。
+
+### 改动范围
+- **`Services/ProductionCoordinator.cs`**：状态文本"等待 PLC 到位信号"→"等待 PLC 主站到位信号"
+  （4 处：Start / Resume / 到位异常 / 收尾复位），对齐从站模式下"到位信号由 PLC 主站写入 D100"。
+- **`Controls/CameraDisplayControl.cs`**：新增 `WindowDoubleClicked` 事件 + `HandleDoubleClick`，
+  **直接订阅图像子控件（PictureBox / 编号 Label）的 `MouseDoubleClick`**（左键双击，UI 线程）。
+  【根因修正·两轮血泪】首版重写 `OnDoubleClick`：`Control.DoubleClick` 事件不支持冒泡，双击落在
+  占满整窗的 PictureBox 上时不触发 → 没反应；第二版改为订阅本 UserControl 的 `MouseDoubleClick`
+  （依赖冒泡），实测部分环境冒泡仍不稳定，依旧没生效。最终改为**直接订阅 PictureBox 的
+  MouseDoubleClick**——因为 PictureBox 用 Dock=Fill 占满整窗、双击必落其上，完全不依赖冒泡、
+  **必然命中**（harness 对 PictureBox 注入双击确认为全屏）。
+- **`Views/MainForm.cs`**：
+  - 窗口矩阵每格订阅 `WindowDoubleClicked` → `OnWindowDoubleClicked`；
+  - 新增 `EnterFullScreenWindow`/`RestoreFullScreenWindow`：用无边框、置顶、覆盖整屏（含任务栏）
+    的独立 Form 承载该窗口（同一控件实例，Dock=Fill 铺满），**移动控件而非复制图片**，保证全屏时
+    主流程 `SetImage` 刷新照常生效；进入前记录原单元格（TableLayoutPanelCellPosition），还原时放回原位；
+  - 双击另一窗口时先还原当前全屏、再放大新窗口（双击放大/再双击还原 + 直接切换）；
+  - Esc 兜底还原（无边框窗体无关闭按钮）；`BuildWindowGrid`/`FormClosing` 幂等收尾全屏窗体
+    （防热更/关窗时孤儿顶级窗体残留导致无法退出）；
+  - 状态栏注释（"等待PLC主站到位"、双击放大说明）同步。
+- **`CHANGELOG.md`**：本小节记录。
+
+### 为什么这么改
+- 状态栏文案与三态灯语义一致，现场一看即知"上位机是从站、等 PLC 主站发到位信号"；
+- 全屏用独立 TopLevel 窗体 + 移动控件实例：布局最简单（不碰主窗体 Dock 布局），并让全屏画面
+  跟随检测实时刷新（复制图片的方案会停住）。
+
+### 验证
+- Debug 构建通过，冒烟启动进程存活、无崩溃。
 
 > 现场联调：功能测试页写 D101，汇川主站直接读地址 101 即见，与 NModbus 从站
 > `PointSource.ReadPoints/WritePoints(start)` 的 0-based 起始地址天然对齐，**无需任何换算**。

@@ -40,6 +40,14 @@
   - **防 NRE 的空安全**（不可删，否则留坑）：`obj.Prop.Trim()`、`obj.Method()` 这类链式调用，删掉外层判空后，配置被手改成 null/空值时直接崩溃。
   - 删除后**必须逐处校验**：① 被删判空保护的对象在"所有调用路径"是否恒非 null（尤其 json 手改、跨窗体传参、列表元素）；② 用 `?.Trim()...==true` 这类空安全写法替代裸链式调用（语义不变、只防崩溃），**而不是**加回旧兜底逻辑；③ 构建 + 冒烟测试必须跑，另做一次"故意破坏输入"推演（如把配置里字段手写成 null/空串，代码是否还会崩）。改完自问三遍："删掉的这段保护，有没有谁还在依赖它？"
 
+- **WinForms 鼠标事件"命中与冒泡"红线（2026-08 血泪，做"双击/点击生效"先读这条）**：
+  判断某控件上"点击/双击有没有反应"，先想清两个问题，否则白改：
+  ① **真实命中目标是谁**：鼠标双击落在**最内层的子控件**上（如图像区 PictureBox 用 Dock=Fill 占满整窗，双击必落它），不会"自动落到父 UserControl"；
+  ② **事件冒不冒泡**：WinForms 中带 `Mouse` 前缀的（`MouseClick`/`MouseDoubleClick`/`MouseDown`…)**会**沿父链冒泡；不带前缀的（`Click`/`DoubleClick`）**不冒泡**。
+  - 要做"整窗口都响应双击"最稳写法：**直接订阅最内层子控件（PictureBox）的 `MouseDoubleClick`**（参考 `CameraDisplayControl.HandleDoubleClick`），因为它在真实命中点、必然触发、不依赖冒泡。别用父控件 `OnDoubleClick` 重写（不冒泡→没反应），也别赌父 `MouseDoubleClick` 冒泡（部分环境不稳定）。
+  - **headless / 无桌面交互会话下，合成鼠标事件（`mouse_event`、`SendMessage WM_LBUTTONDBLCLK`）无法触发 WinForms 双击**——WinForms 对双击有内部状态/计时免疫，合成事件被吞，不能用来验证"是否生效"。
+  - 要验证"双击→放大→还原"这类 UI 行为，用**进程序 harness 反射调用 `protected OnMouseDoubleClick`** 注入到真实命中控件（PictureBox），再反射读私有字段断言结果（`_fullScreenForm` 是否非空、`_windows[?]` 是否同一），这是本项目经过验证的可靠手段（见临时验证脚本思路）。
+
 ## 关键文件导航
 
 | 文件 | 作用 |

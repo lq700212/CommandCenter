@@ -69,6 +69,28 @@ namespace CommandCenter.Controls
 
             // 控件尺寸变化时，保证编号标签始终浮在最上层（不被图片盖住）
             Resize += (s, e) => _windowIndexLabel.BringToFront();
+
+            // 双击放大/还原（V1.12.15）：
+            // ★ 直接订阅"子控件"的 MouseDoubleClick，而非依赖父控件的冒泡（血泪教训）——
+            //   初次实现用重写 OnDoubleClick：DoubleClick 事件不支持冒泡，双击落在图像区
+            //   （PictureBox 占满整窗）时不触发，导致"双击没反应"；二次改为订阅本 UserControl
+            //   的 MouseDoubleClick，实测部分环境冒泡仍不稳定，同样没生效。
+            //   图像区 PictureBox 用 Dock=Fill 占满整个窗口，双击无论点在哪必落其上，所以
+            //   直接订阅 PictureBox（及其上的编号标签）的 MouseDoubleClick 是必然命中的方式，
+            //   完全绕开冒泡的不确定性。
+            // 左键双击才触发 WindowDoubleClicked（右键双击不入此）。
+            var handler = new MouseEventHandler(HandleDoubleClick);
+            _pictureBox.MouseDoubleClick += handler;
+            _windowIndexLabel.MouseDoubleClick += handler;
+        }
+
+        /// <summary>
+        /// 子控件双击统一入口（V1.12.15）：左键双击 → 通知主窗体放大/还原全屏。
+        /// </summary>
+        private void HandleDoubleClick(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+                WindowDoubleClicked?.Invoke(this, EventArgs.Empty);
         }
 
         /// <summary>
@@ -107,6 +129,12 @@ namespace CommandCenter.Controls
 
         /// <summary>当前窗口编号</summary>
         public int WindowIndex => _windowIndex;
+
+        /// <summary>
+        /// 鼠标左键双击事件（V1.12.15：供主窗体放大/还原全屏使用）。
+        /// 只在 UI 线程触发；主窗体据此把本窗口放大到全屏、再次双击还原。
+        /// </summary>
+        public event EventHandler WindowDoubleClicked;
 
         /// <summary>
         /// 资源释放：释放控件持有的图片句柄，避免句柄泄漏。

@@ -25,8 +25,10 @@ namespace CommandCenter.Views
     /// │  └──────┘ └──────┘ └──────┘ └──────┘ └──────┘                  │
     /// │  （Rows × Columns 个窗口，逐次环形刷新）                            │
     /// ├───────────────────────────────────────────────────────────────────┤
-    /// │ 状态:等待PLC到位…（左下角；配方下发成功时变绿显示"配方切换完成"）          │
+    /// │ 状态:等待PLC主站到位…（左下角；配方下发成功时变绿显示"配方切换完成"）      │
     /// └───────────────────────────────────────────────────────────────────┘
+    /// 窗口放大/还原（V1.12.15）：鼠标左键双击任一显示窗口 → 该窗口全屏放大（整屏含任务栏），
+    ///   再次双击 / 按 Esc → 还原回窗口矩阵原位置；全屏时画面仍随检测实时刷新（移动的是同一控件）。
     /// 标题栏：左起信息字段（按配置开关）→ 配方下拉框（显示+切换合一）→ 系统设置按钮 → 连接指示灯；
     ///   - 连接指示灯从右到左：●相机N..●相机1 → ●扫码枪 → ●PLC（Dock.Right 先 Add 靠左）。
     ///     扫码枪灯显示"扫码枪：已连接/未连接"，绿=已连接、红=未连接（V1.12.6，聚合刷新）；
@@ -60,6 +62,11 @@ namespace CommandCenter.Views
         private bool _recipeComboInit;    // 组合框程序内初始化/刷新时防误触 SelectedIndexChanged
         private int _recipeSwitchVer;     // 配方下发任务的版本号：只让"最新一次切换"的结果更新状态条（丢弃过期提示）
         private CameraDisplayControl[] _windows;
+
+        // 窗口双击放大/还原全屏（V1.12.15）：双击任一显示窗口 → 全屏显示，再双击/Esc → 还原。
+        private Form _fullScreenForm;                  // 全屏承载窗体（无边框、置顶、覆盖全屏）
+        private CameraDisplayControl _fullScreenWindow;// 当前被放大的窗口（从 grid 移入全屏窗体）
+        private TableLayoutPanelCellPosition? _fullScreenCell; // 该窗口在 grid 里的原单元格（还原时放回）
 
         // 统计
         private int _total, _ok, _ng;
@@ -605,6 +612,8 @@ namespace CommandCenter.Views
             // 重置容器：先释放旧窗口（热更时旧窗口 PictureBox 持有图片句柄，必须 Dispose 防泄漏），
             // 再清掉设计器默认的 1×1 行列与可能残留的子控件。
             // 注意：释放必须针对"上一轮"的 _windows 数组，所以要在 _windows 重建之前做。
+            // 热更前若有窗口正被全屏放大（挂在全屏窗体上），先移回 grid 一并释放，避免孤儿句柄泄漏。
+            RestoreFullScreenWindow();
             var grid = gridCameraWindows;
             if (_windows != null)
                 foreach (var w in _windows)
@@ -639,6 +648,8 @@ namespace CommandCenter.Views
                     w.SetWindowIndex(idx + 1);
                     // 主界面窗口不再显示存图点位标识（点位只通过设置界面 WindowPointForm 查询比对）；
                     // 点位归属由 ProductionCoordinator 按 WindowStationMap 映射计算，窗口编号即拍照顺序。
+                    // 双击放大/还原（V1.12.15）：每格订阅双击事件，由 OnWindowDoubleClicked 统一处理。
+                    w.WindowDoubleClicked += OnWindowDoubleClicked;
                     _windows[idx] = w;
                     grid.Controls.Add(w, c, r);
                     idx++;
@@ -648,6 +659,106 @@ namespace CommandCenter.Views
             // 此刻标题栏/底部栏都已存在，把矩阵放在 z-order 最顶（最后布局），
             // 否则 Top 的标题栏会叠加覆盖矩阵第一排（"第一排窗口显示不全"的根源）。
             grid.BringToFront();
+        }
+
+        /// <summary>
+        /// 双击任一显示窗口的入口（V1.12.15，UI 线程）：
+        ///   - 当前无全屏窗口 → 把双击的窗口放大到全屏（EnterFullScreenWindow）；
+        ///   - 当前已有全屏窗口 → 先还原（移到 grid），若双击的正是全屏窗口则到此为止（还原完成），
+        ///     否则继续把新双击的窗口放大（实现"双击放大、再双击还原"与"双击另一窗口切换"）。
+        /// 事件来自 CameraDisplayControl.OnDoubleClick，已在 UI 线程，无需回切。
+        /// </summary>
+        private void OnWindowDoubleClicked(object sender, EventArgs e)
+        {
+            var w = sender as CameraDisplayControl;
+            if (w == null) return;
+
+            var cur = _fullScreenWindow;
+            if (cur != null)
+            {
+                RestoreFullScreenWindow();          // 先把已有全屏窗口移回 grid 原单元格
+                if (ReferenceEquals(w, cur)) return; // 双击的正是全屏窗口 → 仅还原即可
+            }
+            EnterFullScreenWindow(w);               // 否则把（新）双击的窗口放大到全屏
+        }
+
+        /// <summary>
+        /// 把指定显示窗口放大到全屏（V1.12.15）：
+        /// 用一个无边框、置顶、覆盖整屏（含任务栏）的独立 Form 承载该窗口，Dock=Fill 铺满。
+        /// 【为什么用独立窗体而非主窗体内覆盖层】直接搬动 Dock 控件到主窗体覆盖层会与
+        ///   标题栏/底部栏的 Dock 布局冲突（Fill 抢占剩余空间次序难控）；独立无边框窗体
+        ///   布局最简单，且是 TopLevel 顶层窗口天然盖在一切之上。
+        /// 【为什么要移动控件实例而非复制图片】检测完成刷新图片走的是 `_windows[索引]`
+        ///   SetImage（见 OnInspectionFinished），全屏时若复制图片，主流程刷新不生效、画面停住；
+        ///   移动同一实例则全屏窗口里的画面照常随检测实时刷新。
+        /// 【还原依据】进入全屏前记录该窗口在 grid 里的原单元格（_fullScreenCell），
+        ///   还原时按它 Add 回原位，restore 后布局与放大前完全一致。
+        /// </summary>
+        private void EnterFullScreenWindow(CameraDisplayControl w)
+        {
+            if (_fullScreenForm != null || w == null) return; // 异常防护：已在全屏则不做
+            LogHelper.Info($"窗口{ w.WindowIndex } 进入全屏");
+
+            // 记录原单元格（column,row），还原时用 GetCellPosition 一致的下标 Add 回原位。
+            var pos = gridCameraWindows.GetCellPosition(w);
+            _fullScreenCell = new TableLayoutPanelCellPosition(pos.Column, pos.Row);
+
+            // 全屏承载窗体：无边框、覆盖当前屏幕整屏（含任务栏）、置顶、不占任务栏。
+            _fullScreenForm = new Form
+            {
+                FormBorderStyle = FormBorderStyle.None,
+                StartPosition = FormStartPosition.Manual,
+                ShowInTaskbar = false,
+                TopMost = true,
+                BackColor = Color.Black
+            };
+            _fullScreenForm.Bounds = Screen.FromControl(this).Bounds; // 覆盖整屏含任务栏
+            _fullScreenForm.KeyPreview = true;
+            // Esc 兜底还原：无边框窗体没有关闭按钮，除双击外按 Esc 也能退出全屏。
+            _fullScreenForm.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) RestoreFullScreenWindow(); };
+            _fullScreenForm.Shown += (s, e) => _fullScreenForm.Focus(); // 聚焦到全屏窗体，保证 Esc 能收到
+
+            // 把窗口从 grid 移入全屏窗体：Dock=Fill 保持，正好铺满整屏。
+            _fullScreenWindow = w;
+            gridCameraWindows.Controls.Remove(w);
+            w.Dock = DockStyle.Fill;
+            w.Margin = new Padding(0); // 全屏吞掉 grid 的 3px 间距
+            _fullScreenForm.Controls.Add(w);
+            _fullScreenForm.Show();
+        }
+
+        /// <summary>
+        /// 全屏还原（V1.12.15，UI 线程）：把挂在全屏窗体的窗口移回 grid 原单元格并释放全屏窗体。
+        /// 幂等：无全屏窗口时直接返回（BuildWindowGrid/FormClosing 可在任意时机安全调用）。
+        /// </summary>
+        private void RestoreFullScreenWindow()
+        {
+            var form = _fullScreenForm;
+            var w = _fullScreenWindow;
+            var cell = _fullScreenCell;
+            _fullScreenForm = null;
+            _fullScreenWindow = null;
+            _fullScreenCell = null;
+
+            // 先关掉全屏窗体（把窗口从它身上摘下来，避免 Dispose 时连带销毁窗口）。
+            if (form != null)
+            {
+                form.Controls.Remove(w);
+                form.Close();
+                form.Dispose();
+            }
+
+            // 把窗口放回 grid 原单元格，恢复 Fill + 间距，形态与放大前一致。
+            if (w != null && gridCameraWindows != null && !gridCameraWindows.IsDisposed)
+            {
+                w.Dock = DockStyle.Fill;
+                w.Margin = new Padding(3);
+                if (cell != null)
+                    gridCameraWindows.Controls.Add(w, cell.Value.Column, cell.Value.Row);
+                else
+                    gridCameraWindows.Controls.Add(w);
+                w.BringToFront();
+            }
         }
 
         /// <summary>
@@ -667,6 +778,10 @@ namespace CommandCenter.Views
 
             FormClosing += (s, e) =>
             {
+                // 若正有窗口全屏放大（挂在独立全屏窗体上），先关掉并移回，防止顶级窗体残留导致
+                // 进程退出不了（V1.12.15）。
+                RestoreFullScreenWindow();
+
                 // 清理服务。任何一步异常都不能中断关窗，否则程序会卡在关闭流程（进程退出不了）。
                 // 关窗顺序：先停心跳/编排，再断设备；各服务 Dispose 均已限时抢锁 + 锁外强断网，
                 // 这里再做一层兜底 catch，保证即使个别服务释放出问题，窗口也能正常关闭退出。
@@ -888,7 +1003,7 @@ namespace CommandCenter.Views
         /// <summary>
         /// 流程状态文本刷新（工作线程抛出，需回 UI 线程）。
         /// 每次流程状态更新都恢复默认深蓝灰色文字——配方切换成功的"绿色提示"只在切换成功
-        /// 的瞬间显示，随后流程推进（如"等待PLC到位"）会恢复常规颜色。
+        /// 的瞬间显示，随后流程推进（如"等待PLC主站到位"）会恢复常规颜色。
         /// </summary>
         private void OnStateChanged(string text)
         {

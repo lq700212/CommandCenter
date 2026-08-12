@@ -126,7 +126,7 @@ namespace CommandCenter.Services
                 _imageStore.AddMonitor(dir, i);
             }
             SafeChange(_positionTimer, 0, PollMs); // 立即首轮，之后每 200ms
-            SetState("等待 PLC 到位信号");
+            SetState("等待 PLC 主站到位信号");
         }
 
         /// <summary>暂停流程（界面手动暂停时调用，保留在 Idle）。</summary>
@@ -144,7 +144,7 @@ namespace CommandCenter.Services
             {
                 _running = true;
                 SafeChange(_positionTimer, 0, PollMs);
-                SetState("等待 PLC 到位信号");
+                SetState("等待 PLC 主站到位信号");
             }
         }
 
@@ -240,7 +240,7 @@ namespace CommandCenter.Services
             {
                 LogHelper.Error("到位处理异常", ex);
                 Interlocked.Exchange(ref _busy, 0);
-                SetState("等待 PLC 到位信号");
+                SetState("等待 PLC 主站到位信号");
             }
         }
 
@@ -421,7 +421,7 @@ namespace CommandCenter.Services
                 SafeChange(_imageWaitTimer, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
                 Interlocked.Exchange(ref _busy, 0);
                 Interlocked.Exchange(ref _finished, 0);
-                SetState("等待 PLC 到位信号");
+                SetState("等待 PLC 主站到位信号");
             }
         }
 
