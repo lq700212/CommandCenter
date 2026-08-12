@@ -91,6 +91,9 @@ namespace CommandCenter.Services
                     else
                     {
                         _buffer.Append(c);
+                        // 【V1.8.3 修复】防御异常/噪声数据撑爆内存：串口没有行分隔符时
+                        //   _buffer 会无限增长（对齐 TCP 实现 ScannerTcpService 的 MaxLineLen=512）。
+                        if (_buffer.Length > 512) _buffer.Clear();
                     }
                 }
             }

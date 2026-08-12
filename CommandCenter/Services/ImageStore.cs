@@ -54,7 +54,11 @@ namespace CommandCenter.Services
             if (string.IsNullOrWhiteSpace(dir)) return;
             lock (_watchedDirs)
             {
-                if (_watchedDirs.Contains(dir)) return; // 幂等：同目录只监一次
+                // 幂等：同目录只监一次。比较时把尾斜杠去掉并忽略大小写（Windows 路径不区分大小写，
+                // 否则 "D:\x" 与 "D:\x\" / "d:\X" 会被当成两个目录重复监听，造成重复取图）。
+                if (_watchedDirs.Any(x => string.Equals(
+                        NormalizeDir(x), NormalizeDir(dir), StringComparison.OrdinalIgnoreCase)))
+                    return;
                 try
                 {
                     Directory.CreateDirectory(dir);
@@ -111,7 +115,17 @@ namespace CommandCenter.Services
                     ? $"IMG_{now:yyyyMMdd_HHmmss_fff}_{(isOk ? "OK" : "NG")}.png"   // 模板留空时的兜底命名
                     : SanitizeForPath(renderedFile) + ".png";
 
+                // 【防重名覆盖】默认文件名模板 "{点位}" 下，同一 SN/判定目录里同点位二次拍照
+                // 必然重名，直接覆盖会丢历史图。这里检测重名自动追加 "_2/_3…" 序号兜底
+                // （模板带 {时间} 时基本不重名，此逻辑只是保险，不改变任何存图规则）。
                 string path = Path.Combine(dir, name);
+                int dup = 2;
+                while (File.Exists(path))
+                {
+                    string stem = Path.GetFileNameWithoutExtension(name);
+                    path = Path.Combine(dir, $"{stem}_{dup}.png");
+                    dup++;
+                }
                 image.Save(path, ImageFormat.Png);
                 LogHelper.Info($"照片已保存：{path}");
                 return path;
@@ -160,6 +174,12 @@ namespace CommandCenter.Services
             foreach (char c in s)
                 sb.Append(bad.Contains(c) ? '_' : c);
             return sb.ToString();
+        }
+
+        /// <summary>去掉目录末尾的斜杠（正反斜杠都处理），供幂等判重使用。</summary>
+        private static string NormalizeDir(string dir)
+        {
+            return (dir ?? "").TrimEnd('\\', '/');
         }
 
         /// <summary>

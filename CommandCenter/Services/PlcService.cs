@@ -210,12 +210,18 @@ namespace CommandCenter.Services
             return SafeWriteMulti(_cfg.RecipeAddress, regs);
         }
 
-        /// <summary>上报检测计数：总数 / OK / NG 三个寄存器。</summary>
+        /// <summary>
+        /// 上报检测计数：总数 / OK / NG 三个寄存器。
+        /// 【V1.8.3 修复】逐个写并收集成功与否——此前三连写不校验返回值，任一个失败都静默
+        /// （现场台账会悄悄少记数）；现在任一失败都会记一条 Warn，便于现场发现并排查。
+        /// </summary>
         public void ReportCounts(int total, int ok, int ng)
         {
-            SafeWrite(_cfg.TotalCountAddress, (ushort)total);
-            SafeWrite(_cfg.OkCountAddress, (ushort)ok);
-            SafeWrite(_cfg.NgCountAddress, (ushort)ng);
+            bool tOk = SafeWrite(_cfg.TotalCountAddress, (ushort)total);
+            bool oOk = SafeWrite(_cfg.OkCountAddress, (ushort)ok);
+            bool nOk = SafeWrite(_cfg.NgCountAddress, (ushort)ng);
+            if (!(tOk && oOk && nOk))
+                LogHelper.Warn($"计数上报未全部成功：总数={tOk} OK={oOk} NG={nOk}（PLC 通讯不稳定或寄存器越界）");
         }
 
         private bool SafeRead(ushort address, out ushort value)
@@ -239,19 +245,21 @@ namespace CommandCenter.Services
             }
         }
 
-        private void SafeWrite(ushort address, ushort value)
+        private bool SafeWrite(ushort address, ushort value)
         {
             try
             {
-                if (!EnsureConnected()) return;
+                if (!EnsureConnected()) return false;
                 lock (_lock)
                     _master.WriteSingleRegister(_cfg.UnitId, address, value);
+                return true;
             }
             catch (Exception ex)
             {
                 SetConnected(false);
-                ResetConnection();
+                ResetConnection(); // 连接已不可信：清引用，下次 EnsureConnected 强制重建
                 LogHelper.Warn($"写 PLC 寄存器 D{address} 失败：{ex.Message}");
+                return false;
             }
         }
 

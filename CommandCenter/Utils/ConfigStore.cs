@@ -71,9 +71,26 @@ namespace CommandCenter.Utils
 
                 string tmp = ConfigFile + ".tmp";
                 File.WriteAllText(tmp, json, new UTF8Encoding(false)); // 无 BOM UTF-8，避免 x64 下 BOM 干扰
+                // 【V1.8.3 修复】优先用 File.Replace 做原子替换（目标存在时），避免"先删旧再移新"
+                // 的窗口期：万一 Move 失败（杀毒软件/权限/磁盘瞬时问题）旧文件已被删，配置丢失回退默认。
+                // File.Replace 在某些环境（如目标为只读、不同文件系统）会抛异常，这里 fallback 到
+                // 原来的"删旧移新"（比彻底失败强），保证极端情况下也能落盘。
                 if (File.Exists(ConfigFile))
-                    File.Delete(ConfigFile);
-                File.Move(tmp, ConfigFile);
+                {
+                    try
+                    {
+                        File.Replace(tmp, ConfigFile, null);
+                    }
+                    catch
+                    {
+                        try { File.Delete(ConfigFile); } catch { }
+                        File.Move(tmp, ConfigFile);
+                    }
+                }
+                else
+                {
+                    File.Move(tmp, ConfigFile);
+                }
                 LogHelper.Info("配置已保存：" + ConfigFile);
             }
             catch (Exception ex)

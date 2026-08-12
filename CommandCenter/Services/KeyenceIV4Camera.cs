@@ -168,6 +168,10 @@ namespace CommandCenter.Services
         /// 【连接复用】本方法与 TriggerAndRead 同走 EnsureConnected 的短连接缓存：同一次流程里
         ///   T2（触发+判定）紧接 BR（取图）会用同一条 TCP 连接，避免多占相机 2 路连接上限。
         ///
+        /// 【V1.8.3 修复】响应解析各阶段（前缀/长度/属性/图像数据）遇对端关闭（ReadByte 返回 -1
+        ///   或 Read 返回 0）时，一律 MarkDisconnected 清理连接——此前只判失败不标记，坏流残留，
+        ///   下一次动作复用已关闭的连接持续失败（与 SendCommandAndReadLine 的断连处理对齐）。
+        ///
         /// 【耗时说明】一张 24bit BMP 通常数百 KB~几 MB，读取是同步的（会占用调用线程），
         ///   因此绝不能在 UI 线程调用；主流程在后台线程串行触发+取图，可接受。
         /// </summary>
@@ -193,7 +197,7 @@ namespace CommandCenter.Services
                 while (pos < 3)
                 {
                     int b = _stream.ReadByte();
-                    if (b < 0) return ReadImageOutcome.Fail("读取响应前缀超时/连接断开");
+                    if (b < 0) { MarkDisconnected(); return ReadImageOutcome.Fail("读取响应前缀超时/连接断开"); }
                     if (b == '\r' || b == '\n') continue; // 跳过空行（此阶段没有图像数据，不会误吞）
                     prefix[pos++] = (char)b;
                 }
@@ -206,7 +210,7 @@ namespace CommandCenter.Services
                 while (true)
                 {
                     int b = _stream.ReadByte();
-                    if (b < 0) return ReadImageOutcome.Fail("读取图像长度字段超时/连接断开");
+                    if (b < 0) { MarkDisconnected(); return ReadImageOutcome.Fail("读取图像长度字段超时/连接断开"); }
                     if (b == ',') break;
                     if (b < '0' || b > '9')
                         return ReadImageOutcome.Fail($"长度字段含非数字字符：{(char)b}");
@@ -223,7 +227,7 @@ namespace CommandCenter.Services
                 while (true)
                 {
                     int b = _stream.ReadByte();
-                    if (b < 0) return ReadImageOutcome.Fail("读取属性字段超时/连接断开");
+                    if (b < 0) { MarkDisconnected(); return ReadImageOutcome.Fail("读取属性字段超时/连接断开"); }
                     if (b == ',') break;
                     if (b < '0' || b > '9')
                         return ReadImageOutcome.Fail($"属性字段含非数字字符：{(char)b}");
@@ -240,8 +244,7 @@ namespace CommandCenter.Services
                 {
                     int need = (int)Math.Min(chunk.Length, size - offset);
                     int n = _stream.Read(chunk, 0, need);
-                    if (n <= 0)
-                        return ReadImageOutcome.Fail($"图像数据读取不完整（已收 {offset}/{size} 字节）");
+                    if (n <= 0) { MarkDisconnected(); return ReadImageOutcome.Fail($"图像数据读取不完整（已收 {offset}/{size} 字节）"); }
                     Array.Copy(chunk, 0, data, offset, n);
                     offset += n;
                 }

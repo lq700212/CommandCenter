@@ -65,10 +65,14 @@ namespace CommandCenter.Services
         }
 
         /// <summary>启动后台连接与读取线程。幂等：重复调用不叠加线程。
-        /// 立即返回 true（实际连接在后台线程异步进行，失败自动重连，不阻塞调用方）。</summary>
+        /// 立即返回 true（实际连接在后台线程异步进行，失败自动重连，不阻塞调用方）。
+        /// 【V1.8.3 修复】未启用（Enabled=false）的扫码枪直接返回 false 不启线程，
+        ///   与串口实现 ScannerService.Open 的 `if (!_cfg.Enabled) return false;` 行为对齐，
+        ///   否则被禁用但仍留在配置里的 TCP 扫码枪也会白白起一个后台连接线程。</summary>
         public bool Open()
         {
             if (_disposed || _thread != null) return false;
+            if (!_cfg.Enabled) return false; // 未启用：不起后台线程，行为对齐串口实现
             _thread = new Thread(Worker) { IsBackground = true, Name = "ScannerTcp" };
             _thread.Start();
             LogHelper.Info($"扫码枪(TCP)启动：{_cfg.IpAddress}:{_cfg.Port}");
@@ -215,12 +219,28 @@ namespace CommandCenter.Services
         public void Dispose()
         {
             _disposed = true;
-            lock (_lock)
+            // 【V1.8.3 修复】对齐 PlcService/相机的"限时抢锁 + 锁外强断网"约定：
+            //   Worker 线程持锁做 TryConnect 时最多阻塞 ConnectTimeoutMs(2s)，若用无超时
+            //   lock(_lock)，不可达 IP 会拖住 UI 关窗线程最多 2s。这里限时 300ms 抢锁，
+            //   拿不到锁就锁外 Close socket——Close 会让持锁线程的 BeginConnect 立刻结束
+            //   （WaitOne 返回后 tcp.Client==null 或 EndConnect 抛异常，均被其 catch 收敛），
+            //   随后它自会释放锁退出，本方法也不会被阻塞。
+            if (Monitor.TryEnter(_lock, TimeSpan.FromMilliseconds(300)))
             {
+                try
+                {
+                    CloseConn();
+                }
+                finally
+                {
+                    Monitor.Exit(_lock);
+                }
+            }
+            else
+            {
+                LogHelper.Warn("扫码枪(TCP) Dispose 未能拿到锁（后台连接任务繁忙），改走锁外强断网");
                 try { _stream?.Dispose(); } catch { }
-                _stream = null;
                 try { _tcp?.Close(); } catch { }  // Close 让读线程的 Read 立即返回/抛异常退出
-                _tcp = null;
             }
             // 等读线程退出（短超时，不阻塞关窗）
             var t = _thread;
@@ -229,6 +249,15 @@ namespace CommandCenter.Services
                 try { if (!t.Join(500)) { } } catch { }
             }
             LogHelper.Info("扫码枪(TCP)已释放");
+        }
+
+        /// <summary>锁内清理连接引用（幂等）。Dispose 的锁内分支专用，避免重复代码。</summary>
+        private void CloseConn()
+        {
+            try { _stream?.Dispose(); } catch { }
+            _stream = null;
+            try { _tcp?.Close(); } catch { }
+            _tcp = null;
         }
     }
 }

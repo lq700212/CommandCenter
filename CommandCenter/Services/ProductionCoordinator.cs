@@ -14,7 +14,7 @@ namespace CommandCenter.Services
     ///
     /// 【主流程(与现场要求一致)】
     ///   ① 空闲期后台轮询 PLC 到位寄存器；
-    ///   ② 读到"到位"→ 立即清复位 → 【对所有已配置相机依次触发】；
+    ///   ② 读到"到位"→ 立即清复位 → 【对所有已配置相机并行触发（V1.8.3 起）】；
     ///   ③ 每台相机独立：IV4 指令 T2 直接回 OK/NG（未开启时退化为"图到即 OK"），记各自判定；
     ///   ④ 取图（V1.7.0 每台相机按 ImageSource 二选一）：
     ///      - Ftp（默认）：等相机 FTP 新图上传（共用总超时 = 各相机 ImageWaitMs 的最大值）；
@@ -178,76 +178,31 @@ namespace CommandCenter.Services
                 SetState("相机到位，触发拍照");
                 _plc.ClearMoveDone();                   // 复位握手，否则会反复触发
 
-                // ===== 对所有相机依次触发，各自记录判定/失败原因 =====
+                // ===== 对所有相机并行触发（V1.8.3 起），各自记录判定/失败原因 =====
                 _pends = new List<PendingCamera>();
                 for (int i = 0; i < _cameras.Count; i++)
                 {
-                    var cfg = _cameraCfgs[i];
-                    var p = new PendingCamera
+                    _pends.Add(new PendingCamera
                     {
                         CameraIndex = i,
-                        ImageSource = cfg.ImageSource,   // 本相机取图模式（Ftp/Tcp），收尾时决定如何归档
+                        ImageSource = _cameraCfgs[i].ImageSource, // 本相机取图模式（Ftp/Tcp），收尾时决定如何归档
                         ResultText = ""
-                    };
-                    _pends.Add(p);
-
-                    try
-                    {
-                        if (cfg.ReadResultFromCamera)
-                        {
-                            // 首选：T2 一次完成"触发+读判定"，OK/NG 直接来自 IV4
-                            var outcome = _cameras[i].TriggerAndRead();
-                            p.TriggerOk = outcome.Succeeded;
-                            if (outcome.Succeeded)
-                            {
-                                p.IsOk = outcome.IsOk;
-                                p.ResultText = outcome.ResultText ?? "";
-                                LogHelper.Info($"相机[{i}]判定：{(outcome.IsOk ? "OK" : "NG")} 结果={p.ResultText}" +
-                                               (string.IsNullOrEmpty(outcome.Detail) ? "" : " " + outcome.Detail));
-                                if (!outcome.IsOk)
-                                    ErrorRaised?.Invoke($"相机[{i}]判定 NG，结果={p.ResultText}");
-                            }
-                            else
-                            {
-                                p.FailReason = $"相机[{i}]触发/读判定失败：" + outcome.Detail;
-                            }
-                        }
-                        else
-                        {
-                            // 退化模式：只 T1 触发，判定不详，FTP 图到即记 OK（现场临时用）
-                            p.TriggerOk = _cameras[i].SendTrigger();
-                            p.IsOk = true;
-                            if (!p.TriggerOk)
-                                p.FailReason = $"相机[{i}]触发失败";
-                        }
-
-                        // 取图（V1.7.0）：Ftp 模式保持"等 FTP 新图"（上面已触发，等 OnFtpFileArrived 回调）；
-                        // Tcp 模式在触发成功后立即发 BR 指令，同步读回相机最新图像（24bit 位图）。
-                        // 【时序注意】BR 读的是"最新图像"，紧跟在本次 T2 触发后调用才会对应本帧；
-                        //   若现场节拍很快或相机有外部触发源插入新帧，需实测确认 BR 与本帧的对应关系。
-                        if (p.TriggerOk && IsTcpImage(cfg))
-                        {
-                            var img = _cameras[i].ReadImage();
-                            if (img.Succeeded && img.ImageData != null)
-                            {
-                                p.ImageBytes = img.ImageData;   // 图已在内存
-                                p.IsSnapped = true;             // 等效 FTP 模式"新图已到"
-                                LogHelper.Info($"相机[{i}] TCP 取图成功：{img.DataSize}B（属性={img.DataAttr}）");
-                            }
-                            else
-                            {
-                                p.FailReason = $"相机[{i}] TCP 取图失败：" + img.Detail;
-                                p.TriggerOk = false;            // 无图 → 该点位按失败处理，不进入等图收尾
-                                ErrorRaised?.Invoke(p.FailReason);
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        p.TriggerOk = false;
-                        p.FailReason = $"相机[{i}]触发异常：" + ex.Message;
-                    }
+                    });
                 }
+
+                // 【V1.8.3 修复】多相机并行触发：此前串行 for，每台"触发+取图"是同步阻塞的
+                // （T2 最坏 ResponseTimeoutMs、BR 再 ResponseTimeoutMs），N 台相机总耗时线性累加，
+                // 现场节拍快时新的到位信号会被 _busy 挡住漏检。改为每台相机一个 Task 并行触发，
+                // 总耗时 ≈ 最慢那台相机的时间；每台相机只写自己 _pends[i] 快照，互不干扰。
+                // 相机服务内部各自有锁 + 超时，Task.Run 走线程池，绝不在 UI 线程。
+                var tasks = new System.Threading.Tasks.Task[_cameras.Count];
+                for (int i = 0; i < _cameras.Count; i++)
+                {
+                    int idx = i; // 闭包锁定副本
+                    tasks[idx] = System.Threading.Tasks.Task.Run(() => TriggerOneCamera(idx));
+                }
+                try { System.Threading.Tasks.Task.WaitAll(tasks); }
+                catch (Exception ex) { LogHelper.Error("相机触发任务异常", ex); }
 
                 // 全部触发失败：不必傻等图超时，立刻收尾（各相机都带 FailReason）
                 if (_pends.All(p => !p.TriggerOk))
@@ -280,6 +235,74 @@ namespace CommandCenter.Services
                 LogHelper.Error("到位处理异常", ex);
                 Interlocked.Exchange(ref _busy, 0);
                 SetState("等待 PLC 到位信号");
+            }
+        }
+
+        /// <summary>
+        /// 触发并取图单台相机（V1.8.3 起由并行任务调用）。
+        /// 只写自己的 _pends[idx] 快照，与其它相机任务互不干扰；内部自带 try-catch，
+        /// 任何异常都收敛为该相机的 FailReason，绝不把异常抛回 WaitAll。
+        /// </summary>
+        /// <param name="idx">相机在配置里的下标（0 起）</param>
+        private void TriggerOneCamera(int idx)
+        {
+            var cfg = _cameraCfgs[idx];
+            var p = _pends[idx];
+            try
+            {
+                if (cfg.ReadResultFromCamera)
+                {
+                    // 首选：T2 一次完成"触发+读判定"，OK/NG 直接来自 IV4
+                    var outcome = _cameras[idx].TriggerAndRead();
+                    p.TriggerOk = outcome.Succeeded;
+                    if (outcome.Succeeded)
+                    {
+                        p.IsOk = outcome.IsOk;
+                        p.ResultText = outcome.ResultText ?? "";
+                        LogHelper.Info($"相机[{idx}]判定：{(outcome.IsOk ? "OK" : "NG")} 结果={p.ResultText}" +
+                                       (string.IsNullOrEmpty(outcome.Detail) ? "" : " " + outcome.Detail));
+                        if (!outcome.IsOk)
+                            ErrorRaised?.Invoke($"相机[{idx}]判定 NG，结果={p.ResultText}");
+                    }
+                    else
+                    {
+                        p.FailReason = $"相机[{idx}]触发/读判定失败：" + outcome.Detail;
+                    }
+                }
+                else
+                {
+                    // 退化模式：只 T1 触发，判定不详，FTP 图到即记 OK（现场临时用）
+                    p.TriggerOk = _cameras[idx].SendTrigger();
+                    p.IsOk = true;
+                    if (!p.TriggerOk)
+                        p.FailReason = $"相机[{idx}]触发失败";
+                }
+
+                // 取图（V1.7.0）：Ftp 模式保持"等 FTP 新图"（上面已触发，等 OnFtpFileArrived 回调）；
+                // Tcp 模式在触发成功后立即发 BR 指令，同步读回相机最新图像（24bit 位图）。
+                // 【时序注意】BR 读的是"最新图像"，紧跟在本次 T2 触发后调用才会对应本帧；
+                //   若现场节拍很快或相机有外部触发源插入新帧，需实测确认 BR 与本帧的对应关系。
+                if (p.TriggerOk && IsTcpImage(cfg))
+                {
+                    var img = _cameras[idx].ReadImage();
+                    if (img.Succeeded && img.ImageData != null)
+                    {
+                        p.ImageBytes = img.ImageData;   // 图已在内存
+                        p.IsSnapped = true;             // 等效 FTP 模式"新图已到"
+                        LogHelper.Info($"相机[{idx}] TCP 取图成功：{img.DataSize}B（属性={img.DataAttr}）");
+                    }
+                    else
+                    {
+                        p.FailReason = $"相机[{idx}] TCP 取图失败：" + img.Detail;
+                        p.TriggerOk = false;            // 无图 → 该点位按失败处理，不进入等图收尾
+                        ErrorRaised?.Invoke(p.FailReason);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                p.TriggerOk = false;
+                p.FailReason = $"相机[{idx}]触发异常：" + ex.Message;
             }
         }
 
@@ -398,15 +421,49 @@ namespace CommandCenter.Services
 
         /// <summary>
         /// 归档图片：把 FTP 新图读入内存并按模板转存到正式目录（年/月/日/SN/OK|NG + 点位号.png）。
-        /// 用内存解码避免 FTP 源文件可能被相机重写的文件占用问题。失败返回 null。
+        /// 【V1.8.3 修复】FTP 服务端写完文件才触发 Created/Renamed，但有时事件先于写完到达，
+        ///   Image.FromFile 会抛"文件被占用/损坏"导致图丢失。改为：FileShare.ReadWrite 方式打开
+        ///   （正在写也能读），复制到内存后统一用 Image.FromStream 解码；读取失败短延迟重试最多
+        ///   3 次（共约 1.2s），仍失败返回 null。
+        /// 用内存解码同时避免 FTP 源文件可能被相机重写的文件占用问题。失败返回 null。
         /// </summary>
         /// <param name="p">本点位触发/判定快照</param>
         /// <param name="stationNo">本次存图点位（来自窗口点位映射，见 ResolveStation）</param>
         private string ArchiveImage(PendingCamera p, int stationNo)
         {
+            byte[] bytes = null;
+            Exception lastEx = null;
+            // 重试读取：事件早于文件写完时，等待 FTP 落盘（每次 Sleep 400ms，最多 3 次）
+            for (int i = 0; i < 3; i++)
+            {
+                try
+                {
+                    using (var fs = new FileStream(p.FtpPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    using (var ms = new MemoryStream())
+                    {
+                        fs.CopyTo(ms);
+                        bytes = ms.ToArray();
+                    }
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    lastEx = ex;
+                    Thread.Sleep(400);
+                }
+            }
+
+            if (bytes == null)
+            {
+                LogHelper.Error("图片归档失败（读取 FTP 源文件多次仍失败）", lastEx);
+                ErrorRaised?.Invoke($"点位{stationNo} 图片归档失败：" + p.FtpPath);
+                return null;
+            }
+
             try
             {
-                using (var src = Image.FromFile(p.FtpPath))
+                using (var ms = new MemoryStream(bytes))
+                using (var src = Image.FromStream(ms))
                 using (var copy = new Bitmap(src))
                 {
                     return _imageStore.SaveImage(copy, stationNo, p.IsOk, LatestSerialNumber);
@@ -414,7 +471,7 @@ namespace CommandCenter.Services
             }
             catch (Exception ex)
             {
-                LogHelper.Error("图片归档失败", ex);
+                LogHelper.Error("图片归档失败（解码/保存出错）", ex);
                 ErrorRaised?.Invoke($"点位{stationNo} 图片归档失败：" + p.FtpPath);
                 return null;
             }
@@ -447,12 +504,14 @@ namespace CommandCenter.Services
 
         /// <summary>
         /// 取最近一张图的内存副本（UI 显示用），避免 GDI+ 锁定文件。
+        /// 【V1.8.3 修复】FileShare.ReadWrite：归档失败回退用 FTP 源文件显示时，文件可能
+        ///   仍在被写/被占用，Read 共享读不到会返回 null 导致窗口空白。
         /// </summary>
         public static Image LoadImageSafe(string path)
         {
             try
             {
-                using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                 using (var ms = new MemoryStream())
                 {
                     fs.CopyTo(ms);
@@ -508,7 +567,9 @@ namespace CommandCenter.Services
         /// 一台相机一次检测的暂存快照：判定、图像（FTP 路径或 TCP 字节）、失败原因等，
         /// 在触发到收尾之间跨线程读取。
         /// （只被协调器内部使用，刻意不设锁——图到达与超时回调对同一快照的写都是"幂等填值"，
-        ///  由 _finished 双收尾保护兜底，最坏情况只是日志里少一条。）
+        ///  由 _finished 双收尾保护兜底，最坏情况只是日志里少一条。
+        ///  IsSnapped 声明为 volatile：OnFtpFileArrived（FTP 线程）写、FinishAll（超时/收尾线程）
+        ///  读，volatile 保证该标志的读一定看到最新的写，避免极小窗口读到旧值误判"图未到"。）
         /// </summary>
         private class PendingCamera
         {
@@ -519,7 +580,7 @@ namespace CommandCenter.Services
             public string ResultText;  // 8 位判定文本
             public string FtpPath;     // Ftp 模式：FTP 新图完整路径（到图后填）
             public byte[] ImageBytes;  // Tcp 模式：BR 读回的最新图像字节（24bit BMP，无则 null）
-            public bool IsSnapped;     // 是否已拿到图（Ftp 模式=新图到；Tcp 模式=BR 读回）
+            public volatile bool IsSnapped; // 是否已拿到图（Ftp 模式=新图到；Tcp 模式=BR 读回）。volatile 见类注释
             public string FailReason;  // 触发失败/取图失败/等图超时原因
         }
     }
