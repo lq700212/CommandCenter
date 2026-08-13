@@ -1,5 +1,93 @@
 # 版本改动记录
 
+## V2.12.3（2026-08-13）PLC 地址改干净（配置直接存索引）+ 默认型号修复窗口塌缩
+
+> 三件事：① 按用户要求"改就改干净、不兼容旧逻辑"——PLC 配置字段直接存 **DataStore 索引**，
+> 删除"协议号-40000 换算"（V2.12.2 中间方案废弃）；② 修"主界面只显示 1 个窗口"回归（无配置
+> 文件首次启动时型号为空串 + 相机列表为空 → 窗口数塌成 1）；③ 存图目录顺序对齐现场确认的
+> `{年月日}/{SN}/{相机}/{OKNG}`（{相机} 在 {OKNG} 前）。
+
+### 改动范围
+- **PLC 地址零换算（问题②：现场实测 PLC 写协议 40002 → 从站 DataStore[2]，填 2 就是 2）**：
+  - **`Models/AppConfig.cs`** `PlcConfig`：`ScanRequestAddress/CamUpRequestAddress/…
+    /ProductModelAddress` 默认值全部改为**索引**（1/2/3/4/5/6/7，对应协议 40001~40007）；
+    类注释"地址说明"定稿为"配置存 DataStore 索引、PLC 协议号=索引+40000"。
+  - **`Services/PlcService.cs`**：删除 **`ProtocolToIndex`**，`ReadLocal/WriteLocal/WriteLocalMulti`
+    直接用配置地址（本就是索引），`ReadLocal` 注释更正；侧重结果为"配置即索引、业务层零换算"。
+  - 功能测试页默认值保持索引体系：`txtReadAddr=2`（协议 40002 上相机请求）、`txtWriteAddr=5`
+    （协议 40005 上相机结果）、`txtWriteVal=8`。
+- **窗口塌缩修复（问题①：`Load()` 无配置文件分支直接 `new AppConfig()` 返回，Cameras 空列表 +
+  型号空串 → `WindowCountFor`=0 → 兜底 1 窗口）**：
+  - **`Models/AppConfig.cs`**：`ProductModel` 默认 **"U171"**（预置型号第一个，非空）。
+  - **`Utils/ConfigStore.cs`**：`Load()` 有/无文件统一走新抽的 **`ApplyDefaults`**（空段兜底：
+    默认两台相机、默认三型号候选、Display/Image/Security、数组对齐 `EnsureStationMap`、
+    `EnsureCameraSubDir`），不再有"无文件就裸返回"的分支。
+  - 通用性验证：U171=上18+下4=22 窗、U172=上26=26 窗、Z121=下3=3 窗，切型号均按点位铺窗。
+- **存图目录顺序（问题③）**：`ImageConfig.SubDirs` 默认改为 `{年月日}/{SN}/{相机}/{OKNG}`；
+  `ConfigStore.EnsureCameraSubDir` 旧配置缺 `{相机}` 时**插到 {OKNG} 之前**（无 {OKNG} 才追加末尾），
+  不再一律末尾追加。
+- **文档**：`README.md`、`docs/CommandCenter.md`（§5.1/§5.2/第六部分存图目录/第八部分版本）、
+  `AGENTS.md`（地址约定改为 V2.12.3 定稿 + 默认型号说明）、`CHANGELOG.md`。
+
+### 为什么这么改
+- 索引就是汇川 Debug 界面看到的 "D2/D3/D5"：现场/PLC 用协议号（40002），上位机配置存索引（2），
+  协议号 = 索引 + 40000，二者只在文档里对照，代码无需任何换算操作，"是什么样就是什么样"。
+- 不兼容旧逻辑：项目未上线，删掉 `ProtocolToIndex` 与 <40000 的"兼容"判断，配置语义唯一。
+- 窗口数=各相机按型号点位表条目和是唯一来源；默认型号非空 + Load 补默认相机后，
+  无配置文件首启即按 U171 铺 22 窗，不再塌成 1 个窗口（此前 `Load()` 无文件分支是回归根因）。
+
+### 优化点
+- 地址配置与 PLC 描述一一对应，联调不用心算"减 40000"；
+- 首启/热更/换型号窗口数一致，三种型号各显示对应数量窗口，通用；
+- 存图目录顺序两处（默认值/自动补层）都对齐现场确认，旧配置自动插到 {OKNG} 前。
+
+## V2.12.1（2026-08-13）显示窗口矩阵统一模型 + 存图按相机分目录
+
+> V2.12.0 引入的自适应与"非自适应手填行列"两套计算并存，行列总会对不上、点位归属容易错；
+> 且"自适应下存图点位=全局窗口编号"依赖 windowIndex 间接寻址。本次把显示矩阵统一成一个模型、
+> 存图点位统一为相机点位号、按相机目录隔离，四种视图（主窗体/设置页预览/协调器/点位窗体）
+> 共用同一套计算，所见即所得。
+
+### 改动范围
+- **`Models/AppConfig.cs`**：`DisplayConfig` 新增 **`ResolveLayout(cameras, model, autoFit,
+  manualRows, manualCols)`** 与 **`WindowCountFor(...)`** 统一计算窗口总数（恒=各相机按型号点位表
+  `ProgramsFor(型号)` 条目和，列=min(7,总数)、行=ceil(总数/列)，点数≤7 单行铺满；非自适手填
+  行列只当"排列宽度/期望行数"，放不下自动补行）、`AutoFitLayout` 委托给 `ResolveLayout(autoFit:true)`
+  保留兼容；`WindowStationMap` 标注退役、按"点位=窗口编号"只做对齐留档；`StationProgramItem.StationNo`
+  注释明确=相机点位号；`ImageConfig.SubDirs` 默认加入 **`{相机}`** 层、`FileNameTemplate` 注释加
+  `{相机}` 占位符。
+- **`Utils/ConfigStore.cs`**：新增 **`EnsureCameraSubDir`**——旧配置 `SubDirs` 缺 `{相机}` 层时
+  加载/保存自动补（V2.12.3 起插到 `{OKNG}` 之前，目标顺序 `{年月日}/{SN}/{相机}/{OKNG}`，
+  防上下相机同点位重名覆盖，数据丢失级回归）；`EnsureStationMap` 窗口总数
+  统一用 `WindowCountFor`。
+- **`Services/ImageStore.cs`**：`SaveImageFilePair/SaveImageBytes/RenderTemplate` 增加 **`cameraName`**
+  参数与 **`{相机}`** 占位符（渲染成相机名，默认放子目录层）。
+- **`Services/ProductionCoordinator.cs`**：删掉 `_display`/`_windowStationMap` 字段与构造参数，
+  统一相机表驱动——`TryResolveActiveWindow` 在该相机当前型号点位表中定位窗口（起始窗口+表内位置，
+  "前上相机后下相机"分组）、`_windowCount()` 用 `WindowCountFor`；**存图点位统一=相机点位号
+  StationNo**、归档传相机名（上下相机同号点位靠 {相机} 目录层隔离，不再用 windowIndex）。
+- **`Views/MainForm.cs`**：`BuildWindowGrid` 用 `ResolveLayout` 统一铺排；**型号下拉切换
+  （`SwitchModel`）后重建窗口矩阵**（所见即时更新）。
+- **`Views/WindowPointForm.cs`**：构造用 `ResolveLayout` 算形状；新增 `ApplyMatrixForModel`
+  随"型号"下拉重建矩阵；点位列候选=各相机点位表；**编辑点位/交换位置/恢复默认在两种模式都锁定**
+  （按钮禁用+方法内双保险）；`ResolveWindowSource` 按相机表标注"相机名·点位号"；确定时不写回
+  WindowStationMap。
+- **`Views/SettingsForm.cs`**：`UpdateAutoFitUi` 与 ToolTip 文案统一（点位编辑恒锁定、自适应只影响
+  行列置灰）；btnEditPoints 注释更新。
+- **`Views/DevTestForm.cs` / `Views/DirTreeEditForm.cs`**：存图调用/参数化示例补相机名。
+- **文档**：`README.md`、`docs/CommandCenter.md`（第一/第四/第八部分）、`AGENTS.md`、`CHANGELOG.md`。
+
+### 为什么这么改
+- 窗口数是"各相机点位之和"，它天然跟着型号走；手填行列本质是"人工重复计算"。统一后无论是否
+  勾选自适应，窗口总数/点位归属/存图点位三件事只有一个来源——相机点位表。
+- 存图点位改用相机点位号后天然防重名（同一相机自身点位不重复），两台相机靠 `{相机}` 目录层
+  隔离，语义直白且不依赖 windowIndex 这张"影子表"。
+
+### 优化点
+- 四层（主窗体/设置页预览/协调器/点位窗体）共用 `ResolveLayout`/`WindowCountFor`，不再各写一套；
+- 旧配置（无 `{相机}` 层 / 手改行列）加载自动补齐/自动补行，零手动迁移；
+- 两种模式下 WM 点位编辑都锁定，从入口杜绝"窗口点位与相机表不一致"的隐形坑。
+
 ## V2.12.0（2026-08-13）显示窗口矩阵"自适应"模式：按产品型号+相机点位表自动铺排
 
 > 现场 28 个窗口点位由上下两台相机分工拍摄，窗口总数与型号点位强相关，手填行列容易

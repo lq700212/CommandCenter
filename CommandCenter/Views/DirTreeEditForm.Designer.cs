@@ -129,7 +129,7 @@ namespace CommandCenter.Views
             //
             this.cmbPlaceholder.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbPlaceholder.Items.AddRange(new object[] {
-                "{年月日}", "{年}", "{月}", "{日}", "{SN}", "{OKNG}", "{点位}", "{时间}"});
+                "{年月日}", "{年}", "{月}", "{日}", "{SN}", "{OKNG}", "{点位}", "{相机}", "{时间}"});
             this.cmbPlaceholder.Location = new System.Drawing.Point(160, 293);
             this.cmbPlaceholder.Name = "cmbPlaceholder";
             this.cmbPlaceholder.SelectedIndex = 0;

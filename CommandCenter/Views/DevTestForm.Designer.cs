@@ -457,7 +457,7 @@ namespace CommandCenter.Views
             this.txtReadAddr.Name = "txtReadAddr";
             this.txtReadAddr.Size = new System.Drawing.Size(70, 25);
             this.txtReadAddr.TabIndex = 5;
-            this.txtReadAddr.Text = "100";
+            this.txtReadAddr.Text = "2";
             // 
             // btnReadReg
             // 读测试按钮：从读地址读取一个保持寄存器值（结果写入 txtReadVal）
@@ -517,7 +517,7 @@ namespace CommandCenter.Views
             this.txtWriteAddr.Name = "txtWriteAddr";
             this.txtWriteAddr.Size = new System.Drawing.Size(70, 25);
             this.txtWriteAddr.TabIndex = 9;
-            this.txtWriteAddr.Text = "101";
+            this.txtWriteAddr.Text = "5";
             // 
             // txtWriteVal
             // 写测试的值：写入目标地址的数值
@@ -527,7 +527,7 @@ namespace CommandCenter.Views
             this.txtWriteVal.Name = "txtWriteVal";
             this.txtWriteVal.Size = new System.Drawing.Size(70, 25);
             this.txtWriteVal.TabIndex = 10;
-            this.txtWriteVal.Text = "1";
+            this.txtWriteVal.Text = "8";
             // 
             // btnWriteReg
             // 写测试按钮：把写值写入写地址

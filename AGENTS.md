@@ -34,23 +34,28 @@
 - **扫码枪触发指令（V1.12.1，基恩士 SR 无协议）**：Tcp 模式下扫码枪**不是连上就回数据**，上位机须先发一条打开激光/开始读取的指令（`ScanConfig.TriggerCommand`，默认 `LON`）才读码。`ScannerTcpService.TryConnect` 每次连接/重连成功后**自动发送一次**（发送时自动补 `\r\n` 帧结束符），配置留空则不发送。`IScanner.SendTrigger()` 供界面手动重发。串口扫码枪上电即读码、无需触发（串口实现 SendTrigger 为空操作）。改动扫码枪通讯必须同步 `docs/CommandCenter.md` 的"扫码枪"章节与默认配置。
 - **UI 线程禁做网络 IO（V1.0.1 血泪）**：轮询/连接/读写 PLC 与相机一律放后台线程（`System.Threading.Timer`），TCP 连接必须 `BeginConnect + WaitOne` 强制超时。禁止在 UI 线程同步 `TcpClient.Connect` 或 `ReadHoldingRegisters`——对不可达 IP 会冻结整个界面（表现为"点按钮半天才响应"）。
 - **显示窗口矩阵用 TableLayoutPanel 百分比等分**：窗口数量由 `display.rows/columns` 配置，所有窗口尺寸由容器等分自动保持一致，禁止写死像素布局。
-- **显示窗口矩阵"自适应"模式（V2.12.0）**：`DisplayConfig.AutoFit=true` 时窗口行列/数量由静态
-  `AutoFitLayout(cameras, productModel)` 统一计算（总数=各相机按型号点位表 `ProgramsFor(型号)` 条目和、
-  列=min(7,总数)、行=ceil(总数/列)、点数≤7 单行铺满）、`AutoFitCameraStarts` 返回各相机窗口起始序号
+- **显示窗口矩阵统一模型（V2.12.1，取代并合并 V2.12.0"自适应"）**：窗口总数**恒** = 各相机按型号
+  点位表 `ProgramsFor(型号)` 条目和（`DisplayConfig.WindowCountFor` / `ResolveLayout` 统一计算，
+  列=min(7,总数)、行=ceil(总数/列)、点数≤7 单行铺满），`AutoFitCameraStarts` 返回各相机窗口起始序号
   （"前上相机后下相机"分组），主窗体 BuildWindowGrid / 设置页预览 / 协调器 / WindowPointForm **共用同一套
-  计算，禁止各层再各写一套**。自适应下 **存图点位=全局窗口编号 windowIndex**（上下相机点位号各自从 1 起会
-  重复，绝不能用 PLC 点位号/stationNo 存图，否则上下相机同点位重名覆盖）；手动点位编辑（编辑点位/交换位置/
-  恢复默认）在 WindowPointForm 里**锁定置灰**（按钮禁用+方法内双保险），设置页勾选自适应即置灰行/列输入框并
-  弹 ToolTip 明示"自适应下哪些功能不可用"、相关控件 ToolTip 同步说明。
+  计算，禁止各层再各写一套**。**勾选"自适应"只决定行列是否自动算**：`AutoFit=true` 时行/列输入框置灰
+  （行列自动铺排）；不勾时手填行/列只当"排列宽度/期望行数"，放不下**自动补行**，窗口总数仍=点位和，
+  两种模式所见完全一致。**存图点位统一 = 相机点位号（StationNo）**（上下相机各自从 1 起会重复，靠
+  ImageStore 归档子目录 **`{相机}` 层隔开**——`SubDirs` 默认含 `{相机}`，旧配置加载自动补，绝不拿
+  WindowStationMap/windowIndex 当存图点位）；手动点位编辑（编辑点位/交换位置/恢复默认）在 WindowPointForm
+  里两种模式**都锁定置灰**（点位由相机点位表唯一决定，按钮禁用+方法内双保险），设置页勾选自适应即置灰
+  行/列输入框并弹 ToolTip 明示"自适应下哪些功能不可用"、相关控件 ToolTip 同步说明。
+   **默认型号（V2.12.3）**：`AppConfig.ProductModel` 默认 **"U171"**（非空），无配置文件首次启动也
+   按该型号点位表铺出对应窗口（U171=上18+下4=22 窗），不会因型号空串把窗口塌成 1 个（此前 `Load()`
+   无文件分支直接 new AppConfig() 连相机列表也是空的，窗口=0→兜底 1 个的回归根因）；`ConfigStore.Load`
+   把"空段兜底+数组对齐"抽成 `ApplyDefaults`，有/无配置文件统一走。
 - **PLC 握手协议（V2.7 定稿，从站模式）**：现场 PLC(汇川)做主站、上位机做从站监听本机 502；
   **"请求-结果-复位"三拍握手**，寄存器固定 40001~40011（完整协议见 `docs/CommandCenter.md` §5.5）：
   请求区（PLC只写）：`40001 扫码请求`(0/1)、`40002 上相机拍照请求`(1~255=点位)、`40003 下相机拍照请求`；
   结果区（PLC只读，上位机写）：`40004 扫码结果`(0/1/2)、`40005 上相机`、`40006 下相机`(0/1/2，相机结果
   另支持 **3=点位禁用跳过**）；型号区：`40007~40011`（上位机写固定产品型号，每寄存器 2 字符 ASCII、高字节
   在前、不足补 0x00、最多 10 字符，超长从 40012 向后扩展）。**三拍流程**：PLC 写请求≠0 → 上位机处理完
-  写结果≠0 → PLC 读走并复位请求=0 → 上位机看请求清零再复位结果=0 → 进入下一拍。**地址约定**：配置里存
-  协议地址（40001~40011）= NModbus 从站 DataStore start（0-based、与原主站 `ReadHoldingRegisters` 一致，
-  **零偏移无需 ±40001**）；地址全部收进 `PlcConfig`（`ScanRequestAddress/CamUpRequestAddress/…/
+  写结果≠0 → PLC 读走并复位请求=0 → 上位机看请求清零再复位结果=0 → 进入下一拍。**地址约定（V2.12.3 定稿）**：配置里统一存** DataStore 索引**（PLC 协议号 = 索引 + 40000，如协议 40002 上相机请求 → 索引 2，就是汇川 D2/D3/D5 这类数字，填 2 就是 2）；现场实测 PLC 写 40002 → 从站 DataStore[2]（曾误以为"零偏移直接用协议号"导致读 DataStore[40002] 永远读不到请求；V2.12.2 曾做"协议号-40000 换算"中间方案，V2.12.3 起按"改就改干净"删掉 `ProtocolToIndex`，业务层【零换算】）；地址全部收进 `PlcConfig`（`ScanRequestAddress/CamUpRequestAddress/…/
 ProductModelAddress/ProductModelLen`）+ 顶层 `ProductModel`（**两处可改，同一个值**：① 设置窗体 PLC 区
    "产品型号" **cmbModel 可编辑下拉**（候选=预置三型号 ∪ 顶层 `ProductModels`，手输新型号保存自动加入）；
    ② **主界面标题栏型号下拉 `cmbModel`（V2.8，操作员日常切型号用，候选恒预置 U171/U172/Z121 不依赖配置

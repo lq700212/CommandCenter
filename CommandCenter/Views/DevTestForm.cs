@@ -39,6 +39,8 @@ namespace CommandCenter.Views
     /// │  偏移:[txtOffset]提示:实际D地址=输入地址+偏移量(默认0按D地址)   │
     /// │  读地址测试:[txtReadAddr] [btnReadReg 读] →读到的值[txtReadVal] │
     /// │  写地址测试:[txtWriteAddr] [txtWriteVal] [btnWriteReg 写]       │
+    /// │  （V2.12.3 默认地址=DataStore 索引：读=2 上相机/3 下相机请求，      │
+    /// │   写=5 上相机结果；PLC 协议号=索引+40000，填 2 就是 D2，零换算）   │
     /// │  请求:[btnReadScanReq 读扫码请求] [btnReadCamReq 读相机请求]    │
     /// │        值:[lblMoveVal]                                          │
     /// │  型号:[btnWriteModel 写产品型号] [txtModel] (→PLC 40007~40011) │
@@ -393,7 +395,13 @@ namespace CommandCenter.Views
                         fetchError = "FTP 取图目录里没有 jpeg 图片（相机已触发但未推图，请检查相机 FTP 配置/网络）";
                     else if (_imageStore != null)
                     {
-                        archived = _imageStore.SaveImageFilePair(jpeg, iv4p, 1, r.IsOk, _serialSnapshot);
+                        // V2.12.1：存图文件名 {点位}=1，目录按相机名 {相机} 层隔离（与主流程同规则），
+                        // 相机名取配置 Name，空则兜底"相机N"。
+                        string camName = (camIndex >= 0 && camIndex < _cameraConfigs.Count
+                            && !string.IsNullOrWhiteSpace(_cameraConfigs[camIndex].Name))
+                            ? _cameraConfigs[camIndex].Name.Trim()
+                            : $"相机{camIndex + 1}";
+                        archived = _imageStore.SaveImageFilePair(jpeg, iv4p, 1, r.IsOk, _serialSnapshot, camName);
                         if (archived != null)
                         {
                             // V1.12.25：归档成功后才删 FTP 源图（删早了会把图弄丢），与主流程"处理即删"一致。
@@ -591,9 +599,9 @@ namespace CommandCenter.Views
 
         // ────────────── PLC 操作（全部后台线程；V1.12.11 起从站模式，V2.7 三拍握手）────────────────
         // 【角色反转】PLC(汇川)做主站、上位机做从站。下列 _plc 调用底层已改为读写上位机自己
-        //   DataStore 寄存器区（不连远端 PLC）：读请求（40001~40003）=读 PLC 写入自己区的值；写
-        //   结果/型号（40004~40011）=写自己区供 PLC 主站来读。功能测试这里验证
-        //   "从站数据存储读写正常 + PLC 主站能读到/写入"（三拍握手：请求→结果→复位）。
+        //   DataStore 寄存器区（不连远端 PLC）：读请求（协议 40001~40003=索引 1~3）=读 PLC 写入
+        //   自己区的值；写结果/型号（协议 40004~40011=索引 4~11）=写自己区供 PLC 主站来读。
+        //   功能测试这里验证"从站数据存储读写正常 + PLC 主站能读到/写入"（三拍握手：请求→结果→复位）。
 
         /// <summary>读扫码请求（V2.7，读 40001）：显示 PLC 主站是否请求扫码（1=请求，0=无）。</summary>
         private void BtnReadScanReq_Click(object sender, EventArgs e)

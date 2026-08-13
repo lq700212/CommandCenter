@@ -268,8 +268,8 @@ namespace CommandCenter.Views
         {
             if (levelIndex >= levels.Count)
             {
-                // 目录层级已到底：追加图片文件叶子（按文件名规则渲染，默认 {点位}.png）
-                string fname = ImageStore.RenderTemplate(fileRule, now, sn, true, station);
+                // 目录层级已到底：追加图片文件叶子（按文件名规则渲染，默认 {点位}.jpeg）
+                string fname = ImageStore.RenderTemplate(fileRule, now, sn, true, station, "上相机");
                 if (string.IsNullOrWhiteSpace(fname))
                     fname = "IMG_" + now.ToString("yyyyMMdd_HHmmss_fff") + "_1.png";
                 parent.Nodes.Add(fname + ".png");
@@ -278,8 +278,8 @@ namespace CommandCenter.Views
 
             // 渲染本层目录名：OK/NG 各渲染一次。若结果相同（本层不含 {OKNG}）则只建一个节点；
             // 不同（含 {OKNG}）则建两个并列节点，各自递归展开完整子树。
-            string okName = ImageStore.RenderTemplate(levels[levelIndex], now, sn, true, station);
-            string ngName = ImageStore.RenderTemplate(levels[levelIndex], now, sn, false, station);
+            string okName = ImageStore.RenderTemplate(levels[levelIndex], now, sn, true, station, "上相机");
+            string ngName = ImageStore.RenderTemplate(levels[levelIndex], now, sn, false, station, "上相机");
 
             if (okName == ngName)
             {

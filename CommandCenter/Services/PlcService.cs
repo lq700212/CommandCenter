@@ -256,7 +256,7 @@ namespace CommandCenter.Services
         // ════════════════ V2.7 协议业务方法（读写自己 DataStore，方向见类注释）════════════════
 
         /// <summary>
-        /// 读取扫码请求（V2.7，PLC 写 40001）：返回是否 PLC 请求扫码。
+        /// 读取扫码请求（V2.7，PLC 写协议 40001 = 索引 1）：返回是否 PLC 请求扫码。
         /// 读到 true 表示 PLC 把 40001 置 1、要求上位机触发扫码枪取 SN；
         /// 处理完成并写结果后由 ProductionCoordinator 等 PLC 复位请求回 0。
         /// </summary>
@@ -271,7 +271,7 @@ namespace CommandCenter.Services
             }
         }
 
-        /// <summary>读取上相机拍照请求（V2.7，PLC 写 40002）：返回点位编号（1~255），0=无请求。</summary>
+        /// <summary>读取上相机拍照请求（V2.7，PLC 写协议 40002 = 索引 2）：返回点位编号（1~255），0=无请求。</summary>
         public bool ReadCamUpRequest(out int stationNo)
         {
             stationNo = 0;
@@ -283,7 +283,7 @@ namespace CommandCenter.Services
             }
         }
 
-        /// <summary>读取下相机拍照请求（V2.7，PLC 写 40003）：返回点位编号（1~255），0=无请求。</summary>
+        /// <summary>读取下相机拍照请求（V2.7，PLC 写协议 40003 = 索引 3）：返回点位编号（1~255），0=无请求。</summary>
         public bool ReadCamDownRequest(out int stationNo)
         {
             stationNo = 0;
@@ -295,17 +295,17 @@ namespace CommandCenter.Services
             }
         }
 
-        /// <summary>写扫码结果（V2.7，上位机写 40004，PLC 来读）：0=默认/复位，1=扫码OK，2=扫码NG。</summary>
+        /// <summary>写扫码结果（V2.7，上位机写索引 4 = 协议 40004，PLC 来读）：0=默认/复位，1=扫码OK，2=扫码NG。</summary>
         public void WriteScanResult(int code) => WriteLocalSafe(_cfg.ScanResultAddress, (ushort)code);
 
-        /// <summary>写上相机拍照结果（V2.7，上位机写 40005，PLC 来读）：0=默认/复位，1=OK，2=NG，3=点位禁用跳过。</summary>
+        /// <summary>写上相机拍照结果（V2.7，上位机写索引 5 = 协议 40005，PLC 来读）：0=默认/复位，1=OK，2=NG，3=点位禁用跳过。</summary>
         public void WriteCamUpResult(int code) => WriteLocalSafe(_cfg.CamUpResultAddress, (ushort)code);
 
-        /// <summary>写下相机拍照结果（V2.7，上位机写 40006，PLC 来读）：取值同上相机结果。</summary>
+        /// <summary>写下相机拍照结果（V2.7，上位机写索引 6 = 协议 40006，PLC 来读）：取值同上相机结果。</summary>
         public void WriteCamDownResult(int code) => WriteLocalSafe(_cfg.CamDownResultAddress, (ushort)code);
 
         /// <summary>
-        /// 写产品型号字符串（V2.7，上位机写 40007~40011，PLC 来读）。
+        /// 写产品型号字符串（V2.7，上位机写索引 7~11 = 协议 40007~40011，PLC 来读）。
         /// 编码：每寄存器存 2 个 ASCII 字符，高字节=前字符、低字节=后字符；最多写
         /// ProductModelLen×2 个字符，不足的尾部补 0x00（PLC 以 0x00 作字符串结束符）。
         /// 型号为空时整段写 0（PLC 读到空型号），不崩。
@@ -366,11 +366,12 @@ namespace CommandCenter.Services
 
         /// <summary>
         /// 读自己 DataStore 的保持寄存器（单个）。
-        /// ★ 地址约定（V2.7 文档确认无偏移）：NModbus PointSource.ReadPoints(start, count) 的 start
-        ///   是 0-based 协议地址，PLC 主站写/读的地址号与它一一对应、零换算——PLC 写 40001，
-        ///   上位机 ReadPoints(40001) 即读到（与 V1.12.14 现场实测 D 地址零偏移同规则），
-        ///   配置里的 40001~40011 直接作为 start 使用，无需 ±40001/±1 换算。若将来换 PLC 出现错位，
-        ///   统一在此处调整（如 start = address - 40001），业务层无感。
+        /// ★ 地址说明（V2.12.3 定稿，替换 V2.12.2 的"减 40000 换算"）：
+        ///   PLC(汇川) 主站按【协议号】写/读（40001 扫码请求、40002 上相机请求、40003 下相机请求…），
+        ///   NModbus 从站 DataStore 的 ReadPoints(start) 的 start 是【DataStore 索引】，
+        ///   现场实测 PLC 写协议 40002 → DataStore[2]（功能测试页 txtReadAddr 填 2 即读到）。
+        ///   所以【配置里的地址字段直接存索引】（协议号 = 索引 + 40000），这里拿到地址就是索引，
+        ///   直接用、不做任何换算（协议号 → 索引 的 40000 段操作已删除，填 2 就是 2）。
         /// </summary>
         private ushort ReadLocal(ushort address)
         {

@@ -37,14 +37,18 @@ namespace CommandCenter.Models
         public PlcConfig Plc { get; set; } = new PlcConfig();
 
         /// <summary>
-        /// 固定产品型号（V2.7 协议）：每次扫码完成，上位机把本值写入 PLC 40007~40011
+        /// 固定产品型号（V2.7 协议）：每次扫码完成，上位机把本值写入 PLC 协议 40007~40011
         /// （最多 10 个 ASCII 字符，多余部分用 0x00 补齐）。现场型号固定不变，改这里即可，
         /// 不用每次从 SN 解析。设置窗体"系统设置"里可改。
         /// 【V2.8 型号切换】型号同时决定"点位→相机程序号"映射查哪张表（见
         ///   CameraConfig.ModelStationPrograms）——切型号时把本值改成对应型号，上位机
         ///   就会按该型号的表切相机程序。保存热更后立即生效（coordinator 重建）。
+        /// 【V2.12.3 默认 U171】默认值=预置型号第一个（现场产线首款型号）。窗口总数=各相机
+        ///   按当前型号点位表条目和（见 DisplayConfig.WindowCountFor），默认值非空才能保证
+        ///   【无配置文件首次启动就有对应该型号点位的窗口数】（此前默认空串导致首启按"空型号"
+        ///   查点位表 → 全部回退空默认表 → 窗口数塌成 1，主界面只显示一个窗口）。
         /// </summary>
-        public string ProductModel { get; set; } = "";
+        public string ProductModel { get; set; } = "U171";
 
         /// <summary>
         /// 产品型号候选列表（V2.8）：现场可切换的型号清单，默认预置现场三型号
@@ -342,7 +346,8 @@ namespace CommandCenter.Models
     /// </summary>
     public class StationProgramItem
     {
-        /// <summary>拍照点位号（对应存图点位，1~9999）</summary>
+        /// <summary>拍照点位号（1~9999，相机局部点位：上下相机各自从 1 起、会重复，
+        /// 与"存图 {点位}"同源，存图靠 {相机} 目录层隔离；见 CameraConfig.ProgramsFor 注释）。</summary>
         public int StationNo { get; set; }
 
         /// <summary>该点位在本相机上对应的相机程序号（0~127，0 合法）</summary>
@@ -377,8 +382,11 @@ namespace CommandCenter.Models
     ///                        40007~40011 产品型号(10 字符 ASCII，每寄存器 2 字符，高字节在前)。
     ///   流程：PLC 写请求=非0 → 上位机处理完写结果≠0 → PLC 读结果并复位请求=0 →
     ///         上位机看到请求=0 再复位结果=0，进入下一请求。
-    ///   【地址说明】地址值存 PLC 侧地址（40001~40011），与从站 DataStore 偏移零换算
-    ///     （现场实测 PLC 写 40001 上位机 ReadPoints(40001) 即见，见 PlcService.ReadLocal 注释）。
+    ///   【地址说明（V2.12.3 定稿，替换 V2.12.2 的"减 40000 换算"）】配置里的地址字段统一存
+    ///   【DataStore 索引】，PLC 侧协议号 = 索引 + 40000（协议 40002 上相机请求 → 索引 2）。
+    ///   现场实测：PLC 写协议 40002 → 从站 DataStore[2]（功能测试 txtReadAddr 填 2 即读到），
+    ///   配置直接填索引、业务层【零换算】（PlcService 已删除 ProtocolToIndex）。索引就是
+    ///   汇川 PLC D 区习惯叫的 "D2/D3/D5" 这类数字，填 2 就是 2，不搞 40000 段的操作。
     /// </summary>
     public class PlcConfig
     {
@@ -397,76 +405,115 @@ namespace CommandCenter.Models
         // ─── 寄存器地址映射（V2.7 协议，见 docs/CommandCenter.md §5.5）───
         // 设计原则：定长请求放前面，结果与变长数据（型号）放后面，地址可向后扩展。
 
-        /// <summary>PLC→上位机：扫码请求（V2.7）。PLC 写 1=请求扫码、0=无请求；上位机读到 1 触发扫码枪。</summary>
-        public ushort ScanRequestAddress { get; set; } = 40001;
+        /// <summary>PLC→上位机：扫码请求（V2.7）。PLC 写 1=请求扫码、0=无请求；上位机读到 1 触发扫码枪。配置=DataStore 索引 1（协议 40001）。</summary>
+        public ushort ScanRequestAddress { get; set; } = 1;
 
-        /// <summary>PLC→上位机：上相机拍照请求（V2.7，对应相机列表第 1 台/上相机）。PLC 写 1~255=点位编号、0=无请求。</summary>
-        public ushort CamUpRequestAddress { get; set; } = 40002;
+        /// <summary>PLC→上位机：上相机拍照请求（V2.7，对应相机列表第 1 台/上相机）。PLC 写 1~255=点位编号、0=无请求。配置=索引 2（协议 40002）。</summary>
+        public ushort CamUpRequestAddress { get; set; } = 2;
 
-        /// <summary>PLC→上位机：下相机拍照请求（V2.7，对应相机列表第 2 台/下相机）。PLC 写 1~255=点位编号、0=无请求。</summary>
-        public ushort CamDownRequestAddress { get; set; } = 40003;
+        /// <summary>PLC→上位机：下相机拍照请求（V2.7，对应相机列表第 2 台/下相机）。PLC 写 1~255=点位编号、0=无请求。配置=索引 3（协议 40003）。</summary>
+        public ushort CamDownRequestAddress { get; set; } = 3;
 
-        /// <summary>上位机→PLC：扫码结果（V2.7）。0=默认/复位，1=扫码OK，2=扫码NG（超时）。</summary>
-        public ushort ScanResultAddress { get; set; } = 40004;
+        /// <summary>上位机→PLC：扫码结果（V2.7）。0=默认/复位，1=扫码OK，2=扫码NG（超时）。配置=索引 4（协议 40004）。</summary>
+        public ushort ScanResultAddress { get; set; } = 4;
 
-        /// <summary>上位机→PLC：上相机拍照结果（V2.7）。0=默认/复位，1=OK，2=NG（判定NG/触发失败/取图失败）。</summary>
-        public ushort CamUpResultAddress { get; set; } = 40005;
+        /// <summary>上位机→PLC：上相机拍照结果（V2.7）。0=默认/复位，1=OK，2=NG（判定NG/触发失败/取图失败）。配置=索引 5（协议 40005）。</summary>
+        public ushort CamUpResultAddress { get; set; } = 5;
 
-        /// <summary>上位机→PLC：下相机拍照结果（V2.7）。取值同上相机结果。</summary>
-        public ushort CamDownResultAddress { get; set; } = 40006;
+        /// <summary>上位机→PLC：下相机拍照结果（V2.7）。取值同上相机结果。配置=索引 6（协议 40006）。</summary>
+        public ushort CamDownResultAddress { get; set; } = 6;
 
-        /// <summary>上位机→PLC：产品型号起始地址（V2.7，连续写 ProductModelLen 个寄存器，最多 10 字符）。</summary>
-        public ushort ProductModelAddress { get; set; } = 40007;
+        /// <summary>上位机→PLC：产品型号起始地址（V2.7，连续写 ProductModelLen 个寄存器，最多 10 字符）。配置=索引 7（协议 40007）。</summary>
+        public ushort ProductModelAddress { get; set; } = 7;
 
-        /// <summary>产品型号寄存器数（V2.7，每个寄存器 2 字符，默认 5 个=10 字符；超 10 字符按文档从 40012 扩展地址后调整本值）。</summary>
+        /// <summary>产品型号寄存器数（V2.7，每个寄存器 2 字符，默认 5 个=10 字符；超 10 字符按文档从索引 12（协议 40012）扩展地址后调整本值）。</summary>
         public int ProductModelLen { get; set; } = 5;
     }
 
     /// <summary>
-    /// 主界面显示配置：决定显示几行几列窗口、标题栏显示哪些项、OK/NG 颜色。
-    /// 窗口数 = Rows × Columns，完全由本配置驱动，换机型只改 json 即可复用。
+    /// 主界面显示配置：决定显示窗口矩阵、标题栏显示哪些项、OK/NG 颜色。
+    /// V2.12.1 起窗口总数由"相机点位表"唯一决定（见 WindowCountFor），Rows/Columns
+    /// 只在非自适模式下决定"排列宽度"（列数），行数不够自动补（见 ResolveLayout）。
     /// </summary>
     public class DisplayConfig
     {
-        /// <summary>显示窗口行数（每路相机/每个检测点一个窗口）</summary>
+        /// <summary>显示窗口行数（非自适模式下"期望行数"，放不下时自动补行；自适应下不使用）</summary>
         public int Rows { get; set; } = 4;
 
-        /// <summary>显示窗口列数</summary>
+        /// <summary>显示窗口列数（非自适模式下决定矩阵宽度；自适应下不使用）</summary>
         public int Columns { get; set; } = 7;
 
         /// <summary>
-        /// 显示窗口矩阵是否"自适应"（V2.12.0）：窗口行列不再由 Rows/Columns 手工指定，
-        /// 而是【按当前运营产品型号 + 各相机点位表】自动铺排：
-        ///   ① 窗口总数 = 各相机按当前型号查到的"点位→程序号"表（ModelStationPrograms 对应型号表，
-        ///      型号没配表回退 StationPrograms 默认表）点位条目数之和，即上相机点位 + 下相机点位；
-        ///   ② 列数 = min(7, 总点数)，行数 = ceil(总点数 / 列数)——点数不超 7 就单行铺满
-        ///      （1 个点=1×1 大窗占满全区、2 个=左右各半…）；点数多则固定 7 列、自动加行；
-        ///   ③ 窗口编号按"前上后下分组"连续排：前若干窗=上相机点位、后若干窗=下相机点位，
-        ///      与各相机点位表条目【一一对应】（表里第 i 条点位 = 第 i 个窗口）。
+        /// 显示窗口矩阵是否"自适应"（V2.12.0）：窗口行列的形状是否按点位自动算。
+        /// 【窗口总数】无论勾不勾都 = 各相机按当前运营产品型号查到的"点位→程序号"表
+        ///   （ModelStationPrograms 对应型号表，型号没配表回退 StationPrograms 默认表）
+        ///   点位条目数之和（上相机点位 + 下相机点位）——点位由相机点位表唯一决定，
+        ///   上下相机点位号各自从 1 起会重复，窗口只是把点位条目"前上相机后下相机"
+        ///   顺序铺排的格子（表里第 i 条点位 = 该相机起始窗口 + i）。
+        /// 【行列形状】
+        ///   - 自适应：列 = min(7, 总点数)（点数≤7 单行铺满），行 = ceil(总点数/列)；
+        ///   - 非自适应：列 = 手填 Columns、行 = 手填 Rows（乘积不够自动补行），
+        ///     手填只决定排列宽度，窗口数仍=点位和，保证与自适应窗口↔点位一一对应。
         /// 勾选自适应后，设置在设置窗体的"显示窗口"行、切型号（标题栏/设置页）时自动重算；
-        /// 不勾选自适应则维持历史 Rows×Columns 手动矩阵。
         /// 【为什么加】现场 28 个窗口点位由两台相机分工，窗口数与型号点位强相关，手填行列容易
         /// 对不上；让窗口数跟随点位自动铺排，换型号即所见即所得。
         /// </summary>
         public bool AutoFit { get; set; } = false;
 
         /// <summary>
-        /// 计算自适应布局（V2.12.0）：根据相机列表 + 当前产品型号，返回 (行, 列, 窗口总数)。
-        /// 窗口总数 = 各相机 ProgramsFor(型号) 点位表条目数之和（空相机/空表跳过），至少 1；
-        /// 列 = min(7, 总点数)（点数≤7 时单行铺满），行 = ceil(总点数 / 列)。
-        /// 主窗体 BuildWindowGrid / 设置窗体预览 / 协调器等处统一调用，保证各层看到的行列一致。
+        /// 窗口总数（V2.12.1）：各相机按"当前产品型号"点位表 ProgramsFor(型号) 条目数之和，
+        /// 至少 1（防除 0/空矩阵）。**无论是否勾选"自适应"，窗口数都按这个算**——
+        /// 点位由相机点位表唯一决定（上下相机点位号各自从 1 起、会重复），窗口只是将这些
+        /// 点位条目"前上相机后下相机"顺序铺排的格子，"自适应"开关只影响行列的形状计算。
+        /// 主窗体矩阵 / WindowPointForm / 协调器 / ConfigStore / 设置页预览统一走本方法，
+        /// 禁止各层再各写一套窗口数计算。
         /// </summary>
-        public static (int rows, int cols, int windowCount) AutoFitLayout(
-            IEnumerable<CameraConfig> cameras, string productModel)
+        public static int WindowCountFor(IEnumerable<CameraConfig> cameras, string productModel)
         {
             int total = 0;
             foreach (var cam in cameras ?? new List<CameraConfig>())
                 if (cam != null)
                     total += cam.ProgramsFor(productModel).Count;
-            total = Math.Max(1, total);                                  // 至少 1 个窗口，防除 0
-            int cols = Math.Min(7, total);                               // 点数≤7 → 单行；否则固定 7 列
-            int rows = (int)Math.Ceiling(total / (double)Math.Max(1, cols));
-            return (rows, cols, total);
+            return Math.Max(1, total);
+        }
+
+        /// <summary>
+        /// 统一窗口布局计算（V2.12.1）：返回 (行, 列, 窗口总数)，所有使用窗口矩阵的层共用。
+        /// 【窗口总数】恒 = WindowCountFor（相机点位表条目和，≥1）——点位由相机表唯一决定。
+        /// 【行列形状】
+        ///   - 自适应（autoFit=true）：列 = min(7, 总数)（点数≤7 单行铺满），行 = ceil(总数/列)；
+        ///   - 非自适应（autoFit=false）：列 = 手动 columns（≥1）、行 = 手动 rows（≥1）；
+        ///     手填的 rows×columns 若放不下全部窗口，自动补行到 ceil(总数/列)（多余格子留空），
+        ///     保证"窗口↔相机点位一一对应"与自适应一致，手填行列只决定排列宽度。
+        /// 主窗体 BuildWindowGrid / WindowPointForm / 设置页预览 / ConfigStore 统一调用。
+        /// </summary>
+        public static (int rows, int cols, int windowCount) ResolveLayout(
+            IEnumerable<CameraConfig> cameras, string productModel,
+            bool autoFit, int manualRows, int manualCols)
+        {
+            int total = Math.Max(1, WindowCountFor(cameras, productModel));
+            if (autoFit)
+            {
+                int cols = Math.Min(7, total);               // 点数≤7 → 单行；否则固定 7 列
+                int rows = (int)Math.Ceiling(total / (double)Math.Max(1, cols));
+                return (rows, cols, total);
+            }
+            int cols2 = Math.Max(1, manualCols);
+            int rows2 = Math.Max(1, manualRows);
+            if (rows2 * (long)cols2 < total)                 // 手填行列放不下全部窗口 → 自动补行
+                rows2 = (int)Math.Ceiling(total / (double)cols2);
+            return (rows2, cols2, total);
+        }
+
+        /// <summary>
+        /// 计算自适应布局（V2.12.0，等价于 ResolveLayout(autoFit:true)）：根据相机列表 + 当前产品型号，
+        /// 返回 (行, 列, 窗口总数)。窗口总数 = 各相机 ProgramsFor(型号) 点位表条目数之和（至少 1）。
+        /// 主窗体 BuildWindowGrid / 设置窗体预览 / 协调器等处统一调用，保证各层看到的行列一致。
+        /// </summary>
+        public static (int rows, int cols, int windowCount) AutoFitLayout(
+            IEnumerable<CameraConfig> cameras, string productModel)
+        {
+            return ResolveLayout(cameras, productModel, true, 1, 1);
         }
 
         /// <summary>
@@ -500,22 +547,21 @@ namespace CommandCenter.Models
         public int WindowSpacing { get; set; } = 8;
 
         /// <summary>
-        /// 窗口→存图点位映射（可视化配置的主数据）：第 i+1 号显示窗口存图用的点位号（进文件名 {点位}）。
-        /// 【默认规则】点位 = 窗口编号（1、2、3…），即 1 号窗口存图名为 1.png；
-        /// 【自定义】用户在"系统设置 → 窗口/点位配置…"里可把任意窗口的点位改成其他值
-        ///   （例如 1 号窗口存图名改成 2.png）；
-        /// 【窗口位置调整】交换两个窗口的点位值，等价于"把窗口内容搬到另一个格子"，
-        ///   而窗口编号固定跟随格子（不管谁放第一位都是 1 号）；
-        ///   V2.10.1：交换时禁用状态【跟点位一起交换】（禁用的是点位、不是格子）。
-        /// 说明：
-        ///   - 长度 = 显示窗口总数(Rows×Columns)，由 ConfigStore 在加载/保存时自动对齐
-        ///     （缺的补"点位=窗口编号"，多的截断），运行时 ProductionCoordinator 还有越界兜底；
-        ///   - 存图文件名的 {点位} 用本映射值，相机配置不再有点位概念。
+        /// 窗口→存图点位映射（【V2.12.1 已退役】，仅保留作历史字段兼容旧配置，运行时不再读取）。
+        ///
+        /// V2.12.1 统一模型：点位由【相机点位表】唯一决定（各相机 "点位→程序号" 表里的 StationNo，
+        /// 上下相机点位号各自从 1 起、会重复），窗口只是把相机点位条目"前上相机后下相机"顺序铺排的
+        /// 格子（窗口编号 = 相机起始窗口 + 表内位置）。因此：
+        ///   - 运行时"PLC 点位 → 窗口"解析不再查本表（见 ProductionCoordinator.TryResolveActiveWindow）；
+        ///   - WindowPointForm 的格子标注、存图文件名 {点位} 均改用相机点位号 + {相机} 目录隔离，
+        ///     不再使用本表的"全局唯一点位"；
+        ///   - 本表仅由 ConfigStore.EnsureStationMap 按窗口总数对齐留着（点位=窗口编号），避免旧 json
+        ///     带着自定义映射导致加载解析混乱，但不参与任何存图/显示/切程序逻辑。
         /// </summary>
         public List<int> WindowStationMap { get; set; } = new List<int>();
 
         /// <summary>
-        /// 窗口是否启用（V1.12.28 新增，与 WindowStationMap 同长度=窗口总数 Rows×Columns）。
+        /// 窗口是否启用（V1.12.28 新增，长度=窗口总数，见 WindowCountFor）。
         /// 第 i+1 号窗口的点位坏了/停用时把对应元素置 false：
         ///   - 主界面矩阵"完全移除"该格子，剩余窗口重新紧凑排列（窗口编号保留原值）；
         ///   - PLC 拍照请求写到该点位时，上位机不触发相机、不显示、不存图、不计数，
@@ -601,8 +647,8 @@ namespace CommandCenter.Models
 
     /// <summary>
     /// 图像保存配置：存图目录按【逐级目录列表】归档，文件名按【模板】生成。
-    /// 默认结构（现场要求）：
-    ///   根目录 / 年月日(2026年08月11日) / SN号 / OK|NG / 点位号 / 文件
+    /// 默认结构（V2.12.1 起按相机分目录，上下相机同号点位互不干扰）：
+    ///   根目录 / 年月日(2026年08月11日) / SN号 / OK|NG / 相机 / 点位号文件
     /// 可视化配置入口在设置窗体的"配置目录结构…"，把每级目录名或生成规则编辑成列表。
     /// 注：年月日是【一个】目录名，不是年/月/日三级目录。
     /// </summary>
@@ -614,17 +660,22 @@ namespace CommandCenter.Models
         /// <summary>
         /// 目录层级列表（可视化配置的主数据）：每个元素是一级目录名或生成规则，
         /// 按顺序逐级建目录。支持占位符（见下方占位符说明），固定文字原样保留。
-        /// 默认（现场要求）：["{年月日}","{SN}","{OKNG}"] → 根/2026年08月11日/SN-0001/OK/
+        /// 默认（V2.12.3 按现场最终确认的顺序定稿，{相机} 在 {OKNG} 前）：
+        ///   ["{年月日}","{SN}","{相机}","{OKNG}"] → 根/2026年08月11日/SN-0001/上相机/OK/1.jpeg
         /// 说明：
         ///   {年月日} 是一个整体目录名，展开成"2026年08月11日"（不是年/月/日三级）；
+        ///   {相机}   V2.12.1 新增：展开成相机名（如"上相机"/"下相机"）。**存图点位用的是相机
+        ///     点位号，上下相机同号会重复，必须靠 {相机} 这一层目录把两家隔开**，否则文件互相覆盖。
+        ///     建议保留；若现场确不需要按相机分目录（只有一台相机），可在"配置目录结构…"里删掉这层。
         ///   {OKNG}   按本次判定展开成 OK 或 NG 两个并列目录之一，满足现场分开放习惯；
         ///   点位号进文件名（见 FileNameTemplate），不作为目录层级。
         /// </summary>
-        public List<string> SubDirs { get; set; } = new List<string> { "{年月日}", "{SN}", "{OKNG}" };
+        public List<string> SubDirs { get; set; } = new List<string> { "{年月日}", "{SN}", "{相机}", "{OKNG}" };
 
         /// <summary>
-        /// 文件名模板（不含扩展名，统一存 .png）。支持的占位符（其余文字原样保留）：
-        ///   {点位}   窗口存图点位（DisplayConfig.WindowStationMap，默认=窗口编号，可在设置里可视化改）
+        /// 文件名模板（不含扩展名，jpeg/iv4p 双格式统一按此命名）。支持的占位符（其余文字原样保留）：
+        ///   {点位}   相机点位号（本相机点位表 StationNo；上下相机各自从 1 起，靠目录里的 {相机} 层区分）
+        ///   {相机}   相机名（如"上相机"/"下相机"，也可放文件名里，默认放目录层）
         ///   {时间}   精确到毫秒的时间戳 yyyyMMdd_HHmmss_fff（多张同点位防重名用）
         ///   {SN}     序列号（若文件名也要带 SN 可加）
         ///   例：默认 "{点位}" → 1.png

@@ -112,8 +112,8 @@ namespace CommandCenter.Views
             LogHelper.Info($"BuildServices：共创建 {_cameras.Count} 台相机：{string.Join(" / ", _cameras.ConvertAll(x => x.IpLabel))}");
 
             _imageStore = new ImageStore(_config.Image);
-            _coordinator = new ProductionCoordinator(_plc, _cameras, cams, _imageStore, _config.Display,
-                _config.Display.WindowStationMap, _config.Display.WindowEnabled, _config.ProductModel);
+            _coordinator = new ProductionCoordinator(_plc, _cameras, cams, _imageStore,
+                _config.Display.WindowEnabled, _config.ProductModel);
 
             // 连接健康监控：后台心跳 + 断连自动重连 + 边沿日志（不影响任何 UI 刷新）
             _monitor = new ConnectionMonitor(_plc, _cameras);
@@ -673,48 +673,48 @@ namespace CommandCenter.Views
 
             _coordinator = new ProductionCoordinator(_plc, _cameras,
                 _config.Cameras ?? new List<CameraConfig>(), _imageStore,
-                _config.Display, _config.Display.WindowStationMap,
                 _config.Display.WindowEnabled, _config.ProductModel);
             _coordinator.AttachScanners(_scanners);
             _coordinator.LatestSerialNumber = serial;
             SubscribeCoordinatorEvents();
             _coordinator.Start();
 
-            // ③ 提示 + 日志（成功绿字，遵循现场 OK=绿 习惯）
+            // ③ 窗口矩阵跟随型号重建（V2.12.1）：窗口总数 = 各相机按新型号点位表条目和，
+            // 换型号可能增删窗口，必须在标题栏切型号后就地重建矩阵（自适应/非自适应都一样）。
+            BuildWindowGrid();
+
+            // ④ 提示 + 日志（成功绿字，遵循现场 OK=绿 习惯）
             lblStatus.ForeColor = Color.FromArgb(46, 158, 107);
             lblStatus.Text = $"型号切换完成: {model}";
             LogHelper.Info($"产品型号切换：{model}（已生效并写盘，PLC 型号区随下次扫码写入）");
         }
 
         /// <summary>
-        /// 显示窗口矩阵：按配置 Rows×Columns 在【设计器容器 gridCameraWindows】里动态重建。
+        /// 显示窗口矩阵：按"当前型号 + 相机点位表"在【设计器容器 gridCameraWindows】里动态重建
+        /// （V2.12.1 起自适应/非自适应统一，窗口总数=相机点位表条目和，见 DisplayConfig.ResolveLayout）。
         /// 设计器只负责"容器长什么样"（Dock=Fill 铺满主区、淡蓝白底），具体行列数量与
-        /// 每格的 CameraDisplayControl 全部以这里为准重建，保证改 Rows/Columns 配置即生效。
+        /// 每格的 CameraDisplayControl 全部以这里为准重建，保证改行列/切型号/保存配置即生效。
         ///
         /// 【V1.12.28 窗口禁用重排】DisplayConfig.WindowEnabled=false 的窗口【不创建控件】：
         /// 从矩阵中"完全移除"该格子，剩余启用窗口按原窗口编号顺序【紧凑排列】（编号保留原值，
         /// 不重新编号），尾部多出的格子留空。窗口编号与格子位置不再一一对应，
         /// 刷新窗口改走 _windowControls[窗口编号] 字典（见 OnInspectionFinished）。
-        /// 为什么保留原编号：窗口编号绑定 WindowStationMap（窗口→点位）与 StationPrograms
-        /// （点位→相机程序）等配置，重新编号会打乱既有配置，宁可让格子位置空出。
+        /// 为什么保留原编号：窗口编号绑定"相机点位表条目"（前上相机后下相机分组）与 WindowEnabled、
+        /// StationPrograms（点位→相机程序）等配置，重新编号会打乱既有配置，宁可让格子位置空出。
         /// </summary>
         private void BuildWindowGrid()
         {
-            // V2.12.0 自适应：窗口行列与数量由"当前产品型号 + 各相机点位表"自动铺排，
-            // 不再看 Rows/Columns（布局规则见 DisplayConfig.AutoFitLayout 注释）。
+            // V2.12.1 统一布局：窗口总数 = 各相机按当前产品型号点位表条目数之和（与是否自适应无关，
+            // 自适应/非自适都是"点位由相机表唯一决定，窗口只是按前上后下把点位条目铺排"）；
+            // 行列形状：自适应自动算，非自适列用手填、行不足自动补齐（见 DisplayConfig.ResolveLayout）。
             // 当产品型号在各相机点位表里查不到任何点位时 windowCount≥1，矩阵至少保留一个窗口。
-            int rows, cols, total;
-            if (_config.Display.AutoFit)
-            {
-                var layout = DisplayConfig.AutoFitLayout(_config.Cameras, _config.ProductModel);
-                rows = layout.rows; cols = layout.cols; total = layout.windowCount;
-            }
-            else
-            {
-                rows = Math.Max(1, _config.Display.Rows);
-                cols = Math.Max(1, _config.Display.Columns);
-                total = rows * cols;
-            }
+            var layout = DisplayConfig.ResolveLayout(
+                _config.Cameras,
+                _config.ProductModel,
+                _config.Display.AutoFit,
+                _config.Display.Rows,
+                _config.Display.Columns);
+            int rows = layout.rows, cols = layout.cols, total = layout.windowCount;
             int gridCells = rows * cols; // 矩阵总格子数（自适应下 ≥ 窗口总数，尾行空余格子留空）
 
             // 重置容器：先释放旧窗口（热更时旧窗口 PictureBox 持有图片句柄，必须 Dispose 防泄漏），
@@ -754,7 +754,7 @@ namespace CommandCenter.Views
                     Margin = new Padding(3),
                     Dock = DockStyle.Fill
                 };
-                win.SetWindowIndex(w); // 显示"原窗口编号"（点位归属仍按 WindowStationMap[w-1]）
+                win.SetWindowIndex(w); // 显示"窗口编号"（编号=相机点位表条目序号，前上相机后下相机分组）
                 // V2.10.4：按配置控制左上角窗口编号显隐（默认显示；关掉画面更干净）
                 win.SetWindowIndexVisible(_config.Display.WindowIndexVisible);
                 // V2.10.8：按配置控制悬停气泡提示显隐（默认显示；勾掉画面更干净）

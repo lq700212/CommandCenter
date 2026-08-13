@@ -14,7 +14,10 @@ namespace CommandCenter.Utils
     ///   1. 首次运行无配置文件时，用模型自带默认值重建并把默认配置落盘，方便现场看着改；
     ///   2. 序列化时忽略值为 null 的字段、使用缩进格式，人工可读；
     ///   3. 保存先写临时文件再改名替换，避免"写到一半断电把配置写坏"导致程序起不来；
-    ///   4. 不做任何旧配置兼容/迁移：项目未上线，配置全部以当前模型为准，字段缺了就用模型默认值。
+    ///   4. 不做旧配置兼容/迁移：项目未上线，配置全部以当前模型为准，字段缺了就用模型默认值。
+    ///   唯一例外：V2.12.1 起存图点位统一为【相机点位号】（上下相机各自从 1 起、会重复），
+    ///   归档目录必须含 {相机} 层隔开两相机，否则同点位文件互相覆盖（数据丢失）。因此加载/保存
+    ///   时自动补上 {相机} 目录层（原有目录层级保持不变，仅末尾追加一级），已含则不重复加。
     /// </summary>
     public static class ConfigStore
     {
@@ -23,43 +26,66 @@ namespace CommandCenter.Utils
         public static string ConfigFile => Path.Combine(ConfigDir, "appconfig.json");
 
         /// <summary>
-        /// 加载配置。文件不存在则返回模型默认值（不自动写盘，由首次点保存时写）。
+        /// 加载配置。文件不存在则返回模型默认值（补齐默认相机/型号列表等，不自动写盘，
+        /// 由首次点保存时写）。文件存在则反序列化后同样走一遍"空段兜底"。
+        /// 【V2.12.3 修复窗口塌缩】首次运行无配置文件时此前直接 new AppConfig() 返回，
+        /// Cameras 是空列表 → 主界面窗口总数 = 相机点位和 = 0 → 塌成 1 个窗口。
+        /// 现在统一走 ApplyDefaults：补默认两台相机 + 默认型号 U171（非空型号才能按点位
+        /// 表算出对应窗口数，U171 → 上 18 点 + 下 4 点 = 22 个窗口）。
         /// </summary>
         public static Models.AppConfig Load()
         {
+            Models.AppConfig cfg;
             try
             {
                 if (File.Exists(ConfigFile))
                 {
                     string json = File.ReadAllText(ConfigFile, Encoding.UTF8);
-                    var cfg = JsonConvert.DeserializeObject<Models.AppConfig>(json) ?? new Models.AppConfig();
-
-                    // 空段兜底（json 缺字段/显式 null 时用模型默认），保证后续代码不 NRE
-                    // 相机列表缺省时用现场默认两台相机（V1.9.8：IP 写死，见 CameraConfig.DefaultCameras）
-                    // V1.9.9：兜底条件从"仅 null"放宽到"null 或空列表"——因 AppConfig.Cameras
-                    // 初始化器已改为空列表（避免 Newtonsoft 反序列化时向已存在实例 Add 而叠成 4 台），
-                    // json 没写相机时必须在此补上默认两台现场相机。
-                    if (cfg.Cameras == null || cfg.Cameras.Count == 0) cfg.Cameras = Models.CameraConfig.DefaultCameras();
-                    if (cfg.Scanners == null) cfg.Scanners = new List<Models.ScanConfig>();
-                    // 产品型号候选列表（V2.8）：null/空时用现场默认三型号（U171/U172/Z121），
-                    // 保证设置窗体"产品型号"下拉与"窗口/点位配置"的型号下拉有候选可点。
-                    if (cfg.ProductModels == null || cfg.ProductModels.Count == 0)
-                        cfg.ProductModels = Models.AppConfig.DefaultProductModels();
-                    if (cfg.Display == null) cfg.Display = new Models.DisplayConfig();
-                    if (cfg.Image == null) cfg.Image = new Models.ImageConfig();
-                    if (cfg.Security == null) cfg.Security = new Models.SecurityConfig();
-
-                    // 保证窗口→存图点位映射长度与窗口总数一致（缺的补默认、多的截断）
-                    EnsureStationMap(cfg);
-                    return cfg;
+                    cfg = JsonConvert.DeserializeObject<Models.AppConfig>(json) ?? new Models.AppConfig();
+                }
+                else
+                {
+                    cfg = new Models.AppConfig();
                 }
             }
             catch (Exception ex)
             {
                 // 配置损坏时不让程序崩，退回默认值并提示（调用方决定是否弹窗）
                 LogHelper.Error("读取配置文件失败，已使用默认配置。原因：" + ex.Message);
+                cfg = new Models.AppConfig();
             }
-            return new Models.AppConfig();
+            ApplyDefaults(cfg);
+            return cfg;
+        }
+
+        /// <summary>
+        /// 空段兜底 + 数组对齐（加载与保存共用）：
+        ///   - Cameras/ProductModels/Scanners 缺省或为空 → 现场默认值（两台相机、三型号）；
+        ///   - Display/Image/Security 为 null → 模型默认实例；
+        ///   - WindowStationMap/WindowEnabled 按窗口总数对齐；归档目录补 {相机} 层。
+        /// 反序列化时 Newtonsoft 对"属性已有实例的集合"是复用并 Add 而非整值替换，
+        /// 所以模型初始化器里的集合必须给空列表，默认值统一在这里补（V1.9.9）。
+        /// </summary>
+        private static void ApplyDefaults(Models.AppConfig cfg)
+        {
+            // 相机列表缺省时用现场默认两台相机（V1.9.8：IP 写死，见 CameraConfig.DefaultCameras）
+            // V1.9.9：兜底条件从"仅 null"放宽到"null 或空列表"——因 AppConfig.Cameras
+            // 初始化器已改为空列表（避免 Newtonsoft 反序列化时向已存在实例 Add 而叠成 4 台），
+            // json 没写相机时必须在此补上默认两台现场相机。
+            if (cfg.Cameras == null || cfg.Cameras.Count == 0) cfg.Cameras = Models.CameraConfig.DefaultCameras();
+            if (cfg.Scanners == null) cfg.Scanners = new List<Models.ScanConfig>();
+            // 产品型号候选列表（V2.8）：null/空时用现场默认三型号（U171/U172/Z121），
+            // 保证设置窗体"产品型号"下拉与"窗口/点位配置"的型号下拉有候选可点。
+            if (cfg.ProductModels == null || cfg.ProductModels.Count == 0)
+                cfg.ProductModels = Models.AppConfig.DefaultProductModels();
+            if (cfg.Display == null) cfg.Display = new Models.DisplayConfig();
+            if (cfg.Image == null) cfg.Image = new Models.ImageConfig();
+            if (cfg.Security == null) cfg.Security = new Models.SecurityConfig();
+
+            // 保证窗口→存图点位映射长度与窗口总数一致（缺的补默认、多的截断）
+            EnsureStationMap(cfg);
+            // V2.12.1：归档子目录必须含 {相机} 层（上下相机同号点位靠它隔开），缺则自动补
+            EnsureCameraSubDir(cfg);
         }
 
         /// <summary>
@@ -71,6 +97,7 @@ namespace CommandCenter.Utils
             {
                 Directory.CreateDirectory(ConfigDir);
                 EnsureStationMap(config);   // 保存前把点位映射对齐到窗口总数，避免写盘出越界/缺项
+                EnsureCameraSubDir(config); // 保存前保证归档目录含 {相机} 层（见类注释第 4 点）
                 string json = JsonConvert.SerializeObject(config, new JsonSerializerSettings
                 {
                     Formatting = Formatting.Indented,
@@ -110,22 +137,18 @@ namespace CommandCenter.Utils
         }
 
         /// <summary>
-        /// 保证 WindowStationMap（窗口→存图点位）与 WindowEnabled（窗口启用列表）都和
-        /// 显示窗口总数对齐：
-        ///   - 非自适应模式：窗口总数 = Rows×Columns（历史行为）；
-        ///   - 自适应模式（V2.12.0）：窗口总数 = 各相机按当前型号点位表条目数之和
-        ///     （见 DisplayConfig.AutoFitLayout），Rows/Columns 仅作历史值保留、不参与。
+        /// 保证 WindowStationMap（历史兼容字段）与 WindowEnabled（窗口启用列表）都和
+        /// 显示窗口总数对齐（V2.12.1 统一）：窗口总数 = 各相机按当前型号点位表条目数之和
+        /// （DisplayConfig.WindowCountFor，自适应/非自适应一致——点位由相机点位表唯一决定）。
+        /// Rows/Columns 仅决定排列宽度、不决定窗口数；WindowStationMap 已退役，
+        /// 只按"点位=窗口编号"补齐对齐留档，不参与任何运行逻辑。
         /// 对齐规则不变：长度不足 → 点位按"点位=窗口编号"补上、启用按 true 补上（默认规则）；
         /// 长度超出 → 多余截断（窗口数改小后，超出部分丢弃）。
         /// 在加载与保存各调一次，保证运行时取 map[i]/enabled[i] 永不越界。
         /// </summary>
         private static void EnsureStationMap(Models.AppConfig cfg)
         {
-            int rows = Math.Max(1, cfg.Display.Rows);
-            int cols = Math.Max(1, cfg.Display.Columns);
-            int windowCount = cfg.Display.AutoFit
-                ? Models.DisplayConfig.AutoFitLayout(cfg.Cameras, cfg.ProductModel).windowCount
-                : rows * cols;
+            int windowCount = Models.DisplayConfig.WindowCountFor(cfg.Cameras, cfg.ProductModel);
 
             var map = cfg.Display.WindowStationMap ?? new List<int>();
             while (map.Count < windowCount) map.Add(map.Count + 1);
@@ -137,6 +160,35 @@ namespace CommandCenter.Utils
             while (enabled.Count < windowCount) enabled.Add(true);
             if (enabled.Count > windowCount) enabled.RemoveRange(windowCount, enabled.Count - windowCount);
             cfg.Display.WindowEnabled = enabled;
+        }
+
+        /// <summary>
+        /// 保证归档目录层级里含 "{相机}" 这一层（V2.12.1）。
+        /// 【为什么必须】V2.12.1 起存图点位统一为相机点位号（本相机点位表 StationNo），
+        /// 上下相机点位号各自从 1 起、会重复（如上相机 1~18、下相机 1~4）；归档若不分相机目录，
+        /// 上相机点位 3 与下相机点位 3 会落进同一目录同名覆盖（数据丢失）。FTP 中转目录天然按相机
+        /// 分开（一台相机一个目录），但【归档目录】依赖这一层 {相机}。
+        /// 【做法（V2.12.3 对齐现场最终目录顺序）】旧配置（SubDirs 未含 {相机}）在加载/保存时
+        /// 自动补一层 {相机}：插到 {OKNG} 之前（目标顺序 = "…/{SN}/{相机}/{OKNG}"；无 {OKNG} 则
+        /// 追加末尾），原有层级顺序其余保持不变；已含（忽略大小写）则不重复加。单相机现场可手动删掉这层。
+        /// </summary>
+        private static void EnsureCameraSubDir(Models.AppConfig cfg)
+        {
+            if (cfg.Image == null) cfg.Image = new Models.ImageConfig();
+            var subs = cfg.Image.SubDirs;
+            if (subs == null) cfg.Image.SubDirs = subs = new List<string>();
+            foreach (var s in subs)
+            {
+                if (!string.IsNullOrWhiteSpace(s)
+                    && s.IndexOf("{相机}", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return;   // 已含 {相机} 层，不重复加
+            }
+            // 插到 {OKNG} 之前（现场要求 "…/SN/{相机}/OK|NG" 顺序）；目录里没有 {OKNG} 就追加到末尾
+            int okIdx = subs.FindIndex(s => !string.IsNullOrWhiteSpace(s)
+                && s.IndexOf("{OKNG}", StringComparison.OrdinalIgnoreCase) >= 0);
+            if (okIdx >= 0) subs.Insert(okIdx, "{相机}");
+            else subs.Add("{相机}");
+            LogHelper.Info("配置升级：归档目录已自动补上 {相机} 层（上下相机同号点位隔离），已插到 {OKNG} 之前");
         }
     }
 }

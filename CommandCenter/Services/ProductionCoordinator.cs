@@ -33,9 +33,11 @@ namespace CommandCenter.Services
     ///   第三台及以上相机暂无 PLC 驱动通道（文档预留 40012+ 扩展），不参与请求驱动，
     ///   仍可手动（功能测试窗体）触发验证。
     ///
-    /// 【点位与窗口】PLC 请求里带点位编号（40002/40003 的值），上位机经窗口映射
-    ///   WindowStationMap 找到对应显示窗口（找不到兜底"点位=窗口编号"）；该窗口被禁用
-    ///   （WindowEnabled=false）时视为"该点位跳过"，直接写结果 3。
+    /// 【点位与窗口】PLC 请求里带点位编号（40002/40003 的值），该点位是【相机局部点位号】
+    ///   （上下相机各自从 1 起、会重复），上位机按"相机通道 + 该相机点位表"定位窗口
+    ///   （见 TryResolveActiveWindow，窗口=相机点位表条目，前上相机后下相机分组）；
+    ///   该窗口被禁用（WindowEnabled=false）时视为"该点位跳过"，直接写结果 3。
+    ///   存图点位 = 相机点位号（文件名 {点位}），按相机的 {相机} 目录层隔离（见 ImageStore）。
     ///
     /// 【线程】请求轮询在后台线程（PositionTimer），相机触发/取图/归档在 Task 后台线程，
     ///   通过 _chanResult（volatile）回传结果给轮询线程写 PLC；界面刷新走事件
@@ -47,8 +49,6 @@ namespace CommandCenter.Services
         private readonly List<KeyenceIV4Camera> _cameras;   // 每台相机一个服务实例
         private readonly List<CameraConfig> _cameraCfgs;    // 对应的相机配置（程序映射/FTP目录等）
         private readonly ImageStore _imageStore;
-        private readonly DisplayConfig _display;
-        private readonly List<int> _windowStationMap;       // 窗口→存图点位映射（配置）
         private readonly List<bool> _windowEnabled;         // 窗口→是否启用（V1.12.28）
         private readonly string _productModel;              // 固定产品型号（V2.7，每次扫码写入 PLC）
 
@@ -112,8 +112,6 @@ namespace CommandCenter.Services
                                      List<KeyenceIV4Camera> cameras,
                                      List<CameraConfig> cameraCfgs,
                                      ImageStore imageStore,
-                                     DisplayConfig display,
-                                     List<int> windowStationMap,
                                      List<bool> windowEnabled,
                                      string productModel)
         {
@@ -121,8 +119,6 @@ namespace CommandCenter.Services
             _cameras = cameras ?? new List<KeyenceIV4Camera>();
             _cameraCfgs = cameraCfgs ?? new List<CameraConfig>();
             _imageStore = imageStore;
-            _display = display;
-            _windowStationMap = windowStationMap;
             _windowEnabled = windowEnabled;
             _productModel = productModel ?? "";
 
@@ -405,12 +401,13 @@ namespace CommandCenter.Services
             int code = 2;                 // 默认 NG，成功路径改 1
             string archived = null;
             string resultText = "";
-            // 存图点位号（V2.12.0）：自适应下必须用【全局窗口编号】windowIndex，不能直接用 PLC 点位
-            // 号 stationNo——自适应里上下相机的点位号各自从 1 起会重复（如上相机 1~18、下相机 1~4），
-            // 若直接拿 stationNo 存图，上下相机同一点位号会重名/混淆。windowIndex 是"前上后下分组"的
-            // 全局唯一编号（上相机窗口 1..N1、下相机窗口 N1+1..N1+N2），正好把存图按相机天然分开。
-            // 非自适应保持历史行为（stationNo 即窗口存图点位 DisplayConfig.WindowStationMap 的值）。
-            int storeStation = _display.AutoFit ? windowIndex : stationNo;
+            // 存图点位号（V2.12.1 定稿）：统一用【相机点位号】stationNo 进文件名 {点位}——
+            // 点位由相机点位表唯一决定，上下相机点位号各自从 1 起会重复（如上相机 1~18、下相机 1~4），
+            // 同名文件靠 ImageStore 的目录 {相机} 层按相机隔开（见 ImageStore 类注释），不再用全局窗口编号。
+            // windowIndex 仅用于"显示窗口定位 / WindowEnabled/是否跳过"判定。
+            int storeStation = stationNo;
+            // 相机名（存图目录 {相机} 层 / 日志归属用；配置名空时兜底"相机N"）
+            string camName = string.IsNullOrWhiteSpace(cfg.Name) ? $"相机{camIdx + 1}" : cfg.Name.Trim();
             try
             {
                 // ① 触发前的输出格式 + 程序切换（V1.12.18/V1.12.25）：
@@ -420,16 +417,16 @@ namespace CommandCenter.Services
                     && !cam.SetOutputFormat(cfg.OutputFormat))
                 {
                     code = 2;
-                    LogHelper.Warn($"相机[{camIdx}] 点位{stationNo} 设置判定输出格式失败（OF,{cfg.OutputFormat.Trim()}）");
-                    ErrorRaised?.Invoke($"相机[{camIdx}] 点位{stationNo} 设置输出格式失败");
+                    LogHelper.Warn($"相机[{camName}] 点位{stationNo} 设置判定输出格式失败（OF,{cfg.OutputFormat.Trim()}）");
+                    ErrorRaised?.Invoke($"相机[{camName}] 点位{stationNo} 设置输出格式失败");
                     return;
                 }
                 int programNo = ResolveProgramForStation(cfg, stationNo);
                 if (programNo >= 0 && !cam.SwitchProgram(programNo))
                 {
                     code = 2;
-                    LogHelper.Warn($"相机[{camIdx}] 点位{stationNo} 切换程序失败（PW,{programNo:D3}）");
-                    ErrorRaised?.Invoke($"相机[{camIdx}] 点位{stationNo} 切换程序失败");
+                    LogHelper.Warn($"相机[{camName}] 点位{stationNo} 切换程序失败（PW,{programNo:D3}）");
+                    ErrorRaised?.Invoke($"相机[{camName}] 点位{stationNo} 切换程序失败");
                     return;
                 }
 
@@ -444,13 +441,13 @@ namespace CommandCenter.Services
                     resultText = outcome.ResultText ?? "";
                     if (!triggerOk)
                     {
-                        LogHelper.Warn($"相机[{camIdx}] 点位{stationNo} 触发/读判定失败：{outcome.Detail}");
-                        ErrorRaised?.Invoke($"相机[{camIdx}] 点位{stationNo} 触发/读判定失败");
+                        LogHelper.Warn($"相机[{camName}] 点位{stationNo} 触发/读判定失败：{outcome.Detail}");
+                        ErrorRaised?.Invoke($"相机[{camName}] 点位{stationNo} 触发/读判定失败");
                         return;
                     }
-                    LogHelper.Info($"相机[{camIdx}] 点位{stationNo} 判定：{(isOk ? "OK" : "NG")} 结果={resultText}");
+                    LogHelper.Info($"相机[{camName}] 点位{stationNo} 判定：{(isOk ? "OK" : "NG")} 结果={resultText}");
                     if (!isOk)
-                        ErrorRaised?.Invoke($"相机[{camIdx}] 点位{stationNo} 判定 NG，结果={resultText}");
+                        ErrorRaised?.Invoke($"相机[{camName}] 点位{stationNo} 判定 NG，结果={resultText}");
                 }
                 else
                 {
@@ -459,8 +456,8 @@ namespace CommandCenter.Services
                     isOk = true;
                     if (!triggerOk)
                     {
-                        LogHelper.Warn($"相机[{camIdx}] 点位{stationNo} 触发失败");
-                        ErrorRaised?.Invoke($"相机[{camIdx}] 点位{stationNo} 触发失败");
+                        LogHelper.Warn($"相机[{camName}] 点位{stationNo} 触发失败");
+                        ErrorRaised?.Invoke($"相机[{camName}] 点位{stationNo} 触发失败");
                         return;
                     }
                 }
@@ -472,15 +469,15 @@ namespace CommandCenter.Services
                     var img = cam.ReadImage();
                     if (img.Succeeded && img.ImageData != null)
                     {
-                        archived = _imageStore.SaveImageBytes(img.ImageData, storeStation, isOk, LatestSerialNumber);
+                        archived = _imageStore.SaveImageBytes(img.ImageData, storeStation, isOk, LatestSerialNumber, camName);
                         hasImage = archived != null;
                         if (!hasImage)
-                            LogHelper.Warn($"相机[{camIdx}] 点位{stationNo} 图像归档失败（TCP 取图）");
+                            LogHelper.Warn($"相机[{camName}] 点位{stationNo} 图像归档失败（TCP 取图）");
                     }
                     else
                     {
-                        LogHelper.Warn($"相机[{camIdx}] 点位{stationNo} TCP 取图失败：" + img.Detail);
-                        ErrorRaised?.Invoke($"相机[{camIdx}] 点位{stationNo} TCP 取图失败");
+                        LogHelper.Warn($"相机[{camName}] 点位{stationNo} TCP 取图失败：" + img.Detail);
+                        ErrorRaised?.Invoke($"相机[{camName}] 点位{stationNo} TCP 取图失败");
                     }
                 }
                 else
@@ -492,17 +489,17 @@ namespace CommandCenter.Services
                     string jpeg = WaitForFtpImage(cfg, triggerUtc, out iv4p);
                     if (string.IsNullOrEmpty(jpeg))
                     {
-                        LogHelper.Warn($"相机[{camIdx}] 点位{stationNo} FTP 取图目录未找到新图");
-                        ErrorRaised?.Invoke($"相机[{camIdx}] 点位{stationNo} FTP 取图目录未找到新图");
+                        LogHelper.Warn($"相机[{camName}] 点位{stationNo} FTP 取图目录未找到新图");
+                        ErrorRaised?.Invoke($"相机[{camName}] 点位{stationNo} FTP 取图目录未找到新图");
                     }
                     else
                     {
-                        archived = _imageStore.SaveImageFilePair(jpeg, iv4p, storeStation, isOk, LatestSerialNumber);
+                        archived = _imageStore.SaveImageFilePair(jpeg, iv4p, storeStation, isOk, LatestSerialNumber, camName);
                         if (archived != null)
                         {
                             // 归档成功 → 删除 FTP 源文件（"处理即删"，防同点位新旧图混淆）；删失败不阻断
-                            ImageStore.DeleteSourceFile(jpeg, $"点位{stationNo}");
-                            ImageStore.DeleteSourceFile(iv4p, $"点位{stationNo}");
+                            ImageStore.DeleteSourceFile(jpeg, $"相机[{camName}] 点位{stationNo}");
+                            ImageStore.DeleteSourceFile(iv4p, $"相机[{camName}] 点位{stationNo}");
                         }
                         hasImage = archived != null;
                     }
@@ -527,8 +524,8 @@ namespace CommandCenter.Services
             }
             catch (Exception ex)
             {
-                LogHelper.Error($"相机[{camIdx}] 点位{stationNo} 拍照异常", ex);
-                ErrorRaised?.Invoke($"相机[{camIdx}] 点位{stationNo} 拍照异常：" + ex.Message);
+                LogHelper.Error($"相机[{camName}] 点位{stationNo} 拍照异常", ex);
+                ErrorRaised?.Invoke($"相机[{camName}] 点位{stationNo} 拍照异常：" + ex.Message);
             }
             finally
             {
@@ -594,55 +591,32 @@ namespace CommandCenter.Services
             && cfg.ImageSource.Trim().Equals("Tcp", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
-        /// 由点位编号找到"应刷新/应检测"的启用窗口（V1.12.28，替代旧的环形窗口分配）：
-        /// ① 在窗口映射 WindowStationMap 里找所有==该点位的窗口，取第一个【启用】的；
-        /// ② 映射里没有该点位（自定义点位不在映射内）→ 兜底"点位=窗口编号"且该窗口启用；
-        /// ③ 都找不到启用窗口 → 返回 false（调用方按"点位禁用跳过"处理，不拍照不计数）。
-        /// 【自适应模式（V2.12.0）】不走上面的全局映射查找——上下相机点位号各自从 1 起、
-        /// 会重复，必须按相机通道定位窗口（"前上后下分组"：窗口=相机表条目序号 + 相机起始窗口偏移）：
-        /// 在该相机当前型号点位表里找 StationNo==请求点位 的条目位置，窗口 = 该相机起始窗口 + 位置；
-        /// 表里没有该点位（点位不归本相机拍）→ 返回 false（跳过）。
+        /// 把"某台相机拍到某个点位"解析成显示窗口编号（V2.12.1 起统一相机表驱动，不再分自适应/非自适应）。
+        ///
+        /// 点位由相机点位表唯一决定：上下相机点位号各自从 1 起会重复（如上相机 1~18、下相机 1~4），
+        /// 全局查 WindowStationMap 一定会错位/撞窗，必须【按相机通道】定位：
+        ///   在该相机当前型号点位表里找 StationNo==请求点位 的条目位置 pos，窗口编号 =
+        ///   该相机起始窗口（AutoFitCameraStarts，"前上后下分组"）+ pos，即"窗口=相机表条目"。
+        /// 找不到 pos：
+        ///   - 该点位不归本相机拍（另一台相机的点位）→ 返回 false，调用方按"跳过"处理（写结果 3）；
+        /// 该窗口被禁用（WindowEnabled=false）→ 返回 false（同样是跳过，不拍照不计数）。
         /// </summary>
         private bool TryResolveActiveWindow(int camIdx, int stationNo, out int windowIndex)
         {
             windowIndex = -1;
-
-            // 自适应模式：按相机通道 + 相机表解析窗口（上下点位号可重复，不能全局查）
-            if (_display.AutoFit)
+            if (camIdx < 0 || camIdx >= _cameraCfgs.Count) return false;
+            var table = _cameraCfgs[camIdx].ProgramsFor(_productModel);
+            if (table == null) return false;
+            int pos = -1;
+            for (int i = 0; i < table.Count; i++)
             {
-                if (camIdx < 0 || camIdx >= _cameraCfgs.Count) return false;
-                var table = _cameraCfgs[camIdx].ProgramsFor(_productModel);
-                if (table == null) return false;
-                int pos = -1;
-                for (int i = 0; i < table.Count; i++)
-                {
-                    if (table[i] != null && table[i].StationNo == stationNo) { pos = i; break; }
-                }
-                if (pos < 0) return false;          // 该相机点位表里没有此点位 → 不归本相机拍
-                var starts = DisplayConfig.AutoFitCameraStarts(_cameraCfgs, _productModel);
-                if (camIdx >= starts.Count) return false;
-                windowIndex = starts[camIdx] + pos; // 起始窗口 + 表内位置（表第 1 条=窗口 1）
-                return IsWindowEnabled(windowIndex);
+                if (table[i] != null && table[i].StationNo == stationNo) { pos = i; break; }
             }
-
-            int count = _windowCount();
-            if (_windowStationMap != null)
-            {
-                for (int i = 0; i < Math.Min(_windowStationMap.Count, count); i++)
-                {
-                    if (_windowStationMap[i] == stationNo && IsWindowEnabled(i + 1))
-                    {
-                        windowIndex = i + 1;
-                        return true;
-                    }
-                }
-            }
-            if (stationNo >= 1 && stationNo <= count && IsWindowEnabled(stationNo))
-            {
-                windowIndex = stationNo;
-                return true;
-            }
-            return false;
+            if (pos < 0) return false;          // 该相机点位表里没有此点位 → 不归本相机拍
+            var starts = DisplayConfig.AutoFitCameraStarts(_cameraCfgs, _productModel);
+            if (camIdx >= starts.Count) return false;
+            windowIndex = starts[camIdx] + pos; // 起始窗口 + 表内位置（表第 1 条=该相机起始窗口）
+            return IsWindowEnabled(windowIndex);
         }
 
         /// <summary>某号窗口是否启用（V1.12.28）：配置缺省/越界一律视为启用（新窗口默认开）。</summary>
@@ -653,14 +627,12 @@ namespace CommandCenter.Services
             return _windowEnabled[w - 1];
         }
 
-        /// <summary>显示窗口总数（V2.12.0 自适应下 = 各相机按当前型号点位表条目数之和，
-        /// 与主窗体 BuildWindowGrid / 设置页预览统一走 DisplayConfig.AutoFitLayout）。
-        /// 非自适应保持 Rows×Columns（至少 1）。</summary>
+        /// <summary>显示窗口总数（V2.12.1 统一）：各相机按当前型号点位表条目数之和（至少 1），
+        /// 与主窗体 BuildWindowGrid / WindowPointForm / 设置页预览走同一套（DisplayConfig.WindowCountFor，
+        /// 自适应与否都一样——点位由相机点位表唯一决定，窗口只是把点位条目顺序铺排）。</summary>
         private int _windowCount()
         {
-            if (_display.AutoFit)
-                return DisplayConfig.AutoFitLayout(_cameraCfgs, _productModel).windowCount;
-            return Math.Max(1, _display.Rows * _display.Columns);
+            return DisplayConfig.WindowCountFor(_cameraCfgs, _productModel);
         }
 
         /// <summary>

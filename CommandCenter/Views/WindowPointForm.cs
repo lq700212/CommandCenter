@@ -8,26 +8,29 @@ using CommandCenter.Utils;
 
 namespace CommandCenter.Views
 {
-    /// <summary>
+/// <summary>
     /// 窗口/点位与相机程序配置对话框：它同时管两个映射（V1.12.25 起同页混排）：
-    ///   ① 【窗口 → 存图点位】可视化格子矩阵（原功能）：每个格子=一个显示窗口，改"该窗口的图存成几号点位"；
+    ///   ① 【窗口 ↔ 相机点位】可视化格子矩阵（V2.12.1 起统一模型）：每个格子=一个显示窗口，
+    ///      点位由【相机点位表】唯一决定（上下相机点位号各自从 1 起、会重复），格子下方标注
+    ///      "归属相机·点位号"（如上相机·点位3）；窗口总数 = 各相机按当前型号点位表条目和，
+    ///      矩阵跟随下部"型号"下拉联动重建（切型号即所见即所得）。
     ///   ② 【点位 → 相机程序号】每台相机各自一张表（V1.12.25 新增），**V2.8 起再按产品型号分表**：
     ///      同一台相机的程序库会随产品型号变化（如"上相机"型号 U171 用 P000~P012、U172 用 P013~P028），
     ///      所以型号下拉选"默认"编辑旧 StationPrograms 表、选某型号编辑该相机在该型号下的映射表
     ///      （ModelStationPrograms）。触发时按"当前产品型号→点位"切到对应程序（见
-    ///      ProductionCoordinator.TriggerOneCamera 与 ResolveProgramForStation）。
+    ///      ProductionCoordinator.ResolveProgramForStation）。
     ///
     /// ┌───────────────────────────────────────────────────────────────────┐
     /// │ 窗口/点位与相机程序配置                                              │
     /// │ [lblHint 操作说明]                                                   │
     /// │ ┌──────────────────────────────┐                                   │
-    /// │ │ 窗口↔点位矩阵（格子：上=固定编号 下=存图点位）                     │
+    /// │ │ 窗口↔点位矩阵（格子：上=窗口编号 下=相机·点位，随型号联动）          │
     /// │ │ ┌──────┬──────┬──────┬──────┐                                    │
     /// │ │ │窗口1 │窗口2 │窗口3 │窗口4 │   ← 与主界面矩阵布局一致             │
-    /// │ │ │点位1 │点位2 │点位3 │点位4 │                                    │
+    /// │ │ │上·点1 │上·点2 │上·点3 │下·点1 │（点位=相机点位表的点位号）       │
     /// │ │ └──────┴──────┴──────┴──────┘                                    │
     /// │ └──────────────────────────────┘                                   │
-///     │ ┌ [grpProgram 相机程序映射]──────────────────────────────────┐ │
+    ///     │ ┌ [grpProgram 相机程序映射]──────────────────────────────────┐ │
     ///     │ │ 相机: [cmbCamera▾]  型号: [cmbModel▾]  查"相机+型号"切程序     │ │
     ///     │ │ ┌────────────┬──────────────┐                              │ │
     ///     │ │ │ 点位(下拉)  │ 相机程序(下拉) │ ← dgvPrograms 下拉选择        │ │
@@ -37,34 +40,32 @@ namespace CommandCenter.Views
     ///     │ │ [btnAddProg 新增映射] [btnDelProg 删除选中行] 下区提示:点位从下拉选、  │ │
     ///     │ │   程序号=相机程序库(0~127,与窗口数无关)；型号=产品型号(U171…)  │ │
     ///     │ └───────────────────────────────────────────────────────────┘ │
-    /// │ [btnEditPoint 编辑点位][btnSwap 交换位置][btnReset 恢复默认][btnDisable 禁用/启用]│
-    /// │                                            [btnOk] [btnCancel]     │
+    /// │ [btnEditPoint 编辑点位][btnSwap 交换位置][btnReset 恢复默认]（V2.12.1 锁定置灰）   │
+    /// │ [btnDisable 禁用/启用]                      [btnOk] [btnCancel]     │
     /// └───────────────────────────────────────────────────────────────────┘
     ///
     /// 【为什么这么做】
-    ///   - 现场存图点位默认=窗口编号、可自定义（原逻辑），可视化格子最直观；
-    ///   - 相机程序映射是"同页混排"新增区：因为点位和相机程序是强关联的（一次到的件、谁拍、拍时切哪个
-    ///     程序），放同一对话框里一起配，避免到处找。也顺带满足"一个入口管完窗口/点位/相机程序"。
+    ///   - 点位由"相机点位表"唯一决定（现场上下相机各管一张点位表、点位号从 1 起会重复），
+    ///     窗口只是把点位条目"前上相机后下相机"铺排的格子，故【编辑点位/交换/恢复默认】锁定置灰
+    ///     （改了也不生效）；"禁用/启用"仍保留（按窗口编号管理）；相机程序映射同页混排，
+    ///     因为点位和相机程序是强关联的（一次到的件、谁拍、拍时切哪个程序），一个入口管完。
     ///   - 相机下拉只影响【哪个相机的表被编辑】，不影响上面的窗口↔点位矩阵。
-    ///   【自适应模式（V2.12.0）】构造传入 autoFit=true 时：矩阵行列/窗口数 = 当前型号 + 各相机
-    ///     点位表自动铺排（AutoFitLayout，前上相机后下相机），格子下方显示"相机名·点位号"；
-    ///     存图点位=全局窗口编号（windowIndex），故【编辑点位/交换位置/恢复默认】锁定置灰，
-    ///     仅保留"禁用/启用"与下方相机程序映射区；确定时不再写回 WindowStationMap（自适应不依赖它）。
+    ///   【统一模型（V2.12.1）】无论是否勾选"自适应"，窗口总数都 = 各相机按当前型号点位表条目和
+    ///     （DisplayConfig.ResolveLayout/WindowCountFor）；"自适应"只决定矩阵行/列形状是否自动算。
+    ///     主界面切型号、或本窗体"程序映射区"型号下拉切型号时，矩阵都会跟随重建（ApplyMatrixForModel）。
+    ///     存图点位 = 相机点位号（文件名 {点位}），靠存图目录的 {相机} 层按相机隔开（见 ImageStore）。
     ///   【禁用窗口/点位（V1.12.28）】右键点击格子、或选中后点"禁用/启用"按钮切换某窗口的启停：
     ///   禁用的格子显示灰底"已禁用"；生效后主界面该窗口不显示（矩阵紧凑重排）、PLC 拍照请求写到
     ///   该点位时上位机不触发相机、不显示、不存图、不计数，直接把结果写成 3（跳过）让 PLC 走下一工位。
-    ///   V2.10.1：禁用状态【跟随点位】——"交换位置"时禁用状态随点位一起搬到另一格（现场语义是
-    ///   "禁用的是这个点位"，不是"禁用的是这个格子"）。
-    ///   所有改动先落在内存编辑副本上，点"确定"才写回 DisplayConfig.WindowStationMap 与
-    ///   WindowEnabled、各 CameraConfig.StationPrograms（同一实例引用，保证设置窗体保存时拿到最新值）。
+    ///   所有改动先落在内存编辑副本上，点"确定"才写回 DisplayConfig.WindowEnabled 与各相机
+    ///   StationPrograms / ModelStationPrograms（同一实例引用，保证设置窗体保存时拿到最新值）；
+    ///   WindowStationMap 已退役不再写回（见 DisplayConfig.WindowStationMap 注释）。
     /// </summary>
     public partial class WindowPointForm : Form
     {
-        /// <summary>编辑副本：确定时整体写回目标列表（同实例，保证设置窗体保存时拿到最新值）</summary>
+        /// <summary>历史兼容副本（V2.12.1 起 WindowStationMap 已退役）：仅保留对齐长度 +
+        /// 作为点位列下拉的兜底候选，确定时【不写回】目标配置（见 OnOk）。</summary>
         private readonly List<int> _map;
-
-        /// <summary>确定时写回的目标列表（DisplayConfig.WindowStationMap 的引用）</summary>
-        private readonly List<int> _target;
 
         /// <summary>编辑副本（V1.12.28 窗口禁用）：与 _map 同下标表示"该窗口是否启用"，确定时整体写回。</summary>
         private readonly List<bool> _enabled;
@@ -86,31 +87,32 @@ namespace CommandCenter.Views
         /// <summary>当前程序映射区正在编辑的型号（""="默认（不区分型号）"，对应 StationPrograms）。</summary>
         private string _programModel = "";
 
-        private readonly int _rows;   // 矩阵行数（与主界面一致）
-        private readonly int _cols;   // 矩阵列数
+        private int _rows;   // 矩阵行数（与主界面一致；切型号会随点位表重算）
+        private int _cols;   // 矩阵列数（切型号会随点位表重算）
 
-        /// <summary>是否自适应模式（V2.12.0）：窗口矩阵按"相机+型号点位表"自动铺排、
-        /// 手动点位编辑（编辑/交换/恢复）锁定，仅保留禁用/启用与相机程序映射。</summary>
+        /// <summary>是否自适应模式（V2.12.0）：矩阵行列是否自动算（窗口总数两者一致，见 ResolveLayout）。</summary>
         private readonly bool _autoFit;
 
-        /// <summary>当前产品型号（V2.12.0，用于按型号查各相机点位表铺排窗口与格子上标注点位）。</summary>
+        /// <summary>当前产品型号（V2.12.0，构建传入：用于初始化矩阵铺排与点位表解析）。</summary>
         private readonly string _productModel;
 
-        /// <summary>窗口总数：非自适应=rows×cols；自适应=各相机当前型号点位表条目数之和（≥1，
-        /// 布局上 matrix 的格子数=rows×cols≥窗口总数，超出部分留空）。</summary>
-        private readonly int _windowCount;
+        /// <summary>当前矩阵正在铺排用的产品型号（V2.12.1）：初始=构建传入当前型号，
+        /// 用户在"相机程序映射区"型号下拉切型号时矩阵跟随重建（见 ApplyMatrixForModel）。</summary>
+        private string _matrixModel;
+
+        /// <summary>用户手填行列（V2.12.1）：非自适下作为"排列宽度/行数"的形状基准，切型号重建沿用。</summary>
+        private readonly int _manualRows;
+        private readonly int _manualCols;
+
+        /// <summary>窗口总数（V2.12.1）：各相机按当前矩阵型号点位表条目数之和（≥1，
+        /// 布局上 matrix 的格子数=rows×cols≥窗口总数，超出部分留空；切型号会重算）。</summary>
+        private int _windowCount;
 
         /// <summary>格子按钮矩阵（行×列），Tag 存格子序号（0 起）</summary>
         private Button[,] _cells;
 
-        /// <summary>当前选中的格子序号（-1 = 未选中）；用于"编辑点位"。</summary>
+        /// <summary>当前选中的格子序号（-1 = 未选中）；用于"禁用/启用"定位。</summary>
         private int _selectedIdx = -1;
-
-        /// <summary>是否处于"交换位置"模式（点完两个格子自动互换）。</summary>
-        private bool _swapping;
-
-        /// <summary>交换模式里已选中的第一个格子序号（-1 = 还没选第一个）。</summary>
-        private int _swapA = -1;
 
         /// <summary>当前相机映射区正在编辑哪台相机（cmbCamera 下标，-1=还没选）</summary>
         private int _programCamIdx = -1;
@@ -118,30 +120,29 @@ namespace CommandCenter.Views
 public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfig> cameras,
             List<bool> enabledTarget, List<string> productModels, bool autoFit, string productModel)
         {
-            _target = targetMap;
+            // 注意：targetMap（WindowStationMap）参数仍接收但 V2.12.1 起不再写回（点位由相机点位表
+            // 决定），保留参数仅为兼容调用方签名；本窗体实际落盘的只有 WindowEnabled + 相机点位表。
             _cameras = cameras ?? new List<CameraConfig>();
             _productModels = productModels ?? new List<string>();
             _autoFit = autoFit;
             _productModel = productModel ?? "";
 
-            // 自适应（V2.12.0）：窗口行列/数量由"当前型号 + 各相机点位表"自动铺排，忽略手填行列；
-            // 非自适应保持传入手动行列（与主界面 Rows×Columns 一致）。
-            if (_autoFit)
-            {
-                var layout = DisplayConfig.AutoFitLayout(_cameras, _productModel);
-                _rows = layout.rows;
-                _cols = layout.cols;
-                _windowCount = layout.windowCount;
-            }
-            else
-            {
-                _rows = Math.Max(1, rows);
-                _cols = Math.Max(1, cols);
-                _windowCount = _rows * _cols;
-            }
+            // 矩阵当前铺排用的产品型号（V2.12.1）：初始=构建传入的当前运营型号；之后用户在下部
+            // "相机程序映射区"型号下拉里切型号时矩阵跟随重建（见 cmbModel.SelectedIndexChanged）。
+            _matrixModel = _productModel;
+            _manualRows = Math.Max(1, rows);
+            _manualCols = Math.Max(1, cols);
 
-            // 复制一份窗口映射作为编辑副本：点确定才写回，避免"改了又取消"污染配置。
-            // 空安全：targetMap 被配置手改成 null 时按空表兜底（自适应下本映射本就不参与存图）。
+            // 统一布局（V2.12.1）：窗口总数 = 各相机按当前型号点位表条目和，自适应/非自适应一致；
+            // 自适应行列自动算；非自适列用手填、行不足自动补齐（见 DisplayConfig.ResolveLayout）。
+            var layout = DisplayConfig.ResolveLayout(_cameras, _matrixModel, _autoFit, _manualRows, _manualCols);
+            _rows = layout.rows;
+            _cols = layout.cols;
+            _windowCount = layout.windowCount;
+
+            // 复制一份窗口映射作为编辑副本：V2.12.1 起仅作历史兼容保留（点位由相机点位表决定，
+            // 运行时/显示/存图均不读取本表，见 DisplayConfig.WindowStationMap 注释），长度照常对齐。
+            // 空安全：targetMap 被配置手改成 null 时按空表兜底。
             _map = new List<int>(targetMap ?? new List<int>());
             // 长度兜底：调用方已对齐（ConfigStore.EnsureStationMap），这里再保一层，防止越界。
             // 自适应下 _map 不参与存图（存图点位=全局窗口编号），仅作格子上坐标对齐参考。
@@ -178,10 +179,35 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             }
 
             InitializeComponent();      // 先解析设计器里的静态控件
-            BuildMatrix();              // 按 Rows×Cols 动态生成窗口格子按钮
+            BuildMatrix();              // 按 _rows×_cols 动态生成窗口格子按钮
             BuildProgramGrid();         // 初始化相机程序映射区：下拉 + 表格列
             WireEvents();               // 挂按钮/格子交互
-            RefreshCells();             // 首次填充"编号 + 点位"文字
+            RefreshCells();             // 首次填充"编号 + 相机·点位"文字
+        }
+
+        /// <summary>
+        /// 按某产品型号重建窗口矩阵（V2.12.1）：窗口总数/行列随型号点位表变化（U171=上18+下4=22 窗、
+        /// U172=上26=26 窗…），切型号必须重建 TableLayoutPanel，否则矩阵跟不上新型号（用户实测的
+        /// "切型号后矩阵不刷新"bug 的根治）。步骤：重算布局 → _map/_enabled 重新对齐（保留已有的
+        /// 禁用状态，按窗口号前缀截断）→ BuildMatrix 重建格子 → RefillStationColumn（点位列候选
+        /// 随矩阵点位更新）→ RefreshCells。
+        /// 行列形状：非自适沿用进入对话框时传入手填行列（_manualRows/_manualCols），自适自动算。
+        /// </summary>
+        private void ApplyMatrixForModel(string model)
+        {
+            _matrixModel = model ?? "";
+            var layout = DisplayConfig.ResolveLayout(_cameras, _matrixModel, _autoFit, _manualRows, _manualCols);
+            _rows = layout.rows;
+            _cols = layout.cols;
+            _windowCount = layout.windowCount;
+            while (_map.Count < _windowCount) _map.Add(_map.Count + 1);
+            if (_map.Count > _windowCount) _map.RemoveRange(_windowCount, _map.Count - _windowCount);
+            while (_enabled.Count < _windowCount) _enabled.Add(true);
+            if (_enabled.Count > _windowCount) _enabled.RemoveRange(_windowCount, _enabled.Count - _windowCount);
+            _selectedIdx = -1;
+            BuildMatrix();
+            RefillStationColumn();
+            RefreshCells();
         }
 
         /// <summary>
@@ -300,18 +326,19 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         /// <summary>型号下拉"默认"项文案（不区分型号 = 查相机默认表 StationPrograms）。</summary>
         private const string DefaultModelText = "默认（不区分型号）";
 
-        /// <summary>重建"点位列"下拉候选（V2.10.1）：候选 = 窗口映射里的点位 ∪ 各相机已配点位。
-        /// 构造时调用一次；【矩阵里"编辑点位"输入新点位号后也必须调用】——旧代码只在构造时构建
-        /// 一次，用户把窗口点位改成候选外的号后，程序映射区点位列永远选不到它，那个点位就配不上
-        /// 程序（运行时查不出映射、不切程序，可能拍到错误的对应程序）。</summary>
+        /// <summary>重建"点位列"下拉候选（V2.12.1）：点位由【相机点位表】唯一决定，候选 = 当前矩阵型号
+        /// （_matrixModel）下各相机点位表里的点位号 ∪ 历史 _map 兜底（老配置），保证下拉里已配行仍能
+        /// 重选。构造与 ApplyMatrixForModel（切型号）都会调用——型号变了点位集合跟着变。</summary>
         private void RefillStationColumn()
         {
             var set = new SortedSet<int>();
-            foreach (var s in _map) if (s >= 1) set.Add(s);
             foreach (var cam in _cameras)
-                if (cam.StationPrograms != null)
-                    foreach (var it in cam.StationPrograms)
-                        if (it.StationNo >= 1) set.Add(it.StationNo);
+            {
+                if (cam == null) continue;
+                foreach (var it in cam.ProgramsFor(_matrixModel))
+                    if (it != null && it.StationNo >= 1) set.Add(it.StationNo);
+            }
+            foreach (var s in _map) if (s >= 1) set.Add(s);   // 历史兼容兜底（V2.12.1 起 _map 已退役）
             colStation.Items.Clear();
             foreach (var s in set) colStation.Items.Add(s);
         }
@@ -391,21 +418,19 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         /// </summary>
         private void WireEvents()
         {
-            btnEditPoint.Click += (s, e) => EditSelectedPoint();
-            btnSwap.Click += (s, e) => ToggleSwapMode();
-            btnReset.Click += (s, e) => ResetAll();
+            btnEditPoint.Click += (s, e) => { /* V2.12.1：点位编辑已锁定（按钮 Enabled=false） */ };
+            btnSwap.Click += (s, e) => { /* V2.12.1：窗口交换已锁定（按钮 Enabled=false） */ };
+            btnReset.Click += (s, e) => { /* V2.12.1：恢复默认已锁定（按钮 Enabled=false） */ };
             btnDisable.Click += (s, e) => ToggleSelectedDisabled();
             btnOk.Click += (s, e) => OnOk();
 
-            // V2.12.0 自适应：点位由相机点位表决定，手动"编辑点位/交换位置/恢复默认"锁定置灰，
-            // 仅保留"禁用/启用"窗口与相机程序映射区——避免用户把点位改成与相机表不一致（改了也不生效）。
-            if (_autoFit)
-            {
-                btnEditPoint.Enabled = false;
-                btnSwap.Enabled = false;
-                btnReset.Enabled = false;
-                lblHint.Text = HintAutoFit;
-            }
+            // V2.12.1 统一模型：点位由【相机点位表】唯一决定（上下相机点位号各自从 1 起、会重复），
+            // 运行时解析/显示/存图全部走相机点位表，"编辑点位/交换位置/恢复默认"在自适应与
+            // 非自适应下都锁定置灰——改了也不生效，只保留"禁用/启用"窗口与相机程序映射区。
+            btnEditPoint.Enabled = false;
+            btnSwap.Enabled = false;
+            btnReset.Enabled = false;
+            lblHint.Text = HintDefault;
 
             cmbCamera.SelectedIndexChanged += (s, e) =>
             {
@@ -420,6 +445,12 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 FlushProgramGrid();
                 _programModel = cmbModel.SelectedIndex <= 0 ? "" : (cmbModel.SelectedItem?.ToString() ?? "");
                 ReloadProgramGrid();
+                // V2.12.1：型号决定窗口矩阵（总数/行列/相机标注点位都按型号点位表），程序映射区
+                // 切型号时矩阵必须跟随重建——否则矩阵还停留在旧型号布局（用户实测 bug）。
+                // 选"默认（不区分型号）"时矩阵回到构建传入的当前运营型号 _productModel。
+                string matrixModel = string.IsNullOrEmpty(_programModel) ? _productModel : _programModel;
+                if (matrixModel != _matrixModel)
+                    ApplyMatrixForModel(matrixModel);
             };
             btnAddProg.Click += (s, e) =>
             {
@@ -441,85 +472,28 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         }
 
         /// <summary>
-        /// 格子点击。普通模式：选中/取消选中（供"编辑点位"定位）；
-        /// 交换模式：第一次点选第一格，第二次点选第二格并立即互换两个窗口的点位。
+        /// 格子点击：单击选中/取消选中（供"禁用/启用"按钮定位高亮）。
+        /// V2.12.1 起不支持交换（点位由相机点位表决定，编辑/交换按钮已锁定）。
         /// </summary>
         private void OnCellClick(int idx)
         {
-            if (_swapping)
-            {
-                if (_swapA < 0)
-                {
-                    _swapA = idx;                       // 先记第一格
-                }
-                else if (idx == _swapA)
-                {
-                    _swapA = -1;                        // 再点同一格 = 取消第一选
-                }
-                else
-                {
-                    SwapCells(_swapA, idx);             // 点另一格 → 立即互换并退出交换模式
-                    _swapA = -1;
-                    _swapping = false;
-                    lblHint.Text = HintDefault;
-                }
-                RefreshCells();
-                return;
-            }
-
             _selectedIdx = (_selectedIdx == idx) ? -1 : idx;
             RefreshCells();
         }
 
-        /// <summary>互换两个窗口的存图点位（即"调整窗口位置"，编号固定跟随格子）。
-        /// V2.10.1：禁用状态【跟随点位】一起交换——现场语义是"禁用的是这个点位，不是这个格子"，
-        /// 交换后该点位搬到的窗口保持禁用、原窗口恢复为对方反过来的启用状态。</summary>
-        private void SwapCells(int a, int b)
-        {
-            int t = _map[a];
-            _map[a] = _map[b];
-            _map[b] = t;
-            if (a >= 0 && a < _enabled.Count && b >= 0 && b < _enabled.Count)
-            {
-                bool te = _enabled[a];
-                _enabled[a] = _enabled[b];
-                _enabled[b] = te;
-            }
-        }
-
-        /// <summary>常驻提示文案（Designer 里的默认 Text 也保持一致）。</summary>
+        /// <summary>常驻提示文案（V2.12.1 统一模型版，Designer 里的默认 Text 也保持一致）。</summary>
         private const string HintDefault =
-            "每个格子 = 主界面一个显示窗口。上方是【固定编号】；下方是它的【存图点位】。\r\n" +
-            "单击格子选中，点\"编辑点位\"改存图号；点\"交换位置\"互换两个窗口的内容（编号固定）。\r\n" +
-            "【右键格子】或选中后点\"禁用/启用\"：停用某窗口/点位（主界面不显示、PLC 拍到此点位直接跳过）。";
-
-        /// <summary>自适应模式的常驻提示文案（V2.12.0，与 HintDefault 互斥使用）。</summary>
-        private const string HintAutoFit =
-            "【自适应模式】窗口矩阵由\"当前型号 + 各相机点位表\"自动铺排（前上相机、后下相机），\r\n" +
-            "格子上方=窗口编号、下方=归属相机·相机点位号；存图点位=全局窗口编号，不可手改。\r\n" +
-            "【右键格子】或选中后点\"禁用/启用\"可停用某窗口（主界面不显示、PLC 拍到此点位直接跳过）。\r\n" +
+            "每个格子 = 主界面一个显示窗口。上方是【窗口编号】；下方是【归属相机·相机点位号】。\r\n" +
+            "窗口/点位由\"相机点位表\"唯一决定（上下相机点位号各自从 1 起），矩阵跟随下方\"型号\"下拉自动铺排。\r\n" +
+            "【右键格子】或选中后点\"禁用/启用\"：停用某窗口/点位（主界面不显示、PLC 拍到此点位直接跳过）。\r\n" +
             "下方\"相机程序映射\"区照常可配：相机+型号 → 点位 → 相机程序号。";
-
-        /// <summary>进入/退出"交换位置"模式：模式开启时点两个格子自动互换。</summary>
-        private void ToggleSwapMode()
-        {
-            if (_autoFit) return;          // V2.12.0 自适应：点位不可改，禁止交换（按钮已置灰，双保险）
-            _swapping = !_swapping;
-            _selectedIdx = -1;    // 普通选中态清除，避免与交换选中混淆
-            _swapA = -1;
-            lblHint.Text = _swapping
-                ? "交换位置：请依次单击要互换的两个窗口格子（再点同一个格子可取消第一选）。"
-                : HintDefault;
-            RefreshCells();
-        }
 
         /// <summary>
         /// 切换"选中的格子"的启用状态（V1.12.28，"禁用/启用"按钮）。
-        /// 无选中时提示；交换模式中禁止（避免与换位操作打架）。
+        /// 无选中时提示用户先选中一个格子。
         /// </summary>
         private void ToggleSelectedDisabled()
         {
-            if (_swapping) return;
             if (_selectedIdx < 0)
             {
                 MessageBox.Show("请先单击选中要禁用/启用的窗口格子（格子会高亮）。\r\n也可直接【右键点击】格子切换。",
@@ -538,58 +512,11 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             RefreshCells();
         }
 
-        /// <summary>给当前选中的格子改存图点位（弹出输入框）。</summary>
-        private void EditSelectedPoint()
-        {
-            if (_autoFit) return;          // V2.12.0 自适应：点位由相机表决定，禁止手改（按钮已置灰）
-            if (_swapping) return;                 // 交换模式中禁止编辑，避免操作打架
-            if (_selectedIdx < 0)
-            {
-                MessageBox.Show("请先单击选中要编辑的窗口格子（格子会高亮）。", "提示",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            string input = ShowInputBox(
-                $"编辑窗口 {_selectedIdx + 1} 的存图点位",
-                $"该窗口的图将存成\"{_map[_selectedIdx]}\"（点位号.png）。\r\n请输入新的存图点位（正整数，例如 2）：",
-                _map[_selectedIdx].ToString());
-            if (input == null) return;             // 用户点了取消
-
-            if (!int.TryParse(input.Trim(), out int n) || n < 1 || n > 9999)
-            {
-                MessageBox.Show("请输入 1~9999 的整数点位号。", "提示",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-            _map[_selectedIdx] = n;
-            // V2.10.1：新点位并入程序映射区点位列候选（否则该点位在下拉里选不到、配不上程序）
-            RefillStationColumn();
-            RefreshCells();
-        }
-
-        /// <summary>恢复默认：所有窗口启用 + 每个窗口的存图点位 = 窗口编号（1、2、3…）。</summary>
-        private void ResetAll()
-        {
-            if (_autoFit) return;          // V2.12.0 自适应：点位不可改，禁止恢复默认（按钮已置灰）
-            if (MessageBox.Show("恢复默认后，每个窗口的存图点位 = 窗口编号（1、2、3…），且所有窗口恢复启用。\r\n确定恢复吗？",
-                "恢复默认", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
-                return;
-            for (int i = 0; i < _map.Count; i++) _map[i] = i + 1;
-            for (int i = 0; i < _enabled.Count; i++) _enabled[i] = true; // V1.12.28：一并恢复全部启用
-            _selectedIdx = -1;
-            _swapA = -1;
-            _swapping = false;
-            lblHint.Text = HintDefault;
-            RefreshCells();
-        }
-
         /// <summary>
-        /// 刷新所有格子的显示：编号（固定）+ 点位/相机标注；
-        /// 自适应（V2.12.0）格子下方显示"相机名·点位号"（点位由相机表决定、存图用全局窗口编号）；
-        /// 非自适应显示"存图点位"（_map 值，可自定义）。
-        /// 选中/待交换的格子用浅黄高亮；【禁用的格子（V1.12.28）灰底 + "已禁用"】
-        /// 红点标注（禁用后主界面不显示该窗口、PLC 拍到此点位直接跳过）。
+        /// 刷新所有格子的显示：窗口编号 + "相机名·点位号"（V2.12.1 起自适应/非自适应统一用
+        /// 相机点位表标注——点位由相机表唯一决定，上下相机同号点位靠相机名区分开）。
+        /// 选中的格子用浅黄高亮；【禁用的格子（V1.12.28）灰底 + "已禁用"】
+        /// （禁用后主界面不显示该窗口、PLC 拍到此点位直接跳过）。
         /// </summary>
         private void RefreshCells()
         {
@@ -600,8 +527,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 bool disabled = i >= _enabled.Count || !_enabled[i];
                 b.Text = disabled
                     ? $"窗口 {i + 1}\r\n已禁用"
-                    : (_autoFit ? $"窗口 {i + 1}\r\n{ResolveWindowSource(i + 1)}"
-                                : $"窗口 {i + 1}\r\n点位 {_map[i]}");
+                    : $"窗口 {i + 1}\r\n{ResolveWindowSource(i + 1)}";
                 if (disabled)
                 {
                     // 禁用：灰底 + 灰字，醒目区分于普通格子
@@ -612,27 +538,28 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 else
                 {
                     b.ForeColor = Color.Black;
-                    b.BackColor = (i == _selectedIdx || i == _swapA)
+                    b.BackColor = (i == _selectedIdx)
                         ? Color.FromArgb(255, 224, 130)
                         : SystemColors.Control;
-                    b.UseVisualStyleBackColor = (i != _selectedIdx && i != _swapA);
+                    b.UseVisualStyleBackColor = (i != _selectedIdx);
                 }
             }
         }
 
         /// <summary>
-        /// 自适应下解析"窗口 w(1 起) → 相机名·点位号"显示文案（V2.12.0）：
+        /// 解析"窗口 w(1 起) → 相机名·点位号"显示文案（V2.12.1 起自适应/非自适应统一）：
         /// 用 AutoFitCameraStarts（各相机起始窗口）找出窗口落在哪台相机的点位表区间，
         /// 再取该表中对应条目的点位号（StationNo）拼成"相机名·点位N"（如上相机·点位3）。
+        /// 型号用 _matrixModel（随"程序映射区"型号下拉联动，切型号标注一起刷新）。
         /// 解析失败（相机表被删/越界）兜底显示窗口编号，只影响展示、不影响配置。
         /// </summary>
         private string ResolveWindowSource(int w)
         {
-            var starts = DisplayConfig.AutoFitCameraStarts(_cameras, _productModel);
+            var starts = DisplayConfig.AutoFitCameraStarts(_cameras, _matrixModel);
             for (int i = 0; i < _cameras.Count && i < starts.Count; i++)
             {
                 if (_cameras[i] == null) continue;   // 空安全：配置被手改成 null 元素时跳过，不崩
-                var table = _cameras[i].ProgramsFor(_productModel);
+                var table = _cameras[i].ProgramsFor(_matrixModel);
                 if (table == null || table.Count == 0) continue;
                 if (w >= starts[i] && w < starts[i] + table.Count)
                 {
@@ -646,23 +573,18 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         }
 
         /// <summary>
-        /// 确定：把编辑副本整体写回目标（窗口映射 + 各相机点位→程序号映射，含按型号分表），再关闭。
+        /// 确定：把编辑副本整体写回目标（各相机点位→程序号映射，含按型号分表），再关闭。
         /// 写回规则（V2.8）：
         ///   - 型号下拉选的"默认"槽位 → CameraConfig.StationPrograms（默认表，不区分型号）；
         ///   - 其余型号槽位 → CameraConfig.ModelStationPrograms（按型号名合并：已有同名表更新
         ///     Programs，没有的追加；没编辑过的型号表原样保留不丢）。
+        /// V2.12.1 起【不写回 WindowStationMap】（已退役：点位由相机点位表唯一决定，运行时/显示/
+        /// 存图都不读它，写回反而污染历史字段）；窗口禁用状态照常写回。
         /// 两处都是"同实例引用写回"，设置窗体点保存时自动带上最新值。
         /// </summary>
         private void OnOk()
         {
             FlushProgramGrid();                                   // 先把当前表格内容落回编辑副本
-            // V2.12.0 自适应：存图点位=全局窗口编号（windowIndex），不依赖 WindowStationMap，
-            // 故不把编辑副本写回 _target（写入也是无用值，反而污染配置）；窗口禁用状态照常写回。
-            if (!_autoFit)
-            {
-                _target.Clear();
-                _target.AddRange(_map);
-            }
             // V1.12.28：把"窗口是否启用"编辑副本整体写回（同实例引用，设置窗体保存时自动落盘）
             _enabledTarget.Clear();
             _enabledTarget.AddRange(_enabled);
@@ -714,51 +636,6 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             }
 
             DialogResult = DialogResult.OK;
-        }
-
-        /// <summary>
-        /// 简易输入框（项目没有现成 InputBox）：标题 + 提示 + 文本框 + 确定/取消。
-        /// 返回输入文本；点取消返回 null。
-        /// </summary>
-        private static string ShowInputBox(string title, string prompt, string initValue)
-        {
-            using (var f = new Form
-            {
-                Text = title,
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                StartPosition = FormStartPosition.CenterParent,
-                MaximizeBox = false,
-                MinimizeBox = false,
-                ClientSize = new Size(380, 158),
-                Font = new Font("Microsoft YaHei", 9.5F)
-            })
-            {
-                var lbl = new Label { Text = prompt, Location = new Point(16, 14), Size = new Size(348, 60) };
-                var txt = new TextBox { Text = initValue, Location = new Point(16, 80), Size = new Size(348, 24) };
-                var btnOk = new Button
-                {
-                    Text = "确定",
-                    DialogResult = DialogResult.OK,
-                    Location = new Point(196, 116),
-                    Size = new Size(80, 30)
-                };
-                var btnCancel = new Button
-                {
-                    Text = "取消",
-                    DialogResult = DialogResult.Cancel,
-                    Location = new Point(284, 116),
-                    Size = new Size(80, 30)
-                };
-                f.Controls.Add(lbl);
-                f.Controls.Add(txt);
-                f.Controls.Add(btnOk);
-                f.Controls.Add(btnCancel);
-                f.AcceptButton = btnOk;
-                f.CancelButton = btnCancel;
-
-                if (f.ShowDialog() != DialogResult.OK) return null;
-                return txt.Text;
-            }
         }
     }
 }

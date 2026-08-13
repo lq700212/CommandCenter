@@ -19,10 +19,14 @@ namespace CommandCenter.Services
     ///   主流程据此区分"这张图来自哪台相机、对应哪个点位"。
     ///
     /// 【存图规则（可配置，见 ImageConfig）】
-    ///   目录结构默认：保存根目录 / {年月日} / {SN} / {OKNG}
-    ///   文件名默认：{点位}.png
-    ///   占位符：{年月日} {年} {月} {日} {SN} {OKNG} {点位} {时间}，其余文字原样保留。
+    ///   目录结构默认（V2.12.1 起带 {相机} 层，因上下相机点位号各自从 1 起、必须靠相机隔开）：
+    ///     保存根目录 / {年月日} / {SN} / {OKNG} / {相机}
+    ///   文件名默认：{点位}.jpeg（+ 时间戳后缀）+ 同名的 .iv4p
+    ///   占位符：{年月日} {年} {月} {日} {SN} {OKNG} {点位} {相机} {时间}，其余文字原样保留。
     ///   目录层级由 ImageConfig.SubDirs 列表逐级驱动（每级一个名字/生成规则），逐级渲染后建目录。
+    ///   【为什么存图点位=相机点位号 + 目录 {相机} 层】：点位由"相机点位表"唯一决定，
+    ///   上下相机点位号会重复（上1、下1…），文件名 {点位} 自然也会重复；{相机} 目录层保证
+    ///   两家各存各的目录、互不覆盖，文件名看起来/归档上都符合"该相机点位N"的现场语义。
     ///
     /// 【线程安全】FileSystemWatcher 回调运行在监听线程，事件一定要跨线程同步到 UI（Invoke）。
     /// </summary>
@@ -88,15 +92,17 @@ namespace CommandCenter.Services
         /// 目录列表为空时兜底建 "{年月日}" 一层，文件名模板为空时兜底用时间戳命名。
         /// </summary>
         /// <param name="image">要保存的图片</param>
-        /// <param name="stationNo">拍照点位号（窗口存图点位 DisplayConfig.WindowStationMap，进文件名 {点位}）</param>
+        /// <param name="stationNo">相机点位号（本相机点位表 StationNo，进文件名 {点位}；上下相机
+        ///     同号重复，靠目录里的 {相机} 层隔离，见类注释）</param>
         /// <param name="isOk">本次结果（OK/NG 进目录 {OKNG}）</param>
         /// <param name="serial">产品序列号（进 {SN} 目录；可能来自扫码枪/手动输入）</param>
-        public string SaveImage(Image image, int stationNo, bool isOk, string serial)
+        /// <param name="cameraName">相机名（进目录/文件名 {相机}；保留 null/空时渲染为"未知相机"）</param>
+        public string SaveImage(Image image, int stationNo, bool isOk, string serial, string cameraName)
         {
             try
             {
                 DateTime now = DateTime.Now;
-                string renderedFile = RenderTemplate(_cfg.FileNameTemplate, now, serial, isOk, stationNo);
+                string renderedFile = RenderTemplate(_cfg.FileNameTemplate, now, serial, isOk, stationNo, cameraName);
 
                 // 目录：按 SubDirs 逐级渲染（每级名字清洗掉非法字符防路径被搞坏），逐级拼到根目录下
                 var levels = _cfg.SubDirs ?? new List<string>();
@@ -104,7 +110,7 @@ namespace CommandCenter.Services
                 var segs = new List<string>();
                 foreach (var lvl in levels)
                 {
-                    string rendered = RenderTemplate(lvl, now, serial, isOk, stationNo);
+                    string rendered = RenderTemplate(lvl, now, serial, isOk, stationNo, cameraName);
                     if (!string.IsNullOrWhiteSpace(rendered))
                         segs.Add(SanitizeForPath(rendered));
                 }
@@ -149,11 +155,13 @@ namespace CommandCenter.Services
         /// </summary>
         /// <param name="jpegPath">FTP 取图目录里的 jpeg 源文件完整路径</param>
         /// <param name="iv4pPath">FTP 取图目录里的 iv4p 源文件完整路径（可为空/不存在则跳过）</param>
-        /// <param name="stationNo">拍照点位号（进文件名 {点位}）</param>
+        /// <param name="stationNo">相机点位号（本相机点位表 StationNo，进文件名 {点位}；上下相机
+        ///     同号重复，靠目录里的 {相机} 层隔离）</param>
         /// <param name="isOk">本次结果（OK/NG 进目录 {OKNG}）</param>
         /// <param name="serial">产品序列号（进 {SN} 目录）</param>
+        /// <param name="cameraName">相机名（进目录/文件名 {相机}；保留 null/空时渲染为"未知相机"）</param>
         /// <returns>归档后的 jpeg 完整路径（供显示/上报）；失败返回 null</returns>
-        public string SaveImageFilePair(string jpegPath, string iv4pPath, int stationNo, bool isOk, string serial)
+        public string SaveImageFilePair(string jpegPath, string iv4pPath, int stationNo, bool isOk, string serial, string cameraName)
         {
             try
             {
@@ -164,7 +172,7 @@ namespace CommandCenter.Services
                 }
                 DateTime now = DateTime.Now;
                 // 文件名主体 = 模板渲染结果；模板为空时兜底用 "IMG_{时间戳}"
-                string stem = RenderTemplate(_cfg.FileNameTemplate, now, serial, isOk, stationNo);
+                string stem = RenderTemplate(_cfg.FileNameTemplate, now, serial, isOk, stationNo, cameraName);
                 if (string.IsNullOrWhiteSpace(stem))
                     stem = "IMG_" + now.ToString("yyyyMMdd_HHmmss_fff");
                 // 时间戳后缀：默认追加（现场约定，防同点位重复拍照覆盖旧图）
@@ -177,7 +185,7 @@ namespace CommandCenter.Services
                 var segs = new List<string>();
                 foreach (var lvl in levels)
                 {
-                    string rendered = RenderTemplate(lvl, now, serial, isOk, stationNo);
+                    string rendered = RenderTemplate(lvl, now, serial, isOk, stationNo, cameraName);
                     if (!string.IsNullOrWhiteSpace(rendered))
                         segs.Add(SanitizeForPath(rendered));
                 }
@@ -315,10 +323,11 @@ namespace CommandCenter.Services
         /// （无 BMP 文件头），需在 KeyenceIV4Camera.ReadImage 侧按实测补文件头后再调用本方法。
         /// </summary>
         /// <param name="imageData">BR 指令读回的图像字节</param>
-        /// <param name="stationNo">拍照点位号（同 SaveImage 的 stationNo，进文件名 {点位}）</param>
+        /// <param name="stationNo">相机点位号（同 SaveImage 的 stationNo，进文件名 {点位}）</param>
         /// <param name="isOk">本次结果（OK/NG 进目录 {OKNG}）</param>
         /// <param name="serial">产品序列号（进 {SN} 目录）</param>
-        public string SaveImageBytes(byte[] imageData, int stationNo, bool isOk, string serial)
+        /// <param name="cameraName">相机名（进目录/文件名 {相机}；保留 null/空时渲染为"未知相机"）</param>
+        public string SaveImageBytes(byte[] imageData, int stationNo, bool isOk, string serial, string cameraName)
         {
             try
             {
@@ -326,7 +335,7 @@ namespace CommandCenter.Services
                 using (var img = Image.FromStream(ms))
                 using (var copy = new Bitmap(img))
                 {
-                    return SaveImage(copy, stationNo, isOk, serial);
+                    return SaveImage(copy, stationNo, isOk, serial, cameraName);
                 }
             }
             catch (Exception ex)
@@ -356,10 +365,11 @@ namespace CommandCenter.Services
         /// <summary>
         /// 渲染模板：替换全部占位符。未识别的 {xxx} 原样保留（由现场自己控制，写错也只是变成路径字符）。
         /// {年月日} 是一个整体目录名（如"2026年08月11日"），不是年/月/日三级目录。
+        /// {相机} 渲染成相机名（cameraName）；空/未传 → "未知相机"（防目录层为空、也防两级合并）。
         /// 设为 internal：目录结构配置对话框（DirTreeEditForm）也要用同样的渲染规则做实时预览。
         /// </summary>
         internal static string RenderTemplate(string template, DateTime now,
-                                             string serial, bool isOk, int stationNo)
+                                             string serial, bool isOk, int stationNo, string cameraName)
         {
             if (string.IsNullOrWhiteSpace(template)) return "";
             return template
@@ -370,6 +380,7 @@ namespace CommandCenter.Services
                 .Replace("{SN}", string.IsNullOrWhiteSpace(serial) ? "未知SN" : serial)
                 .Replace("{OKNG}", isOk ? "OK" : "NG")
                 .Replace("{点位}", stationNo.ToString())
+                .Replace("{相机}", string.IsNullOrWhiteSpace(cameraName) ? "未知相机" : cameraName)
                 .Replace("{时间}", now.ToString("yyyyMMdd_HHmmss_fff"));
         }
 
