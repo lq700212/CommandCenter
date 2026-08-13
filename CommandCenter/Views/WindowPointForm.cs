@@ -16,8 +16,9 @@ namespace CommandCenter.Views
     ///      矩阵跟随下部"型号"下拉联动重建（切型号即所见即所得）。
     ///   ② 【点位 → 相机程序号】每台相机各自一张表（V1.12.25 新增），**V2.8 起再按产品型号分表**：
     ///      同一台相机的程序库会随产品型号变化（如"上相机"型号 U171 用 P000~P012、U172 用 P013~P028），
-    ///      所以型号下拉选"默认"编辑旧 StationPrograms 表、选某型号编辑该相机在该型号下的映射表
-    ///      （ModelStationPrograms）。触发时按"当前产品型号→点位"切到对应程序（见
+    ///      所以型号下拉【只列真实产品型号】（V2.12.x 起移除"默认（不区分型号）"项）、默认选中与主界面
+    ///      标题栏型号一致的值，选某型号即编辑该相机在该型号下的映射表（ModelStationPrograms）。
+    ///      触发时按"当前产品型号→点位"切到对应程序（见
     ///      ProductionCoordinator.ResolveProgramForStation）。
     ///
     /// ┌───────────────────────────────────────────────────────────────────┐
@@ -58,7 +59,7 @@ namespace CommandCenter.Views
     ///   禁用的格子显示灰底"已禁用"；生效后主界面该窗口不显示（矩阵紧凑重排）、PLC 拍照请求写到
     ///   该点位时上位机不触发相机、不显示、不存图、不计数，直接把结果写成 3（跳过）让 PLC 走下一工位。
     ///   所有改动先落在内存编辑副本上，点"确定"才写回 DisplayConfig.WindowEnabled 与各相机
-    ///   StationPrograms / ModelStationPrograms（同一实例引用，保证设置窗体保存时拿到最新值）；
+    ///   ModelStationPrograms（同一实例引用，保证设置窗体保存时拿到最新值）；
     ///   WindowStationMap 已退役不再写回（见 DisplayConfig.WindowStationMap 注释）。
     /// </summary>
     public partial class WindowPointForm : Form
@@ -77,14 +78,15 @@ namespace CommandCenter.Views
         private readonly List<CameraConfig> _cameras;
 
         /// <summary>每台相机的"点位→程序号"编辑副本（V2.8 起按型号分表，见 BuildProgramGrid）：
-        /// 外层下标与 _cameras 对齐；内层 Dictionary 的 key=产品型号名（""=默认/不区分型号），
-        /// value=该型号下的点位→程序号表。</summary>
+        /// 外层下标与 _cameras 对齐；内层 Dictionary 的 key=产品型号名（V2.12.x 起恒为真实型号，
+        /// 不再有 ""="默认不区分型号"槽——该功能已移除），value=该型号下的点位→程序号表。</summary>
         private readonly List<Dictionary<string, List<StationProgramItem>>> _programEdits;
 
         /// <summary>全局产品型号候选列表（构造传入，AppConfig.ProductModels，界面型号下拉候选）。</summary>
         private readonly List<string> _productModels;
 
-        /// <summary>当前程序映射区正在编辑的型号（""="默认（不区分型号）"，对应 StationPrograms）。</summary>
+        /// <summary>当前程序映射区正在编辑的型号（V2.12.x 起恒为真实型号，无"默认"项；
+        /// 默认选中与主界面标题栏型号一致，见 BuildProgramGrid）。</summary>
         private string _programModel = "";
 
         private int _rows;   // 矩阵行数（与主界面一致；切型号会随点位表重算）
@@ -156,15 +158,14 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             while (_enabled.Count < total) _enabled.Add(true);
             if (_enabled.Count > total) _enabled.RemoveRange(total, _enabled.Count - total);
 
-            // 每台相机复制一份"点位→程序号"编辑副本（V2.8 起按型号分表）：
-            //  key "" = 默认表（旧 StationPrograms）；其余 key = ProductModels 里的型号，
-            //  对应 ModelStationPrograms 里同名型号表。改的是副本，点确定才写回原配置。
+            // 每台相机复制一份"点位→程序号"编辑副本（V2.8 起按型号分表；V2.12.x 起不再含
+            // ""=默认表槽，界面型号下拉不再提供"默认（不区分型号）"项，StationPrograms 旧默认表
+            // 仅作无型号回退、确定时不写回不碰它，防止误清空老数据）：
+            //  key=真实型号名，对应 ModelStationPrograms 里同名型号表。改的是副本，点确定才写回原配置。
             _programEdits = new List<Dictionary<string, List<StationProgramItem>>>();
             foreach (var cam in _cameras)
             {
                 var dict = new Dictionary<string, List<StationProgramItem>>(StringComparer.OrdinalIgnoreCase);
-                // 默认表（无型号/旧兼容）
-                dict[""] = CloneTable(cam.StationPrograms);
                 // 各型号表（ModelStationPrograms）
                 if (cam.ModelStationPrograms != null)
                 {
@@ -251,9 +252,10 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         }
 
         /// <summary>
-        /// 初始化相机程序映射区（V1.12.25；V2.8 加型号维度）：
+        /// 初始化相机程序映射区（V1.12.25；V2.8 加型号维度；V2.12.x 移默认项）：
         ///   - 相机下拉列出每台相机（显示名称/IP）；
-        ///   - 型号下拉列出"默认（不区分型号）" + 全局产品型号（AppConfig.ProductModels）；
+        ///   - 型号下拉列出全局产品型号 + 当前运营型号（AppConfig.ProductModels ∪ MainForm 标题栏型号），
+        ///     默认选中与主界面标题栏下拉一致的值；
         ///   - DataGridView 两列：点位 / 相机程序号（V1.12.26 起下拉选择，不必手输）；
         ///   - 选中某台相机 + 某型号时把该组合的编辑副本灌进表格。
         /// 【下拉可选项·V1.12.26 澄清】点位列＝窗口映射里的点位（数量=窗口数，点位默认=窗口编号、
@@ -270,29 +272,26 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 cmbCamera.Items.Add($"{name}  {cam.IpAddress}");
             }
 
-            // 型号下拉（V2.8）：候选 = "默认（不区分型号）" + 全局产品型号列表（AppConfig.ProductModels）。
-            // 选"默认"编辑的是旧 StationPrograms 默认表；选某型号编辑该相机在该型号下的映射表
-            // （ModelStationPrograms）。当前型号 _programModel="" 表示默认表。
+            // 型号下拉（V2.8；V2.12.x 起移除"默认（不区分型号）"项）：
+            //   候选 = 全局产品型号列表（AppConfig.ProductModels）+ 当前运营型号（_productModel，
+            //   即主界面标题栏 cmbModel 的选中值，来自 SettingsForm 传入。主界面候选是预置三型号，
+            //   与本窗体候选不同源，先把当前型号加进去保证能选中、能编辑到这张表，重复值去重）。
+            //   默认选中 = 当前运营型号，与主界面标题栏下拉所见一致（用户诉求）。
+            //   选某型号即编辑该相机在该型号下的映射表（ModelStationPrograms）。
             cmbModel.Items.Clear();
-            cmbModel.Items.Add(DefaultModelText);
+            if (!string.IsNullOrWhiteSpace(_productModel))
+                cmbModel.Items.Add(_productModel);
             foreach (var m in _productModels)
-                if (!string.IsNullOrWhiteSpace(m)) cmbModel.Items.Add(m);
-            // V2.12.0 自适应：默认选中"当前产品型号"的映射表（自适应窗口/存图均按型号查表，
-            // 型号表才是现场要配的主表）；非自适应保持默认"默认（不区分型号）"表。
+                if (!string.IsNullOrWhiteSpace(m) && !cmbModel.Items.Contains(m)) cmbModel.Items.Add(m);
+            // 当前型号一定在候选里（上面已先加入），找不到只会在 _productModel 为空时发生，兜底选首个。
+            int modelSel = string.IsNullOrWhiteSpace(_productModel) ? 0 : cmbModel.Items.IndexOf(_productModel);
+            if (modelSel < 0) modelSel = 0;
             // 注意：此处仍在 WireEvents 之前设置 SelectedIndex，不会触发 SelectedIndexChanged，
-            // _programModel 需手动同步赋值。
-            _programModel = "";
-            int modelSel = -1;
-            if (_autoFit && !string.IsNullOrWhiteSpace(_productModel))
-                modelSel = cmbModel.Items.IndexOf(_productModel);
-            if (modelSel > 0)
+            // _programModel 需手动同步赋值（= 选中项，恒为真实型号）。
+            if (cmbModel.Items.Count > 0)
             {
-                _programModel = _productModel;
                 cmbModel.SelectedIndex = modelSel;
-            }
-            else
-            {
-                cmbModel.SelectedIndex = 0;   // 默认表（兜底，含型号无对应型号表时）
+                _programModel = cmbModel.SelectedItem?.ToString() ?? "";
             }
 
             // 点位下拉候选：以【窗口映射的点位】为准（数量=窗口数；点位默认=窗口编号，改也只是互换或个别调整）。
@@ -322,9 +321,6 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 btnDelProg.Enabled = false;
             }
         }
-
-        /// <summary>型号下拉"默认"项文案（不区分型号 = 查相机默认表 StationPrograms）。</summary>
-        private const string DefaultModelText = "默认（不区分型号）";
 
         /// <summary>重建"点位列"下拉候选（V2.12.1）：点位由【相机点位表】唯一决定，候选 = 当前矩阵型号
         /// （_matrixModel）下各相机点位表里的点位号 ∪ 历史 _map 兜底（老配置），保证下拉里已配行仍能
@@ -441,13 +437,13 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             };
             cmbModel.SelectedIndexChanged += (s, e) =>
             {
-                // 切换型号：先把"当前相机+旧型号"的表格内容留存在副本里，再切到新型号映射
+                // 切换型号：先把"当前相机+旧型号"的表格内容留存在副本里，再切到新型号映射。
+                // V2.12.x 起候选全为真实型号（无"默认"项），_programModel 恒 = 选中型号。
                 FlushProgramGrid();
-                _programModel = cmbModel.SelectedIndex <= 0 ? "" : (cmbModel.SelectedItem?.ToString() ?? "");
+                _programModel = cmbModel.SelectedItem?.ToString() ?? "";
                 ReloadProgramGrid();
                 // V2.12.1：型号决定窗口矩阵（总数/行列/相机标注点位都按型号点位表），程序映射区
                 // 切型号时矩阵必须跟随重建——否则矩阵还停留在旧型号布局（用户实测 bug）。
-                // 选"默认（不区分型号）"时矩阵回到构建传入的当前运营型号 _productModel。
                 string matrixModel = string.IsNullOrEmpty(_programModel) ? _productModel : _programModel;
                 if (matrixModel != _matrixModel)
                     ApplyMatrixForModel(matrixModel);
@@ -574,10 +570,9 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
 
         /// <summary>
         /// 确定：把编辑副本整体写回目标（各相机点位→程序号映射，含按型号分表），再关闭。
-        /// 写回规则（V2.8）：
-        ///   - 型号下拉选的"默认"槽位 → CameraConfig.StationPrograms（默认表，不区分型号）；
-        ///   - 其余型号槽位 → CameraConfig.ModelStationPrograms（按型号名合并：已有同名表更新
-        ///     Programs，没有的追加；没编辑过的型号表原样保留不丢）。
+        /// 写回规则（V2.8；V2.12.x 起不再写默认表）：
+        ///   - 所有型号槽位 → CameraConfig.ModelStationPrograms（按型号名合并：已有同名表更新
+        ///     Programs，没有的追加；没编辑过的型号表原样保留不丢）；StationPrograms 默认表不碰。
         /// V2.12.1 起【不写回 WindowStationMap】（已退役：点位由相机点位表唯一决定，运行时/显示/
         /// 存图都不读它，写回反而污染历史字段）；窗口禁用状态照常写回。
         /// 两处都是"同实例引用写回"，设置窗体点保存时自动带上最新值。
@@ -597,14 +592,14 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             {
                 var cam = _cameras[i];
                 var dict = _programEdits[i];
-                // 默认表（型号下拉选"默认"编辑的那张）→ StationPrograms
-                dict.TryGetValue("", out var defList);
-                cam.StationPrograms = defList ?? new List<StationProgramItem>();
+                // V2.12.x 起不再编辑/写回 StationPrograms（默认不区分型号表）：型号下拉已无"默认"项，
+                // 该表只作旧配置/无型号时的运行时回退（ProgramsFor 型号没配表才查它），保留原值不动，
+                // 防止用户从旧配置升级后一点确定把默认表误清空成空表。
                 // 型号表 → ModelStationPrograms：按型号名合并，未编辑的型号表不碰
                 var dest = cam.ModelStationPrograms ?? new List<ModelStationPrograms>();
                 foreach (var kv in dict)
                 {
-                    if (string.IsNullOrEmpty(kv.Key)) continue;          // ""=默认表，已写 StationPrograms
+                    if (string.IsNullOrEmpty(kv.Key)) continue;          // 空 key 防御（正常不会出现）
                     if (kv.Value == null || kv.Value.Count == 0)
                     {
                         // V2.10.1 空表【沿用该型号既有映射、不写空表】：防止用户删光映射行把配置
