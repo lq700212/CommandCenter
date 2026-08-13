@@ -32,6 +32,7 @@ namespace CommandCenter.Views
             this.btnEditPoint = new System.Windows.Forms.Button();
             this.btnSwap = new System.Windows.Forms.Button();
             this.btnReset = new System.Windows.Forms.Button();
+            this.btnDisable = new System.Windows.Forms.Button();
             this.btnOk = new System.Windows.Forms.Button();
             this.btnCancel = new System.Windows.Forms.Button();
             this.grpProgram = new System.Windows.Forms.GroupBox();
@@ -41,6 +42,8 @@ namespace CommandCenter.Views
             this.btnDelProg = new System.Windows.Forms.Button();
             this.cmbCamera = new System.Windows.Forms.ComboBox();
             this.lblCamera = new System.Windows.Forms.Label();
+            this.lblModel = new System.Windows.Forms.Label();
+            this.cmbModel = new System.Windows.Forms.ComboBox();
             this.dgvPrograms = new System.Windows.Forms.DataGridView();
             this.colStation = new System.Windows.Forms.DataGridViewComboBoxColumn();
             this.colProgram = new System.Windows.Forms.DataGridViewComboBoxColumn();
@@ -88,6 +91,8 @@ namespace CommandCenter.Views
             this.grpProgram.Controls.Add(this.btnDelProg);
             this.grpProgram.Controls.Add(this.cmbCamera);
             this.grpProgram.Controls.Add(this.lblCamera);
+            this.grpProgram.Controls.Add(this.cmbModel);
+            this.grpProgram.Controls.Add(this.lblModel);
             this.grpProgram.Controls.Add(this.dgvPrograms);
             this.grpProgram.Location = new System.Drawing.Point(20, 368);
             this.grpProgram.Name = "grpProgram";
@@ -110,17 +115,34 @@ namespace CommandCenter.Views
             this.cmbCamera.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbCamera.Location = new System.Drawing.Point(78, 32);
             this.cmbCamera.Name = "cmbCamera";
-            this.cmbCamera.Size = new System.Drawing.Size(210, 27);
+            this.cmbCamera.Size = new System.Drawing.Size(140, 27);
             this.cmbCamera.TabIndex = 9;
+            // 
+            // lblModel
+            // 
+            this.lblModel.Location = new System.Drawing.Point(224, 34);
+            this.lblModel.Name = "lblModel";
+            this.lblModel.Size = new System.Drawing.Size(54, 26);
+            this.lblModel.TabIndex = 15;
+            this.lblModel.Text = "型号：";
+            this.lblModel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            // 
+            // cmbModel
+            // 
+            this.cmbModel.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbModel.Location = new System.Drawing.Point(280, 32);
+            this.cmbModel.Name = "cmbModel";
+            this.cmbModel.Size = new System.Drawing.Size(122, 27);
+            this.cmbModel.TabIndex = 16;
             // 
             // lblProgHint
             // 
             this.lblProgHint.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(100)))), ((int)(((byte)(100)))), ((int)(((byte)(100)))));
-            this.lblProgHint.Location = new System.Drawing.Point(304, 30);
+            this.lblProgHint.Location = new System.Drawing.Point(410, 30);
             this.lblProgHint.Name = "lblProgHint";
-            this.lblProgHint.Size = new System.Drawing.Size(280, 34);
+            this.lblProgHint.Size = new System.Drawing.Size(178, 34);
             this.lblProgHint.TabIndex = 10;
-            this.lblProgHint.Text = "表格里配了哪些点位，就是这台相机负责拍\r\n哪些点位；触发时按点位切程序，没配不切换。";
+            this.lblProgHint.Text = "按“相机+型号”查表切程序；\r\n选“默认”查相机的旧映射表。";
             // 
             // dgvPrograms
             // 
@@ -206,6 +228,15 @@ namespace CommandCenter.Views
             this.btnReset.Text = "恢复默认";
             this.btnReset.UseVisualStyleBackColor = true;
             // 
+            // btnDisable
+            // 
+            this.btnDisable.Location = new System.Drawing.Point(350, 614);
+            this.btnDisable.Name = "btnDisable";
+            this.btnDisable.Size = new System.Drawing.Size(70, 30);
+            this.btnDisable.TabIndex = 15;
+            this.btnDisable.Text = "禁用/启用";
+            this.btnDisable.UseVisualStyleBackColor = true;
+            // 
             // btnOk
             // 
             this.btnOk.Location = new System.Drawing.Point(430, 614);
@@ -234,6 +265,7 @@ namespace CommandCenter.Views
             this.ClientSize = new System.Drawing.Size(640, 664);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnOk);
+            this.Controls.Add(this.btnDisable);
             this.Controls.Add(this.btnReset);
             this.Controls.Add(this.btnSwap);
             this.Controls.Add(this.btnEditPoint);
@@ -263,6 +295,7 @@ namespace CommandCenter.Views
         private Button btnEditPoint;
         private Button btnSwap;
         private Button btnReset;
+        private Button btnDisable;
         private Button btnOk;
         private Button btnCancel;
         private GroupBox grpProgram;
@@ -272,6 +305,8 @@ namespace CommandCenter.Views
         private Button btnDelProg;
         private ComboBox cmbCamera;
         private Label lblCamera;
+        private Label lblModel;
+        private ComboBox cmbModel;
         private DataGridView dgvPrograms;
         private DataGridViewComboBoxColumn colStation;
         private DataGridViewComboBoxColumn colProgram;

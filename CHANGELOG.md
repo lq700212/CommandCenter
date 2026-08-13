@@ -1,6 +1,125 @@
 # 版本改动记录
 
-## V1.12.27（2026-08-13）功能测试 T2 取图存图时序修复：触发后等待 FTP 推图 + 预览加载失败不静默
+## V2.9（2026-08-13）彻底删除"产品配方"概念（本地配方逻辑全线清理）
+
+> 上位机历史上曾维护"产品配方"（`RecipeConfig` / `RecipeManager` / 标题栏配方下拉 `cmbRecipe` /
+> `AppConfig.CurrentRecipe` 等），但现场 PLC 侧只按**产品型号**切换相机程序，配方与型号功能
+> 重叠且配方从未真正参与 PLC 下发（V2.7 起 PLC 只读型号 40007~40011）。本次把本地配方逻辑
+> **全部删除**，产品切换只留"产品型号"一条主线，消除两套概念并存造成的困惑。
+
+### 改动范围
+- **`Models/RecipeConfig.cs`、`Services/RecipeManager.cs`**：整个文件删除（csproj 中对应的
+  `Compile Include` 一并移除）。
+- **`Models/AppConfig.cs`**：删除顶层 `CurrentRecipe` / `CurrentRecipeIndex` 与配方相关注释；
+  `ProductModelPrefix` 注释去掉"可含当前配方名"。
+- **`Services/PlcService.cs`**：类头注释的旧协议历史段改为"配方概念已删除（V2.9，配方由 PLC
+  侧按产品型号切换，上位机只传型号）"。
+- **`CommandCenter.csproj`**：删除配方文件引用，MainForm Designer 分部文件注释去掉"配方下拉框"。
+
+### 为什么这么改
+- 配方与型号概念重复，且配方不存在 PLC 下发路径，属于历史遗留的冗余功能；
+- 保留会让维护者困惑"到底配型号还是配配方"，删除后切换产品的唯一入口就是标题栏型号下拉。
+
+### 优化点
+- 配置模型/服务/界面/文档四处配方痕迹一并清除，`appconfig.json` 不再有配方相关字段；
+- 删除后构建通过 + 冒烟测试存活（V2.9 验证）。
+
+## V2.8（2026-08-13）点位→相机程序号映射按【产品型号】分表 + 预置现场三型号（U171/U172/Z121）
+
+> 现场相机程序库随产品型号变化：同一台相机在不同型号下用的程序号与点位归属都不同（例：上相机
+> 型号 U171 用 P000~P012、型号 U172 用 P013~P028，点位分工也不同），原来"每相机一张表"
+> （`stationPrograms`）没法表达"切型号→换一套映射"。本次升级为**按型号分表**：每台相机在
+> `modelStationPrograms` 里按型号各建一张表，运行时按当前产品型号查对应型号的表切程序，型号没配表
+> 就回退默认表；同时把现场预置的三个型号及其映射写进默认配置，切型号即可切换整套相机程序。
+
+### 改动范围
+- **`Models/AppConfig.cs`**：
+  - 顶层新增 **`ProductModels`**（`List<string>`，产品型号候选列表，JSON `productModels`），
+    默认预置 `["U171","U172","Z121"]`（`DefaultProductModels()`），ConfigStore 加载时兜底；
+  - 顶层 `ProductModel` 注释补 V2.8 说明：型号同时决定查哪张程序映射表；
+  - `CameraConfig` 新增 **`ModelStationPrograms`**（`List<ModelStationPrograms>`，JSON
+    `modelStationPrograms`），每型号一张"点位→程序号"表；旧 `StationPrograms` 保留为
+    "默认/不区分型号"表（旧配置兼容 + 型号没配表时兜底）；
+  - 新类 **`ModelStationPrograms`**：`{ modelName, programs }`；
+  - `DefaultCameras()` 预置现场定稿映射：上相机 U171（P000~P012）/U172（P013~P028）、
+    下相机 U171（P000~P003）/Z121（P005~P007）。
+- **`Utils/ConfigStore.cs`**：加载时 `ProductModels` 为 null/空 → 兜底默认三型号。
+- **`Services/ProductionCoordinator.cs`**：`ResolveProgramForStation` 按当前 `_productModel`
+  优先查 `ModelStationPrograms` 同名型号表（大小写不敏感），命中按该表切程序；型号没配表或表里没
+  该点位 → 回退 `StationPrograms` 默认表；仍无 → 不切换（保持相机当前程序）。型号切换经设置保存
+  热更自动生效（coordinator 重建）。
+- **`Views/WindowPointForm.cs` + Designer（V2.8）**："相机程序映射"区新增**型号下拉**
+  （`cmbModel`："默认（不区分型号）" + 全局型号候选）；编辑副本 `_programEdits` 升级为
+  `[相机]→[型号]` 二维字典；确定时默认槽位写 `StationPrograms`、型号槽位按型号名合并写
+  `ModelStationPrograms`（未编辑过的型号表原样保留不丢）。布局图同步更新。
+- **`Views/SettingsForm.cs` + Designer（V2.8）**："产品型号"由文本框 `txtModel` 改为**可编辑下拉**
+  `cmbModel`（候选=`ProductModels`，可手输新型号，保存时自动加入候选列表）；打开"窗口/点位配置"
+  时把 `ProductModels` 传给 WindowPointForm 供型号下拉使用。设置窗体型号候选与主界面一致，均为
+  "预置三型号 ∪ 配置已有型号"去重合并，**appconfig 缺 `productModels` 字段/为空时也能直接选到
+  U171/U172/Z121**。
+- **`Views/MainForm.cs` + Designer（V2.8）**：标题栏新增**产品型号下拉 `cmbModel`**（紧跟
+  "产品型号:"标签之后）。候选恒预置三型号
+  （`DefaultProductModels` ∪ `_config.ProductModels` 去重，配置缺字段也能直接选）；操作员在标题栏
+  下拉即切换当前生产型号（`SwitchModel`）：更新 `_config.ProductModel` + 写盘持久化 + **只重建
+  协调器**（PLC/相机/扫码枪连接全部复用，设备不断连；新型号随下次扫码写入 PLC 40007~40011 且
+  相机按新型号查 `modelStationPrograms` 切程序），比设置保存的全量重建轻量。
+  热更（设置保存）后 `InitModelCombo` 重新填充候选并同步选中项；事件只挂一次不叠加。
+
+### 为什么这么改
+- 现场按"产品型号"切换相机程序映射是硬需求（三型号各自一套映射），旧"每相机一张表"无法表达，
+  且手工改 json 极易配错；预置默认表后开箱即用、界面下拉可视化修改。
+- 型号选"默认"仍可用旧 `stationPrograms`，老配置零迁移；型号没配表的相机/型号不切换程序，
+  不会误切错程序。
+- 换型号是操作员生产日常操作：主界面标题栏直接下拉切换（预置三型号、不依赖配置文件），
+  即时生效并写盘，无需每次进系统设置。
+
+### 验证
+- Debug 构建通过（无 error/警告）；冒烟启动存活。空安全自检：`ModelStationPrograms`/
+  `StationPrograms`/`ProductModels` 判空全部保留，配置手改成 null 不崩。
+- 功能 harness 验证：无配置文件时标题栏/设置窗体型号下拉恒预置 `U171/U172/Z121`；
+  `SwitchModel("Z121")` 后协调器 `_productModel` 变为 Z121（重建生效）；下拉事件只挂一次。
+
+## V2.7（2026-08-13）PLC 握手协议升级为 40001~40011"请求-结果-复位"三拍式 + 设置/功能测试界面同步
+
+> 现场 PLC 程序定稿了新寄存器表：把原来占位的 D99~D112（扫码到位/相机到位/开始/完成/配方/计数）
+> **整体换成 40001~40011 的"请求-结果-复位"三拍握手**（完整协议见
+> `docs/上位机PLC通信接口定义文档.md`）。上位机角色不变（从站监听 502，PLC 做主站），只换寄存器
+> 语义与驱动方式：**不再有"到位/开始/完成"这种单向信号，而是 PLC 写请求(≠0)→上位机处理完写
+> 结果(≠0)→PLC 读走后复位请求(=0)→上位机看请求清零再复位结果(=0)→进入下一拍**。同时补上
+> 上次协议改动遗留的两处界面同步缺口：设置窗体没有产品型号输入框（`ProductModel` 注释写了
+> "设置窗体可改"但界面一直没有）、功能测试窗体 PLC 区还是旧协议按钮（导致**编译不过**）。
+
+### 改动范围
+- **`Models/AppConfig.cs`**：`PlcConfig` 增加 V2.7 寄存器地址映射（`ScanRequest 40001` /
+  `CamUpRequest 40002` / `CamDownRequest 40003` / `ScanResult 40004` / `CamUpResult 40005` /
+  `CamDownResult 40006` / `ProductModelAddress 40007` / `ProductModelLen 5`）与顶层 `ProductModel`
+  （固定产品型号，每次扫码写入 PLC）；移除旧的 D99/D100~D113 占位字段。
+- **`Services/PlcService.cs`**：新增 `ReadScanRequest`/`ReadCamUpRequest`/`ReadCamDownRequest`
+  （读 PLC 请求）、`WriteScanResult`/`WriteCamUpResult`/`WriteCamDownResult`（写结果，0/1/2，3=点位
+  禁用跳过）、`WriteProductModel`（型号字符串写 40007~40011，每寄存器 2 字符 ASCII、不足补 `0x00`、
+  超 10 字符自动截断）；删除旧 `ReadMoveDone`/`ClearMoveDone`/`SetStartSignal`/`SetDone`/`WriteRecipe`
+  /`ReportCounts` 等 D 地址方法。
+- **`Services/ProductionCoordinator.cs`**：状态机按 V2.7 请求驱动打通通道①（扫码请求→触发扫码枪
+  等 SN→写型号+扫码结果→等 PLC 复位请求→复位结果）与通道②③（相机请求→解析点位→触发拍照→
+  写相机结果→等复位→复位结果）；点位禁用/无相机时直接写结果 3（跳过）。
+- **`Views/SettingsForm.cs` + Designer（本次补）**：PLC 区新增"产品型号"输入框（`txtModel`，
+  最多 10 字符），`LoadFromConfig`/`OnSave` 与 `AppConfig.ProductModel` 双向读写，保存后每次扫码
+  上位机自动把型号写入 PLC 40007~40011。
+- **`Views/DevTestForm.cs` + Designer（本次补）**：PLC 测试区从旧协议按钮（读到位/清到位/触发
+  ON/OFF/完成 0/1/2/下发配方）整体换成 V2.7 语义按钮：`读扫码请求`（40001）/`读相机请求`
+  （40002+40003）/`写产品型号`（`txtModel` → 40007~40011）/`扫码结果 0/1/2`（40004）/`上相机OK=1`
+  /`下相机OK=1`/`相机复位=0`（40005/40006），修复此前调用已删除旧方法导致的编译错误。
+
+### 为什么这么改
+- PLC 侧定稿三拍握手后，旧单向信号（到位/开始/完成）语义与地址全部作废，上位机必须跟着换，
+  否则现场 PLC 程序一上线就握手失败。型号不再从 SN 解析，改由设置界面固定配置、每次扫码写一次，
+  符合"一条产线一个型号固定不变"的现场习惯。
+- 界面与通讯必须同步：设置页型号框是 `ProductModel` 配置的入口（此前只写进注释没实现）；
+  功能测试页是现场联调的第一工具，不修好连编译都过不去。
+
+### 验证
+- Debug 构建通过（含 DevTestForm 编译修复）；字段/控件的空安全保持（`txtModel.Text = _cfg.ProductModel ?? ""`）。
+- ⚠️ 未提交项：本仓库当前工作区包含本协议的代码+文档改动，**未 commit/push**，现场部署前需合并。
 
 > 现场反馈：测试界面点"触发+判定T2（取图存图）"后图像显示失败。排查确认与 programNo/切程序
 > **无关**（该按钮本就直接 T2、用相机当前程序拍照，从不切程序）。两个真实问题：

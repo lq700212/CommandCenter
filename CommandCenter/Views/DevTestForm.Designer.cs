@@ -63,16 +63,17 @@ namespace CommandCenter.Views
             this.txtWriteVal = new System.Windows.Forms.TextBox();
             this.btnWriteReg = new System.Windows.Forms.Button();
             this.txtWriteAddr = new System.Windows.Forms.TextBox();
-            this.btnWriteRecipe = new System.Windows.Forms.Button();
-            this.txtRecipe = new System.Windows.Forms.TextBox();
-            this.btnDone2 = new System.Windows.Forms.Button();
-            this.btnDone1 = new System.Windows.Forms.Button();
-            this.btnDone0 = new System.Windows.Forms.Button();
-            this.btnStartOff = new System.Windows.Forms.Button();
-            this.btnStartOn = new System.Windows.Forms.Button();
+            this.btnResCamReset = new System.Windows.Forms.Button();
+            this.btnResCamDown = new System.Windows.Forms.Button();
+            this.btnResCamUp = new System.Windows.Forms.Button();
+            this.btnResScan2 = new System.Windows.Forms.Button();
+            this.btnResScan1 = new System.Windows.Forms.Button();
+            this.btnResScan0 = new System.Windows.Forms.Button();
+            this.txtModel = new System.Windows.Forms.TextBox();
+            this.btnWriteModel = new System.Windows.Forms.Button();
             this.lblMoveVal = new System.Windows.Forms.Label();
-            this.btnClearMoveDone = new System.Windows.Forms.Button();
-            this.btnReadMoveDone = new System.Windows.Forms.Button();
+            this.btnReadCamReq = new System.Windows.Forms.Button();
+            this.btnReadScanReq = new System.Windows.Forms.Button();
             this.lblPlcState = new System.Windows.Forms.Label();
             this.grpLog = new System.Windows.Forms.GroupBox();
             this.txtLog = new System.Windows.Forms.TextBox();
@@ -341,16 +342,19 @@ namespace CommandCenter.Views
             this.btnScannerTrigger.UseVisualStyleBackColor = true;
             // 
             // grpPlc
-            // PLC 测试区（V1.12.0 增强）：协议偏移量配置 + 读地址/写地址测试 + 业务信号 + 配方。
+            // PLC 测试区（V1.12.0 增强 + V2.7 协议适配）：协议偏移量配置 + 读地址/写地址测试 + V2.7 业务信号。
             // 布局规则：每行由按钮(高34)/文本框(高25)/标签(高19)混排，控件按行中心线对齐
             // （txt 顶=行顶+4、lbl 顶=行顶+7），保证一行内上下视觉居中，见文件头说明。
             // 行划分（组内 y 坐标）：
             //   ☆常规行高 40px☆
-            //   状态行  y=34
-            //   偏移行  y=74（协议偏移量，读写地址自动加上该值）
-            //   读测试行 y=112（读地址→读值）
-            //   写测试行 y=152（写地址+写值）
-            //   到位行  y=194 / 触发行 y=240 / 完成行 y=286 / 配分行 y=332
+            //   状态行    y=34
+            //   偏移行    y=74（协议偏移量，读写地址自动加上该值）
+            //   读测试行  y=112（读地址→读值）
+            //   写测试行  y=152（写地址+写值）
+            //   请求行    y=194（读扫码请求 / 读相机请求 → 显示到 lblMoveVal）
+            //   型号行    y=232（写产品型号 → txtModel 输入，写 40007~40011）
+            //   结果行    y=278（扫码结果写 40004：0=复位 / 1=OK / 2=NG）
+            //   相机结果行 y=332（上/下相机结果写 40005/40006：1=OK / 0=复位）
             // 
             this.grpPlc.Controls.Add(this.lblOffsetTip);
             this.grpPlc.Controls.Add(this.txtOffset);
@@ -364,16 +368,17 @@ namespace CommandCenter.Views
             this.grpPlc.Controls.Add(this.txtWriteVal);
             this.grpPlc.Controls.Add(this.btnWriteReg);
             this.grpPlc.Controls.Add(this.txtWriteAddr);
-            this.grpPlc.Controls.Add(this.btnWriteRecipe);
-            this.grpPlc.Controls.Add(this.txtRecipe);
-            this.grpPlc.Controls.Add(this.btnDone2);
-            this.grpPlc.Controls.Add(this.btnDone1);
-            this.grpPlc.Controls.Add(this.btnDone0);
-            this.grpPlc.Controls.Add(this.btnStartOff);
-            this.grpPlc.Controls.Add(this.btnStartOn);
+            this.grpPlc.Controls.Add(this.btnResCamReset);
+            this.grpPlc.Controls.Add(this.btnResCamDown);
+            this.grpPlc.Controls.Add(this.btnResCamUp);
+            this.grpPlc.Controls.Add(this.btnResScan2);
+            this.grpPlc.Controls.Add(this.btnResScan1);
+            this.grpPlc.Controls.Add(this.btnResScan0);
+            this.grpPlc.Controls.Add(this.txtModel);
+            this.grpPlc.Controls.Add(this.btnWriteModel);
             this.grpPlc.Controls.Add(this.lblMoveVal);
-            this.grpPlc.Controls.Add(this.btnClearMoveDone);
-            this.grpPlc.Controls.Add(this.btnReadMoveDone);
+            this.grpPlc.Controls.Add(this.btnReadCamReq);
+            this.grpPlc.Controls.Add(this.btnReadScanReq);
             this.grpPlc.Controls.Add(this.lblPlcState);
             this.grpPlc.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
             this.grpPlc.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
@@ -539,152 +544,170 @@ namespace CommandCenter.Views
             this.btnWriteReg.UseVisualStyleBackColor = true;
             this.btnWriteReg.Click += new System.EventHandler(this.BtnWriteReg_Click);
             // 
-            // btnReadMoveDone
-            // 读到位信号：返回 PLC 的到位寄存器是否为 1（到位行）
+            // btnReadScanReq
+            // 读扫码请求（V2.7，读 40001）：PLC 主站写 1=请求扫码。结果写到 lblMoveVal（请求行）
             // 
-            this.btnReadMoveDone.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
-            this.btnReadMoveDone.FlatAppearance.BorderSize = 0;
-            this.btnReadMoveDone.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnReadMoveDone.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
-            this.btnReadMoveDone.ForeColor = System.Drawing.Color.White;
-            this.btnReadMoveDone.Location = new System.Drawing.Point(24, 194);
-            this.btnReadMoveDone.Name = "btnReadMoveDone";
-            this.btnReadMoveDone.Size = new System.Drawing.Size(120, 34);
-            this.btnReadMoveDone.TabIndex = 12;
-            this.btnReadMoveDone.Text = "读到位信号";
-            this.btnReadMoveDone.UseVisualStyleBackColor = false;
-            this.btnReadMoveDone.Click += new System.EventHandler(this.BtnReadMoveDone_Click);
+            this.btnReadScanReq.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
+            this.btnReadScanReq.FlatAppearance.BorderSize = 0;
+            this.btnReadScanReq.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnReadScanReq.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
+            this.btnReadScanReq.ForeColor = System.Drawing.Color.White;
+            this.btnReadScanReq.Location = new System.Drawing.Point(24, 194);
+            this.btnReadScanReq.Name = "btnReadScanReq";
+            this.btnReadScanReq.Size = new System.Drawing.Size(120, 34);
+            this.btnReadScanReq.TabIndex = 12;
+            this.btnReadScanReq.Text = "读扫码请求";
+            this.btnReadScanReq.UseVisualStyleBackColor = false;
+            this.btnReadScanReq.Click += new System.EventHandler(this.BtnReadScanReq_Click);
             // 
-            // btnClearMoveDone
-            // 清到位信号：到位寄存器写 0 复位，防止重复处理
+            // btnReadCamReq
+            // 读相机请求（V2.7，读 40002/40003）：PLC 主站写入点位编号=请求该相（机拍照）。结果显示到 lblMoveVal
             // 
-            this.btnClearMoveDone.FlatAppearance.BorderSize = 0;
-            this.btnClearMoveDone.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnClearMoveDone.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
-            this.btnClearMoveDone.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
-            this.btnClearMoveDone.Location = new System.Drawing.Point(154, 194);
-            this.btnClearMoveDone.Name = "btnClearMoveDone";
-            this.btnClearMoveDone.Size = new System.Drawing.Size(120, 34);
-            this.btnClearMoveDone.TabIndex = 13;
-            this.btnClearMoveDone.Text = "清到位信号";
-            this.btnClearMoveDone.UseVisualStyleBackColor = true;
-            this.btnClearMoveDone.Click += new System.EventHandler(this.BtnClearMoveDone_Click);
+            this.btnReadCamReq.FlatAppearance.BorderSize = 0;
+            this.btnReadCamReq.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnReadCamReq.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
+            this.btnReadCamReq.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
+            this.btnReadCamReq.Location = new System.Drawing.Point(154, 194);
+            this.btnReadCamReq.Name = "btnReadCamReq";
+            this.btnReadCamReq.Size = new System.Drawing.Size(120, 34);
+            this.btnReadCamReq.TabIndex = 13;
+            this.btnReadCamReq.Text = "读相机请求";
+            this.btnReadCamReq.UseVisualStyleBackColor = true;
+            this.btnReadCamReq.Click += new System.EventHandler(this.BtnReadCamReq_Click);
             // 
             // lblMoveVal
-            // 到位信号当前值显示：1（已到位）=绿 / 0（未到位）=灰
+            // 请求值显示：显示"读扫码请求/读相机请求"读到的请求值（绿=有请求/点位，灰=无请求）
             // 
             this.lblMoveVal.AutoSize = true;
             this.lblMoveVal.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
             this.lblMoveVal.ForeColor = System.Drawing.Color.Gray;
-            this.lblMoveVal.Location = new System.Drawing.Point(300, 201);
+            this.lblMoveVal.Location = new System.Drawing.Point(290, 201);
             this.lblMoveVal.Name = "lblMoveVal";
             this.lblMoveVal.Size = new System.Drawing.Size(56, 19);
             this.lblMoveVal.TabIndex = 14;
             this.lblMoveVal.Text = "？未读";
             // 
-            // btnStartOn
-            // 触发信号置 1（通知 PLC 开始工作）（触发行）
+            // btnWriteModel
+            // 写产品型号（V2.7，写 40007~40011）：把 txtModel 输入的内容（最多 10 字符）写入型号区，
+            // 供 PLC 主站读取（型号行）
             // 
-            this.btnStartOn.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
-            this.btnStartOn.FlatAppearance.BorderSize = 0;
-            this.btnStartOn.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnStartOn.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
-            this.btnStartOn.ForeColor = System.Drawing.Color.White;
-            this.btnStartOn.Location = new System.Drawing.Point(24, 232);
-            this.btnStartOn.Name = "btnStartOn";
-            this.btnStartOn.Size = new System.Drawing.Size(120, 34);
-            this.btnStartOn.TabIndex = 15;
-            this.btnStartOn.Text = "触发信号 = 1";
-            this.btnStartOn.UseVisualStyleBackColor = false;
-            this.btnStartOn.Click += new System.EventHandler(this.BtnStartOn_Click);
+            this.btnWriteModel.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
+            this.btnWriteModel.FlatAppearance.BorderSize = 0;
+            this.btnWriteModel.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnWriteModel.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
+            this.btnWriteModel.ForeColor = System.Drawing.Color.White;
+            this.btnWriteModel.Location = new System.Drawing.Point(24, 232);
+            this.btnWriteModel.Name = "btnWriteModel";
+            this.btnWriteModel.Size = new System.Drawing.Size(120, 34);
+            this.btnWriteModel.TabIndex = 15;
+            this.btnWriteModel.Text = "写产品型号";
+            this.btnWriteModel.UseVisualStyleBackColor = false;
+            this.btnWriteModel.Click += new System.EventHandler(this.BtnWriteModel_Click);
             // 
-            // btnStartOff
-            // 触发信号置 0
+            // txtModel
+            // 产品型号输入框：写型号按钮写入 PLC 40007~40011 的内容（最多 10 字符）。行中心=232+17=249 → 顶245
             // 
-            this.btnStartOff.FlatAppearance.BorderSize = 0;
-            this.btnStartOff.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnStartOff.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
-            this.btnStartOff.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
-            this.btnStartOff.Location = new System.Drawing.Point(154, 232);
-            this.btnStartOff.Name = "btnStartOff";
-            this.btnStartOff.Size = new System.Drawing.Size(120, 34);
-            this.btnStartOff.TabIndex = 16;
-            this.btnStartOff.Text = "触发信号 = 0";
-            this.btnStartOff.UseVisualStyleBackColor = true;
-            this.btnStartOff.Click += new System.EventHandler(this.BtnStartOff_Click);
+            this.txtModel.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
+            this.txtModel.Location = new System.Drawing.Point(154, 245);
+            this.txtModel.MaxLength = 10;
+            this.txtModel.Name = "txtModel";
+            this.txtModel.Size = new System.Drawing.Size(170, 25);
+            this.txtModel.TabIndex = 16;
+            this.txtModel.Text = "Z1212";
             // 
-            // btnDone0
-            // 完成信号写 0（复位）（完成行）
+            // btnResScan0
+            // 写扫码结果 = 0（复位，V2.7 写 40004）：清掉上一次的扫码结果（结果行）
             // 
-            this.btnDone0.FlatAppearance.BorderSize = 0;
-            this.btnDone0.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnDone0.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
-            this.btnDone0.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
-            this.btnDone0.Location = new System.Drawing.Point(24, 278);
-            this.btnDone0.Name = "btnDone0";
-            this.btnDone0.Size = new System.Drawing.Size(120, 34);
-            this.btnDone0.TabIndex = 17;
-            this.btnDone0.Text = "完成信号 = 0 复位";
-            this.btnDone0.UseVisualStyleBackColor = true;
-            this.btnDone0.Click += new System.EventHandler(this.BtnDone0_Click);
+            this.btnResScan0.FlatAppearance.BorderSize = 0;
+            this.btnResScan0.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnResScan0.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
+            this.btnResScan0.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
+            this.btnResScan0.Location = new System.Drawing.Point(24, 278);
+            this.btnResScan0.Name = "btnResScan0";
+            this.btnResScan0.Size = new System.Drawing.Size(110, 34);
+            this.btnResScan0.TabIndex = 17;
+            this.btnResScan0.Text = "扫码结果 = 0";
+            this.btnResScan0.UseVisualStyleBackColor = true;
+            this.btnResScan0.Click += new System.EventHandler(this.BtnResScan0_Click);
             // 
-            // btnDone1
-            // 完成信号写 1（拍照成功）
+            // btnResScan1
+            // 写扫码结果 = 1（扫码OK，V2.7 写 40004）
             // 
-            this.btnDone1.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
-            this.btnDone1.FlatAppearance.BorderSize = 0;
-            this.btnDone1.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnDone1.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
-            this.btnDone1.ForeColor = System.Drawing.Color.White;
-            this.btnDone1.Location = new System.Drawing.Point(154, 278);
-            this.btnDone1.Name = "btnDone1";
-            this.btnDone1.Size = new System.Drawing.Size(120, 34);
-            this.btnDone1.TabIndex = 18;
-            this.btnDone1.Text = "完成信号 = 1 成功";
-            this.btnDone1.UseVisualStyleBackColor = false;
-            this.btnDone1.Click += new System.EventHandler(this.BtnDone1_Click);
+            this.btnResScan1.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
+            this.btnResScan1.FlatAppearance.BorderSize = 0;
+            this.btnResScan1.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnResScan1.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
+            this.btnResScan1.ForeColor = System.Drawing.Color.White;
+            this.btnResScan1.Location = new System.Drawing.Point(144, 278);
+            this.btnResScan1.Name = "btnResScan1";
+            this.btnResScan1.Size = new System.Drawing.Size(110, 34);
+            this.btnResScan1.TabIndex = 18;
+            this.btnResScan1.Text = "扫码OK = 1";
+            this.btnResScan1.UseVisualStyleBackColor = false;
+            this.btnResScan1.Click += new System.EventHandler(this.BtnResScan1_Click);
             // 
-            // btnDone2
-            // 完成信号写 2（取像失败）
+            // btnResScan2
+            // 写扫码结果 = 2（扫码NG，V2.7 写 40004）
             // 
-            this.btnDone2.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(192)))), ((int)(((byte)(57)))), ((int)(((byte)(43)))));
-            this.btnDone2.FlatAppearance.BorderSize = 0;
-            this.btnDone2.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnDone2.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
-            this.btnDone2.ForeColor = System.Drawing.Color.White;
-            this.btnDone2.Location = new System.Drawing.Point(284, 278);
-            this.btnDone2.Name = "btnDone2";
-            this.btnDone2.Size = new System.Drawing.Size(130, 34);
-            this.btnDone2.TabIndex = 19;
-            this.btnDone2.Text = "完成信号 = 2 失败";
-            this.btnDone2.UseVisualStyleBackColor = false;
-            this.btnDone2.Click += new System.EventHandler(this.BtnDone2_Click);
+            this.btnResScan2.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(192)))), ((int)(((byte)(57)))), ((int)(((byte)(43)))));
+            this.btnResScan2.FlatAppearance.BorderSize = 0;
+            this.btnResScan2.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnResScan2.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
+            this.btnResScan2.ForeColor = System.Drawing.Color.White;
+            this.btnResScan2.Location = new System.Drawing.Point(264, 278);
+            this.btnResScan2.Name = "btnResScan2";
+            this.btnResScan2.Size = new System.Drawing.Size(110, 34);
+            this.btnResScan2.TabIndex = 19;
+            this.btnResScan2.Text = "扫码NG = 2";
+            this.btnResScan2.UseVisualStyleBackColor = false;
+            this.btnResScan2.Click += new System.EventHandler(this.BtnResScan2_Click);
             // 
-            // txtRecipe
-            // 配方号输入框：写 ASCII 数字串到 PLC 配方寄存器（配分行）
+            // btnResCamUp
+            // 写上相机结果 = 1（上相机OK，V2.7 写 40005）（相机结果行）
             // 
-            this.txtRecipe.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
-            this.txtRecipe.Location = new System.Drawing.Point(128, 337);
-            this.txtRecipe.Name = "txtRecipe";
-            this.txtRecipe.Size = new System.Drawing.Size(70, 25);
-            this.txtRecipe.TabIndex = 20;
-            this.txtRecipe.Text = "1";
+            this.btnResCamUp.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
+            this.btnResCamUp.FlatAppearance.BorderSize = 0;
+            this.btnResCamUp.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnResCamUp.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
+            this.btnResCamUp.ForeColor = System.Drawing.Color.White;
+            this.btnResCamUp.Location = new System.Drawing.Point(24, 332);
+            this.btnResCamUp.Name = "btnResCamUp";
+            this.btnResCamUp.Size = new System.Drawing.Size(115, 34);
+            this.btnResCamUp.TabIndex = 20;
+            this.btnResCamUp.Text = "上相机OK = 1";
+            this.btnResCamUp.UseVisualStyleBackColor = false;
+            this.btnResCamUp.Click += new System.EventHandler(this.BtnResCamUp_Click);
             // 
-            // btnWriteRecipe
-            // 下发配方按钮
+            // btnResCamDown
+            // 写下相机结果 = 1（下相机OK，V2.7 写 40006）
             // 
-            this.btnWriteRecipe.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
-            this.btnWriteRecipe.FlatAppearance.BorderSize = 0;
-            this.btnWriteRecipe.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnWriteRecipe.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
-            this.btnWriteRecipe.ForeColor = System.Drawing.Color.White;
-            this.btnWriteRecipe.Location = new System.Drawing.Point(24, 332);
-            this.btnWriteRecipe.Name = "btnWriteRecipe";
-            this.btnWriteRecipe.Size = new System.Drawing.Size(90, 34);
-            this.btnWriteRecipe.TabIndex = 21;
-            this.btnWriteRecipe.Text = "下发配方";
-            this.btnWriteRecipe.UseVisualStyleBackColor = false;
-            this.btnWriteRecipe.Click += new System.EventHandler(this.BtnWriteRecipe_Click);
+            this.btnResCamDown.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
+            this.btnResCamDown.FlatAppearance.BorderSize = 0;
+            this.btnResCamDown.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnResCamDown.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
+            this.btnResCamDown.ForeColor = System.Drawing.Color.White;
+            this.btnResCamDown.Location = new System.Drawing.Point(149, 332);
+            this.btnResCamDown.Name = "btnResCamDown";
+            this.btnResCamDown.Size = new System.Drawing.Size(115, 34);
+            this.btnResCamDown.TabIndex = 21;
+            this.btnResCamDown.Text = "下相机OK = 1";
+            this.btnResCamDown.UseVisualStyleBackColor = false;
+            this.btnResCamDown.Click += new System.EventHandler(this.BtnResCamDown_Click);
+            // 
+            // btnResCamReset
+            // 相机结果复位 = 0（V2.7，同时写 40005/40006=0，清掉上下相机上一次的结果）
+            // 
+            this.btnResCamReset.FlatAppearance.BorderSize = 0;
+            this.btnResCamReset.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnResCamReset.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
+            this.btnResCamReset.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
+            this.btnResCamReset.Location = new System.Drawing.Point(274, 332);
+            this.btnResCamReset.Name = "btnResCamReset";
+            this.btnResCamReset.Size = new System.Drawing.Size(115, 34);
+            this.btnResCamReset.TabIndex = 22;
+            this.btnResCamReset.Text = "相机复位 = 0";
+            this.btnResCamReset.UseVisualStyleBackColor = true;
+            this.btnResCamReset.Click += new System.EventHandler(this.BtnResCamReset_Click);
             // 
             // grpLog
             // 日志区：所有操作结果按时间顺序滚动记录
@@ -775,16 +798,17 @@ namespace CommandCenter.Views
         private TextBox txtWriteAddr;
         private TextBox txtWriteVal;
         private Button btnWriteReg;
-        private Button btnReadMoveDone;
-        private Button btnClearMoveDone;
+        private Button btnReadScanReq;
+        private Button btnReadCamReq;
         private Label lblMoveVal;
-        private Button btnStartOn;
-        private Button btnStartOff;
-        private Button btnDone0;
-        private Button btnDone1;
-        private Button btnDone2;
-        private TextBox txtRecipe;
-        private Button btnWriteRecipe;
+        private Button btnWriteModel;
+        private TextBox txtModel;
+        private Button btnResScan0;
+        private Button btnResScan1;
+        private Button btnResScan2;
+        private Button btnResCamUp;
+        private Button btnResCamDown;
+        private Button btnResCamReset;
         private GroupBox grpLog;
         private TextBox txtLog;
         private PictureBox picTestShot;

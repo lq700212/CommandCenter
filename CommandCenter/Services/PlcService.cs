@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using CommandCenter.Models;
 using CommandCenter.Utils;
@@ -19,16 +20,17 @@ namespace CommandCenter.Services
     ///   现全部改为读写上位机自己的 SlaveDataStore 寄存器区（不发起任何 Modbus 请求）。
     ///
     /// 【Modbus 协议约束】Modbus 是主从问答协议，从站不能主动给主站发消息；
-    ///   所有"上位机→PLC"的数据都靠 PLC 主站轮询来读上位机寄存器区。配方下发亦然——
-    ///   上位机写配方号+标志位到自己寄存器区，PLC 轮询读到标志位=1 后读配方号、切换、写 0 回执。
+    ///   所有"上位机→PLC"的数据都靠 PLC 主站轮询来读上位机寄存器区。
     ///
-    /// 【握手寄存器区（沿用原 D 地址，读写方向反转）】
-    ///   D100 到位信号：PLC 主站写 1 → 上位机 ReadMoveDone() 读自己 DataStore 后 ClearMoveDone() 清 0；
-    ///   D101 开始信号：上位机 SetStartSignal() 写自己区，PLC 来读；
-    ///   D102 完成信号：上位机 SetDone(1=成功/2=取像异常) 写自己区，PLC 来读；
-    ///   D103~D(103+len-1) 配方号：上位机 WriteRecipe() 写自己区(ASCII 每寄存器 2 字符)；
-    ///   D108 配方更新标志：上位机写 1(有新配方待切换)，PLC 读走后写 0 回执；
-    ///   D110 总数 / D111 OK / D112 NG：上位机 ReportCounts() 写自己区，PLC 来读。
+    /// 【V2.7 协议（docs/上位机PLC通信接口定义文档.md）：请求-结果-复位三拍式】
+    ///   PLC 只写（上位机读）：40001 扫码请求(0/1)、40002 上相机拍照请求(1~255=点位)、40003 下相机拍照请求；
+    ///   PLC 只读（上位机写）：40004 扫码结果、40005 上相机结果、40006 下相机结果、
+    ///                         40007~40011 产品型号(10 字符 ASCII，每寄存器 2 字符，高字节在前)。
+    ///   一次完整握手：PLC 写请求≠0 → 上位机处理完写结果≠0 → PLC 读结果(相机还读型号)并复位请求=0
+    ///   → 上位机看到请求回 0 再复位结果=0，进入下一请求。扫描/上相机/下相机三个通道互斥串行处理。
+    ///   【替代的旧协议（V1.12.11~V1.12.16，已全部删除）】D99 扫码到位/D100 相机到位/D101 开始/
+    ///   D102 完成/D103~D108 配方/D110~112 计数——均不再使用；计数改为纯本地功能，
+    ///   配方概念已删除（V2.9，配方由 PLC 侧按产品型号切换，上位机只传型号）。
     ///
     /// 【NModbus 3.0.83 API】TCP 从站用 ModbusTcpSlaveNetwork（不是 ModbusTcpSlave，本 fork 无此类），
     ///   构造 new ModbusTcpSlaveNetwork(TcpListener, IModbusFactory, IModbusLogger)；
@@ -39,12 +41,12 @@ namespace CommandCenter.Services
     ///
     /// 【线程模型】从站监听在后台线程（ListenAsync 是异步 Task，在此 GetAwaiter().GetResult() 阻塞承载，
     ///   Cancel 退出）；DataStore 读写用 _lock 串行化（避免业务轮询与 PLC 写入并发竞态）；
-    ///   业务层(ProductionCoordinator)仍用 PositionTimer 每 200ms 轮询 ReadMoveDone()，等价于原主动读 PLC。
+    ///   业务层(ProductionCoordinator)仍用 PositionTimer 每 200ms 轮询请求寄存器，等价于原主动读 PLC。
     ///
-    /// 【对外接口签名保持不变】EnsureConnected/IsConnected/ConnectionChanged/ReadMoveDone/ClearMoveDone/
-    ///   SetStartSignal/SetDone/WriteRecipe/ReportCounts/ReadRegister/WriteRegister 全部保留原签名，
-    ///   调用方(Coordinator/MainForm/DevTestForm/Monitor)改动最小。
-    ///   语义变化：IsConnected/EnsureConnected 从"已连上 PLC"变为"从站监听已就绪"。
+    /// 【对外接口】ReadScanRequest/ReadCamUpRequest/ReadCamDownRequest（读 PLC 请求）、
+    ///   WriteScanResult/WriteCamUpResult/WriteCamDownResult/WriteProductModel（写结果/型号）、
+    ///   ReadRegister/WriteRegister（功能测试通用读写）。语义：IsConnected/EnsureConnected 表示
+    ///   "从站监听是否已就绪"，HasMasterConnected 表示"汇川主站是否已 TCP 连入"。
     /// </summary>
     public class PlcService : IDisposable
     {
@@ -240,94 +242,84 @@ namespace CommandCenter.Services
             try { _masterPollTimer?.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite); } catch { }
         }
 
-        // ════════════════ 业务握手方法（签名不变，底层改读写自己 DataStore）════════════════
+        // ════════════════ V2.7 协议业务方法（读写自己 DataStore，方向见类注释）════════════════
 
         /// <summary>
-        /// 读取相机到位信号寄存器（D 地址，现读自己 DataStore）。
-        /// 返回 true 表示 PLC 主站已写 1 告知"相机运动到位"。读到后应尽快 ClearMoveDone() 复位。
+        /// 读取扫码请求（V2.7，PLC 写 40001）：返回是否 PLC 请求扫码。
+        /// 读到 true 表示 PLC 把 40001 置 1、要求上位机触发扫码枪取 SN；
+        /// 处理完成并写结果后由 ProductionCoordinator 等 PLC 复位请求回 0。
         /// </summary>
-        public bool ReadMoveDone()
+        public bool ReadScanRequest(out bool requested)
         {
-            lock (_lock)
-                return ReadLocal(_cfg.MoveDoneAddress) != 0;
-        }
-
-        /// <summary>把到位信号写 0 复位（写自己 DataStore），防止同一信号被重复处理。</summary>
-        public void ClearMoveDone()
-        {
-            lock (_lock)
-                WriteLocal(_cfg.MoveDoneAddress, 0);
-        }
-
-        /// <summary>
-        /// 读取"扫码枪运动到位"信号（V1.12.16 两阶段流程新增，D 地址，读自己 DataStore）。
-        /// 返回 true 表示 PLC 主站已写 1 告知"机器人带扫码枪到位、可以扫码"。
-        /// 读到并扫完 SN 后应尽快 ClearScanMoveDone() 复位，流程才进入"等相机到位"阶段。
-        /// </summary>
-        public bool ReadScanMoveDone()
-        {
-            lock (_lock)
-                return ReadLocal(_cfg.ScanMoveDoneAddress) != 0;
-        }
-
-        /// <summary>把"扫码枪到位"信号写 0 复位（自己 DataStore），防止同一信号被重复处理。</summary>
-        public void ClearScanMoveDone()
-        {
-            lock (_lock)
-                WriteLocal(_cfg.ScanMoveDoneAddress, 0);
-        }
-
-        /// <summary>通知 PLC 开始工作（开始信号置 1，写自己 DataStore，PLC 来读）。</summary>
-        public void SetStartSignal(bool on = true) => WriteLocalSafe(_cfg.StartSignalAddress, (ushort)(on ? 1 : 0));
-
-        /// <summary>通知 PLC 拍照完成（写自己 DataStore，PLC 来读）。code：1=成功，2=取像失败，0=复位。</summary>
-        public void SetDone(int code) => WriteLocalSafe(_cfg.DoneSignalAddress, (ushort)code);
-
-        /// <summary>
-        /// 把配方号写到自己寄存器区（D RecipeAddress 起始的连续寄存器，ASCII 数字串每字 2 字符），
-        /// 并置配方更新标志位(D108)=1，PLC 主站轮询读到标志位后读配方号、切换、写 0 回执。
-        /// </summary>
-        /// <param name="recipeId">配方编号，如 1</param>
-        public bool WriteRecipe(int recipeId)
-        {
-            string text = recipeId.ToString();
-            // RecipeLen 配置支持 1~20（AppConfig 注释约定）；超界按 20 截断，
-            // 防异常配置（如手改成 65535）分配超大数组 + 写入越界被静默吞掉（V1.12.13）。
-            int len = Math.Max(1, Math.Min(20, (int)_cfg.RecipeLen));
-            ushort[] regs = new ushort[len]; // 先填空格，再写 ASCII
-            for (int i = 0; i < len; i++)
-            {
-                int start = i * 2;
-                byte hi = 0x20, lo = 0x20; // 空格
-                if (start < text.Length) hi = (byte)text[start];
-                if (start + 1 < text.Length) lo = (byte)text[start + 1];
-                regs[i] = (ushort)((hi << 8) | lo); // 高字节在前
-            }
+            requested = false;
             lock (_lock)
             {
-                // 从站未就绪（监听没起来/DataStore 为 null）：配方根本没写进去，返回 false
                 if (_dataStore?.HoldingRegisters == null) return false;
-                // 先写配方号，再置标志位（顺序重要：避免 PLC 读到标志位=1 时配方号还没写完）
-                WriteLocalMulti(_cfg.RecipeAddress, regs);
-                WriteLocal(_cfg.RecipeFlagAddress, 1);
+                requested = ReadLocal(_cfg.ScanRequestAddress) != 0;
+                return true;
             }
-            // 从站模式：写入本地 DataStore 一定成功，但"PLC 能否立即拉取"取决于主站是否已连入。
-            // 主站未连入时返回 false，让界面如实提示"已缓存待拉取"（而非误报"已下发 PLC"），
-            // 否则操作员会误以为配方已切到 PLC 而实际主站断着（V1.12.13）。
-            return HasMasterConnected;
         }
 
+        /// <summary>读取上相机拍照请求（V2.7，PLC 写 40002）：返回点位编号（1~255），0=无请求。</summary>
+        public bool ReadCamUpRequest(out int stationNo)
+        {
+            stationNo = 0;
+            lock (_lock)
+            {
+                if (_dataStore?.HoldingRegisters == null) return false;
+                stationNo = ReadLocal(_cfg.CamUpRequestAddress);
+                return true;
+            }
+        }
+
+        /// <summary>读取下相机拍照请求（V2.7，PLC 写 40003）：返回点位编号（1~255），0=无请求。</summary>
+        public bool ReadCamDownRequest(out int stationNo)
+        {
+            stationNo = 0;
+            lock (_lock)
+            {
+                if (_dataStore?.HoldingRegisters == null) return false;
+                stationNo = ReadLocal(_cfg.CamDownRequestAddress);
+                return true;
+            }
+        }
+
+        /// <summary>写扫码结果（V2.7，上位机写 40004，PLC 来读）：0=默认/复位，1=扫码OK，2=扫码NG。</summary>
+        public void WriteScanResult(int code) => WriteLocalSafe(_cfg.ScanResultAddress, (ushort)code);
+
+        /// <summary>写上相机拍照结果（V2.7，上位机写 40005，PLC 来读）：0=默认/复位，1=OK，2=NG，3=点位禁用跳过。</summary>
+        public void WriteCamUpResult(int code) => WriteLocalSafe(_cfg.CamUpResultAddress, (ushort)code);
+
+        /// <summary>写下相机拍照结果（V2.7，上位机写 40006，PLC 来读）：取值同上相机结果。</summary>
+        public void WriteCamDownResult(int code) => WriteLocalSafe(_cfg.CamDownResultAddress, (ushort)code);
+
         /// <summary>
-        /// 上报检测计数到上位机自己寄存器区（总数/OK/NG 三个寄存器，PLC 主站来读）。
-        /// 从站模式下写入本地 DataStore 一定成功，这里仍保留日志结构以兼容原语义。
+        /// 写产品型号字符串（V2.7，上位机写 40007~40011，PLC 来读）。
+        /// 编码：每寄存器存 2 个 ASCII 字符，高字节=前字符、低字节=后字符；最多写
+        /// ProductModelLen×2 个字符，不足的尾部补 0x00（PLC 以 0x00 作字符串结束符）。
+        /// 型号为空时整段写 0（PLC 读到空型号），不崩。
         /// </summary>
-        public void ReportCounts(int total, int ok, int ng)
+        /// <param name="model">产品型号（如 "Z1212"），超长自动截断</param>
+        /// <returns>从站就绪(true)/未就绪(false)</returns>
+        public bool WriteProductModel(string model)
         {
             lock (_lock)
             {
-                WriteLocal(_cfg.TotalCountAddress, (ushort)total);
-                WriteLocal(_cfg.OkCountAddress, (ushort)ok);
-                WriteLocal(_cfg.NgCountAddress, (ushort)ng);
+                if (_dataStore?.HoldingRegisters == null) return false;
+                int len = Math.Max(1, Math.Min(20, _cfg.ProductModelLen)); // 寄存器数 1~20，防异常配置
+                ushort[] regs = new ushort[len];
+                byte[] bytes = Encoding.ASCII.GetBytes(model ?? "");       // 空型号→全 0
+                int charCount = Math.Min(bytes.Length, len * 2);
+                for (int i = 0; i < charCount; i++)
+                {
+                    ushort v = bytes[i]; // 单字节 ASCII，直接放进高字节；低字节留 0x00
+                    if (i % 2 == 0)
+                        regs[i / 2] = (ushort)(v << 8); // 高字节=前一字符
+                    else
+                        regs[i / 2] |= v;                // 低字节=后一字符
+                }
+                WriteLocalMulti(_cfg.ProductModelAddress, regs);
+                return true;
             }
         }
 
@@ -363,11 +355,11 @@ namespace CommandCenter.Services
 
         /// <summary>
         /// 读自己 DataStore 的保持寄存器（单个）。
-        /// ★ 地址偏移：NModbus PointSource.ReadPoints(start, count) 的 start 是 0-based 协议地址，
-        ///   与原主站 ReadHoldingRegisters(UnitId, address, 1) 的 address 一致，故直接传 address（不加 1）。
-        ///   【V1.12.14 现场实测确认】汇川主站读地址与 D 地址一一对应、零偏移（写 D101 读 101 即见），
-        ///   此处直接传 D 地址即为正确做法，无需任何 +40001/±1 换算；若将来换 PLC 出现错位，
-        ///   统一在此处调整，业务层无感。
+        /// ★ 地址约定（V2.7 文档确认无偏移）：NModbus PointSource.ReadPoints(start, count) 的 start
+        ///   是 0-based 协议地址，PLC 主站写/读的地址号与它一一对应、零换算——PLC 写 40001，
+        ///   上位机 ReadPoints(40001) 即读到（与 V1.12.14 现场实测 D 地址零偏移同规则），
+        ///   配置里的 40001~40011 直接作为 start 使用，无需 ±40001/±1 换算。若将来换 PLC 出现错位，
+        ///   统一在此处调整（如 start = address - 40001），业务层无感。
         /// </summary>
         private ushort ReadLocal(ushort address)
         {

@@ -16,7 +16,7 @@ namespace CommandCenter.Views
     /// 控制中心主窗体。
     /// 【界面布局】
     /// ┌───────────────────────────────────────────────────────────────────┐
-    /// │ 产品型号:[1]产品A▾ | 序列号:[框] | 总数:0 | [OK] | [NG] | [系统设置] │
+    /// │ 产品型号:[cmbModel▾] 序列号:[框] | 总数:0 | [OK] | [NG] | [系统设置] │
     /// │                                        ●PLC ●扫码枪 ●上相机 ●下相机 │
     /// │（相机灯/下拉显示配置名称：有名称显名称，无名称回退"相机N"即序号）       │
     /// ├───────────────────────────────────────────────────────────────────┤
@@ -26,14 +26,15 @@ namespace CommandCenter.Views
     /// │  └──────┘ └──────┘ └──────┘ └──────┘ └──────┘                  │
     /// │  （Rows × Columns 个窗口，逐次环形刷新）                            │
     /// ├───────────────────────────────────────────────────────────────────┤
-    /// │ 状态:等待PLC主站到位…（左下角；配方下发成功时变绿显示"配方切换完成"）      │
+    /// │ 状态:等待PLC主站到位…（左下角；型号切换成功时变绿显示"型号切换完成"）     │
     /// └───────────────────────────────────────────────────────────────────┘
     /// 窗口放大/还原（V1.12.15）：鼠标左键双击任一显示窗口 → 该窗口全屏放大（整屏含任务栏），
     ///   再次双击 / 按 Esc → 还原回窗口矩阵原位置；全屏时画面仍随检测实时刷新（移动的是同一控件）。
     /// 序列号手动输入（V1.12.17 弹窗 / V1.12.19 框内直录）：点击标题栏"序列号"框（txtSerial，TextBox）
     ///   即可出现输入光标直接录入当前产品 SN（无扫码枪/扫码枪未读到时手动补录）；
     ///   Enter 提交 / Esc 还原 / 失焦非空提交（SetManualSerial 与扫码枪收码等效，可推进"等 SN"阶段）。
-    /// 标题栏：左起信息字段（按配置开关）→ 配方下拉框（显示+切换合一）→ 系统设置按钮 → 连接指示灯；
+/// 标题栏：左起信息字段（按配置开关）→ 产品型号下拉（V2.8，可直接切型号）→ 系统设置按钮
+/// → 连接指示灯；
     ///   - 连接指示灯从右到左：●相机N..●相机1 → ●扫码枪 → ●PLC（Dock.Right 先 Add 靠左）。
     ///     扫码枪灯显示"扫码枪：已连接/未连接"，绿=已连接、红=未连接（V1.12.6，聚合刷新）；
     ///     PLC 灯三态（V1.12.11 从站模式）：绿=主站已连入 / 黄=监听就绪等待主站 / 红=监听失败
@@ -42,7 +43,7 @@ namespace CommandCenter.Views
     ///     DisplayConfig.TitleOkNgHighlight 则回退普通彩色文字；
     /// 底部栏：仅状态文本，固定在左下角。
     /// 职责：只做界面呈现 + 事件绑定，业务编排在 ProductionCoordinator。
-    /// 静态布局控件（标题栏字段/配方下拉框/设置按钮/PLC灯/扫码枪灯/状态栏/窗口矩阵容器）在
+    /// 静态布局控件（标题栏字段/设置按钮/PLC灯/扫码枪灯/状态栏/窗口矩阵容器）在
     /// MainForm.Designer.cs 中由设计器维护；动态控件（相机灯/窗口矩阵内容）在此运行时生成。
     /// 系统设置保存后不重启：ApplyRuntimeConfig 停旧服务层、按新配置全量重建服务与界面
     /// （V1.6.0，连接惰性 + 后台心跳自动按新 IP 重连，等效"断开重连"）。
@@ -53,7 +54,6 @@ namespace CommandCenter.Views
         private PlcService _plc;
         private List<KeyenceIV4Camera> _cameras;   // 多台相机各一个服务实例（V1.1.0）
         private ImageStore _imageStore;
-        private RecipeManager _recipes;
         private ProductionCoordinator _coordinator;
         private ConnectionMonitor _monitor;
         private List<IScanner> _scanners = new List<IScanner>();   // 扫码枪列表（多台各一个实例，V1.8.1 起支持多台；串口/基恩士 TCP 无协议按各自 Mode 二选一）
@@ -63,9 +63,16 @@ namespace CommandCenter.Views
         private Panel _pnlCamOverview;              // ≥3台模式的容器：把总标签+下拉框装一起，统一垂直居中
         private ToolTip _camTip;                    // 总状态标签的悬停明细提示（列出每台相机连/断）
         private ToolTip _plcTip;                    // PLC 灯悬停提示（说明三态灯当前含义，V1.12.11）
-        private bool _recipeComboInit;    // 组合框程序内初始化/刷新时防误触 SelectedIndexChanged
-        private int _recipeSwitchVer;     // 配方下发任务的版本号：只让"最新一次切换"的结果更新状态条（丢弃过期提示）
-        private CameraDisplayControl[] _windows;
+        private bool _modelComboInit;     // 型号下拉程序内初始化/刷新时防误触 SelectedIndexChanged
+        private bool _modelComboWired;    // 型号下拉事件是否已挂线（构造与热更都会走 InitModelCombo，只挂一次）
+
+        /// <summary>
+        /// 显示窗口集合（V1.12.28 起按"窗口编号"索引，不再用数组下标）：
+        /// 禁用的窗口（DisplayConfig.WindowEnabled=false）不在矩阵显示、不建控件，
+        /// 因此窗口编号与格子位置不再是 1:1 连续——用字典按编号存取，OnInspectionFinished
+        /// 拿到窗口编号即可找到对应控件刷新。键=窗口编号（1 起），值=该窗口的显示控件。
+        /// </summary>
+        private readonly Dictionary<int, CameraDisplayControl> _windowControls = new Dictionary<int, CameraDisplayControl>();
 
         // 窗口双击放大/还原全屏（V1.12.15）：双击任一显示窗口 → 全屏显示，再双击/Esc → 还原。
         private Form _fullScreenForm;                  // 全屏承载窗体（无边框、置顶、覆盖全屏）
@@ -80,11 +87,9 @@ namespace CommandCenter.Views
             InitializeComponent();   // 先解析设计器里的静态控件（否则后续代码引用会拿到 null）
 
             _config = ConfigStore.Load();
-            _recipes = new RecipeManager();
-            _recipes.Load();
 
             BuildServices();         // PLC/多相机/图像/协调器 就绪（相机灯数量依赖 _cameras）
-            InitTitleBarRuntime();   // 按配置补全标题栏：文案/可见性/配方填充/动态相机灯/紧凑重排
+            InitTitleBarRuntime();   // 按配置补全标题栏：文案/可见性/型号下拉/动态相机灯/紧凑重排
             BuildWindowGrid();       // 窗口矩阵（用设计器的 gridCameraWindows 容器，动态重建行列）
             SubscribeEvents();
             _coordinator.Start();
@@ -108,7 +113,7 @@ namespace CommandCenter.Views
 
             _imageStore = new ImageStore(_config.Image);
             _coordinator = new ProductionCoordinator(_plc, _cameras, cams, _imageStore, _config.Display,
-                _config.Display.WindowStationMap);
+                _config.Display.WindowStationMap, _config.Display.WindowEnabled, _config.ProductModel);
 
             // 连接健康监控：后台心跳 + 断连自动重连 + 边沿日志（不影响任何 UI 刷新）
             _monitor = new ConnectionMonitor(_plc, _cameras);
@@ -144,7 +149,7 @@ namespace CommandCenter.Views
         /// <summary>
         /// 标题栏"运行时"初始化（仅构造调用一次）：
         ///   ① 字段/可见性/OK-NG 色块/相机灯 → InitTitleBarFields（可重入，热更时再调）；
-        ///   ② 配方下拉框填充（只一次）；
+        ///   ② 产品型号下拉填充（只一次）；
         ///   ③ 设置按钮事件挂线（只一次）。
         /// 设计器负责"控件长什么样"，此处负责"数据与动态部分"。
         /// </summary>
@@ -153,8 +158,9 @@ namespace CommandCenter.Views
             // ① 标题栏字段 + 动态相机灯（构造与"设置保存热更"都会调用，可重入）
             InitTitleBarFields();
 
-            // ② 配方下拉框：填充配方项并选中当前（期间屏蔽事件，防初始化误触发切换）
-            InitRecipeCombo();
+            // ② 产品型号下拉（V2.8）：填充预置三型号候选并选中当前型号（期间屏蔽事件）。
+            //    热更（ApplyRuntimeConfig）也会调用，重新按新配置候选刷新。
+            InitModelCombo();
 
             // ③ 设置按钮事件（设计器只做外观，交互在这里挂线，只挂一次）
             btnSettings.Click += (s, e) => OpenSettings();
@@ -163,8 +169,6 @@ namespace CommandCenter.Views
             //    无需弹窗即可手工录入当前产品 SN（无扫码枪 / 扫码枪没读到码时）。
             //    Enter 提交 / Esc 还原 / 失焦非空提交，全部在 SetupSerialEditor 里接线一次。
             SetupSerialEditor();
-
-            // ⑤ 配方下拉框交互（V1.12.10 起即时切换）与窗口点位提示，都在对应 Init/Action 里接线
         }
 
         /// <summary>
@@ -254,12 +258,11 @@ namespace CommandCenter.Views
         /// 按配置开关设置标题栏各字段/按钮的可见性（V1.9.9 从 InitTitleBarFields 抽出复用）。
         /// 为什么抽出来：InitTitleBarFields（热更）与 RelayoutTitleBar（重排）都依赖同一份
         /// "哪些字段该显示"的判定，共用此方法避免两处漂移。
-        /// cmbRecipe 默认始终显示（暂无独立开关，保持既有行为）。
         /// </summary>
         private void ApplyConfigVisibility()
         {
             lblProductPrefix.Visible = _config.Display.ShowProductModel;
-            cmbRecipe.Visible = true; // 配方下拉框暂不设独立开关（V1.9.9 保持既有行为）
+            cmbModel.Visible = _config.Display.ShowProductModel; // 型号下拉与"产品型号"标签同开关（V2.8）
             lblSerialTitle.Visible = _config.Display.ShowSerialNumber;
             txtSerial.Visible = _config.Display.ShowSerialNumber;
             lblTotal.Visible = _config.Display.ShowTotalCount;
@@ -533,9 +536,9 @@ namespace CommandCenter.Views
         /// 最大 X 限制为 标题栏宽 - 右内边距 - rightDockWidth。
         ///
         /// 【V1.10.0：去掉"空间不足隐藏字段让位"逻辑】
-        /// 早期版本在放不下时会按 hidePriority（产品→配方→序列号→计数→分隔线）逐个
-        /// 隐藏低价值字段再重排，保证按钮可见。但相机台数多时会把 cmbRecipe（配方
-        /// 下拉框）等字段直接藏掉，现场"配方显示不出来"即由此而来。V1.10.0 相机区已
+        /// 早期版本在放不下时会按 hidePriority（产品型号→序列号→计数→分隔线）逐个
+        /// 隐藏低价值字段再重排，保证按钮可见。但相机台数多时会把前边的信息字段直接
+        /// 藏掉，现场"字段显示不出来"即由此而来。V1.10.0 相机区已
         /// 聚拢成"总标签+下拉框"固定宽度容器，右侧不再随台数膨胀，无需再隐藏任何字段。
         /// 现在所有可见字段一律完整排布，宽度超出右侧灯区边界时停止排布（不隐藏）。
         /// 注意：这里只负责排布，不改 ShowXxx 配置；字段可见性由 ApplyConfigVisibility 决定。
@@ -547,8 +550,8 @@ namespace CommandCenter.Views
             // 按配置开关恢复字段可见性（配置说该显示的字段必须显示，不再被压缩隐藏）。
             ApplyConfigVisibility();
 
-            // 排布顺序固定：产品前缀 → 配方下拉框 → 序列号标题 → 序列号框 → | → 总数 → OK → NG → | → 系统设置按钮
-            Control[] seq = { lblProductPrefix, cmbRecipe, lblSerialTitle, txtSerial, lblSep1,
+            // 排布顺序固定：产品前缀 → 型号下拉(V2.8) → 序列号标题 → 序列号框 → | → 总数 → OK → NG → | → 系统设置按钮
+            Control[] seq = { lblProductPrefix, cmbModel, lblSerialTitle, txtSerial, lblSep1,
                               lblTotal, lblOk, lblNg, lblSep2, btnSettings };
 
             // 右侧 Dock 区（PLC 灯 + 相机聚拢容器）占用的总宽：Dock.Right 控件从右往左叠，
@@ -596,108 +599,120 @@ namespace CommandCenter.Views
             lbl.TextAlign = ContentAlignment.MiddleCenter;
         }
 
+        // ────────────── 产品型号下拉（V2.8）──────────────
         /// <summary>
-        /// 填充"配方显示+切换合一"下拉框：控件显示当前配方名，用户点击弹出下拉列表，
-        /// 选择一项即触发配方切换（选中项会回显到控件）。
-        /// DropDownStyle=DropDownList 保证只能从清单里选，不能乱输。
-        /// 【防误触】程序初始化填充/刷新时置 _recipeComboInit=true，屏蔽 SelectedIndexChanged，
-        /// 只有"用户真实选择"才进入 SwitchRecipe。
+        /// 填充"产品型号"下拉（V2.8，可重入：构造与设置保存热更都会调用）。
+        /// 候选 = 预置三型号（AppConfig.DefaultProductModels）∪ 配置已有型号（_config.ProductModels），
+        /// 去重、忽略空白、当前配置型号不在候选时补进去——保证 appconfig 缺 productModels 字段/
+        /// 为空时标题栏也直接能下拉选 U171/U172/Z121（现场三型号写死预置，无需依赖配置文件）。
+        /// DropDownStyle=DropDownList 只能从清单选（型号只认候选，不乱输）。
+        /// 【防误触】填充/选中期间置 _modelComboInit=true，屏蔽 SelectedIndexChanged，
+        /// 只有"用户真实选择"才进入 SwitchModel。
+        /// 事件只挂线一次（_modelComboWired 标记，热更重复调用只刷新候选、不重复挂事件）。
         /// </summary>
-        private void InitRecipeCombo()
+        private void InitModelCombo()
         {
-            // 填充配方项并选中当前配方（期间屏蔽事件，防止初始化就误触发切换）
-            _recipeComboInit = true;
+            _modelComboInit = true;
             try
             {
-                foreach (var r in _recipes.Recipes)
-                    cmbRecipe.Items.Add($"[{r.Id}] {r.Name}");
-                // Current 初始为 null（还没切过配方）时，默认选中第一条作为当前配方，
-                // 让下拉框"一开始就显示当前配方"而不是空白；
-                var cur = _recipes.Current ?? _recipes.Recipes.FirstOrDefault();
-                if (cur != null)
-                {
-                    _recipes.SwitchTo(cur.Id); // 把默认配方落为 Current（无订阅者，事件无副作用）
-                    cmbRecipe.SelectedItem = $"[{cur.Id}] {cur.Name}";
-                }
+                cmbModel.Items.Clear();
+                var candidates = new List<string>();
+                // ① 预置三型号优先（用户要求"直接预置"）：即便配置为空也恒可下拉选到
+                foreach (var m in AppConfig.DefaultProductModels())
+                    if (!string.IsNullOrWhiteSpace(m)) candidates.Add(m);
+                // ② 配置里追加的型号（设置页手输保存自动加入的）合进来
+                foreach (var m in _config.ProductModels ?? new List<string>())
+                    if (!string.IsNullOrWhiteSpace(m) && !candidates.Contains(m)) candidates.Add(m);
+                // ③ 当前配置型号（_config.ProductModel）不在候选时补上，防下拉空白
+                string cur = (_config.ProductModel ?? "").Trim();
+                if (cur.Length > 0 && !candidates.Contains(cur)) candidates.Add(cur);
+                foreach (var m in candidates) cmbModel.Items.Add(m);
+                if (cur.Length > 0 && cmbModel.Items.Contains(cur)) cmbModel.SelectedItem = cur;
+                else if (cmbModel.Items.Count > 0) cmbModel.SelectedIndex = 0;
             }
             finally
             {
-                _recipeComboInit = false;
+                _modelComboInit = false;
             }
 
-            cmbRecipe.SelectedIndexChanged += (s, e) =>
+            if (_modelComboWired) return;
+            _modelComboWired = true;
+            cmbModel.SelectedIndexChanged += (s, e) =>
             {
-                if (_recipeComboInit) return;                          // 程序初始化/刷新，非用户操作
-                string item = cmbRecipe.SelectedItem as string;
-                if (item == null) return;
-                var recipe = _recipes.Recipes.FirstOrDefault(r => item == $"[{r.Id}] {r.Name}");
-                if (recipe != null) SwitchRecipe(recipe);             // 用户选中 → 执行切换
+                if (_modelComboInit) return;                       // 程序内初始化/刷新，非用户操作
+                string model = cmbModel.SelectedItem?.ToString();
+                if (string.IsNullOrWhiteSpace(model)) return;
+                if (model == _config.ProductModel) return;         // 选中的就是当前型号，忽略
+                SwitchModel(model);
             };
         }
 
         /// <summary>
-        /// 执行配方切换（上位机侧流程）：
-        ///   ① 本地立即记录当前配方（UI 线程，秒回，下拉框马上锁住用户选择）；
-        ///   ② 【不卡 UI】把配方号通过 PLC 下发改到后台线程执行——Modbus TCP 写可能因
-        ///      PLC 不可达/超时要等 2s，绝不能堵住界面线程（AGENTS 铁律"UI 线程禁做网络 IO"）；
-        ///   ③ 只有"成功发到 PLC"才在左下角状态输出绿色"配方切换完成"；失败输出红色提示。
-        ///   连续快速切换时用版本号 _recipeSwitchVer 丢弃过期任务的提示，避免旧结果覆盖新结果。
-        /// 颜色遵循现场习惯：OK=绿、NG=红（与标题栏 OK/NG 计数一致）。
+        /// 主界面直接切换产品型号（V2.8，操作员生产日常操作）：
+        ///   ① 更新配置 _config.ProductModel 并写盘（重启后保持当前型号；写盘失败只告警不阻断）；
+        ///   ② 重建协调器——_productModel 是构造时快照，型号决定"点位→相机程序号"查哪张表
+        ///      （ModelStationPrograms）与每次扫码写入 PLC 40007~40011 的型号值，换型号必须重建
+        ///      coordinator 才生效。只重建协调器：PLC/相机/扫码枪连接参数与型号无关，全部复用，
+        ///      比 ApplyRuntimeConfig 全量重建轻量（设备不断连，流程无缝）。
+        ///   ③ 保留当前 SN 状态、重挂协调器事件、启动流程，标题栏提示"型号切换完成"（绿字）。
+        /// 说明：PLC 型号区（40007~40011）由协调器在每次扫码时写入当前 _productModel，
+        /// 这里切换后无需立即下发，下一拍扫码自然带上新型号。
         /// </summary>
-        private void SwitchRecipe(RecipeConfig recipe)
+        private void SwitchModel(string model)
         {
-            _recipes.SwitchTo(recipe.Id);                        // ① 本地切换（同步，足够快）
-            int ver = ++_recipeSwitchVer;                        // 本次下发任务的代号
+            _config.ProductModel = model;
 
-            Task.Run(() =>
-            {
-                // ② 后台线程写 PLC（WriteRecipe 内部自带锁与超时，多任务并发也安全）
-                bool sentOk = _plc.WriteRecipe(recipe.Id);
+            // ① 写盘持久化（try-catch：写盘失败不阻断切换，配置以内存为准）
+            try { ConfigStore.Save(_config); }
+            catch (Exception ex) { LogHelper.Warn("型号切换：配置写盘失败 " + ex.Message); }
 
-                // ③ 回 UI 线程更新状态条；若期间又切换了别的新配方，则丢弃本次过期提示
-                if (IsDisposed) return;
-                BeginInvoke(new Action(() =>
-                {
-                    if (ver != _recipeSwitchVer) return;         // 已有更新的切换，本次结果作废
-                    if (sentOk)
-                    {
-                        lblStatus.ForeColor = Color.FromArgb(46, 158, 107); // 成功 → 绿
-                        lblStatus.Text = $"配方切换完成: {recipe.Name}";
-                        LogHelper.Info($"配方切换完成并已下发 PLC：[{recipe.Id}] {recipe.Name}");
-                    }
-                    else
-                    {
-                        // 从站模式（V1.12.13）：WriteRecipe 返回 false = PLC 主站未连入，
-                        // 配方已写入本地寄存器区、等主站连入后轮询拉取（也可能从站监听未就绪）。
-                        // 黄色=中间态（同 PLC 三态灯的"等待主站"语义），不再误报"下发 PLC 失败"。
-                        lblStatus.ForeColor = Color.FromArgb(240, 173, 78);  // 黄：配方已缓存待拉取
-                        lblStatus.Text = $"配方已缓存，PLC 主站未连入: {recipe.Name}（连入后自动拉取）";
-                        LogHelper.Warn($"配方切换但 PLC 主站未连入（已缓存待拉取）：[{recipe.Id}] {recipe.Name}");
-                    }
-                }));
-            });
+            // ② 重建协调器（复用既有 PLC/相机/扫码枪/图像服务实例）
+            string serial = _coordinator?.LatestSerialNumber ?? "";
+            try { _coordinator?.Dispose(); }
+            catch (Exception ex) { LogHelper.Warn("型号切换：协调器释放异常 " + ex.Message); }
+
+            _coordinator = new ProductionCoordinator(_plc, _cameras,
+                _config.Cameras ?? new List<CameraConfig>(), _imageStore,
+                _config.Display, _config.Display.WindowStationMap,
+                _config.Display.WindowEnabled, _config.ProductModel);
+            _coordinator.AttachScanners(_scanners);
+            _coordinator.LatestSerialNumber = serial;
+            SubscribeCoordinatorEvents();
+            _coordinator.Start();
+
+            // ③ 提示 + 日志（成功绿字，遵循现场 OK=绿 习惯）
+            lblStatus.ForeColor = Color.FromArgb(46, 158, 107);
+            lblStatus.Text = $"型号切换完成: {model}";
+            LogHelper.Info($"产品型号切换：{model}（已生效并写盘，PLC 型号区随下次扫码写入）");
         }
 
         /// <summary>
         /// 显示窗口矩阵：按配置 Rows×Columns 在【设计器容器 gridCameraWindows】里动态重建。
         /// 设计器只负责"容器长什么样"（Dock=Fill 铺满主区、淡蓝白底），具体行列数量与
         /// 每格的 CameraDisplayControl 全部以这里为准重建，保证改 Rows/Columns 配置即生效。
+        ///
+        /// 【V1.12.28 窗口禁用重排】DisplayConfig.WindowEnabled=false 的窗口【不创建控件】：
+        /// 从矩阵中"完全移除"该格子，剩余启用窗口按原窗口编号顺序【紧凑排列】（编号保留原值，
+        /// 不重新编号），尾部多出的格子留空。窗口编号与格子位置不再一一对应，
+        /// 刷新窗口改走 _windowControls[窗口编号] 字典（见 OnInspectionFinished）。
+        /// 为什么保留原编号：窗口编号绑定 WindowStationMap（窗口→点位）与 StationPrograms
+        /// （点位→相机程序）等配置，重新编号会打乱既有配置，宁可让格子位置空出。
         /// </summary>
         private void BuildWindowGrid()
         {
             int rows = Math.Max(1, _config.Display.Rows);
             int cols = Math.Max(1, _config.Display.Columns);
+            int total = rows * cols;
 
             // 重置容器：先释放旧窗口（热更时旧窗口 PictureBox 持有图片句柄，必须 Dispose 防泄漏），
             // 再清掉设计器默认的 1×1 行列与可能残留的子控件。
-            // 注意：释放必须针对"上一轮"的 _windows 数组，所以要在 _windows 重建之前做。
+            // 注意：释放必须针对"上一轮"的 _windowControls，所以要在重建之前做。
             // 热更前若有窗口正被全屏放大（挂在全屏窗体上），先移回 grid 一并释放，避免孤儿句柄泄漏。
             RestoreFullScreenWindow();
             var grid = gridCameraWindows;
-            if (_windows != null)
-                foreach (var w in _windows)
-                    try { w?.Dispose(); } catch { }
-            _windows = null;
+            foreach (var w in _windowControls.Values)
+                try { w?.Dispose(); } catch { }
+            _windowControls.Clear();
             grid.Controls.Clear();
             grid.ColumnCount = cols;
             grid.RowCount = rows;
@@ -710,29 +725,27 @@ namespace CommandCenter.Views
             for (int r = 0; r < rows; r++)
                 grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100f / rows));
 
-            // 新建数组放到填充循环之前：顺序必须是"先释放旧数组→再建新数组→再填充"，
-            // 否则循环里 _windows[idx] = w 会对 null 解引用抛 NullReferenceException。
-            _windows = new CameraDisplayControl[rows * cols];
-
-            int idx = 0;
-            for (int r = 0; r < rows; r++)
+            // 逐窗口编号创建：禁用的窗口不建控件（从矩阵移除），启用的按顺序紧凑填格子。
+            var enabled = _config.Display.WindowEnabled ?? new List<bool>();
+            int cellIdx = 0;
+            for (int w = 1; w <= total; w++)
             {
-                for (int c = 0; c < cols; c++)
+                bool on = enabled.Count < w || enabled[w - 1]; // 越界按启用（新窗口默认开）
+                if (!on) continue;                             // 禁用窗口：不显示、不占格子
+                if (cellIdx >= total) break;                   // 格子已填满（理论上不会）
+                int r = cellIdx / cols, c = cellIdx % cols;
+                cellIdx++;
+
+                var win = new CameraDisplayControl
                 {
-                    var w = new CameraDisplayControl
-                    {
-                        Margin = new Padding(3),
-                        Dock = DockStyle.Fill
-                    };
-                    w.SetWindowIndex(idx + 1);
-                    // 主界面窗口不再显示存图点位标识（点位只通过设置界面 WindowPointForm 查询比对）；
-                    // 点位归属由 ProductionCoordinator 按 WindowStationMap 映射计算，窗口编号即拍照顺序。
-                    // 双击放大/还原（V1.12.15）：每格订阅双击事件，由 OnWindowDoubleClicked 统一处理。
-                    w.WindowDoubleClicked += OnWindowDoubleClicked;
-                    _windows[idx] = w;
-                    grid.Controls.Add(w, c, r);
-                    idx++;
-                }
+                    Margin = new Padding(3),
+                    Dock = DockStyle.Fill
+                };
+                win.SetWindowIndex(w); // 显示"原窗口编号"（点位归属仍按 WindowStationMap[w-1]）
+                // 双击放大/还原（V1.12.15）：每格订阅双击事件，由 OnWindowDoubleClicked 统一处理。
+                win.WindowDoubleClicked += OnWindowDoubleClicked;
+                _windowControls[w] = win;
+                grid.Controls.Add(win, c, r);
             }
             // Dock 布局按 z-order 自底向上处理，Fill 最后处理才会给 Top/Bottom 让位。
             // 此刻标题栏/底部栏都已存在，把矩阵放在 z-order 最顶（最后布局），
@@ -767,7 +780,7 @@ namespace CommandCenter.Views
         /// 【为什么用独立窗体而非主窗体内覆盖层】直接搬动 Dock 控件到主窗体覆盖层会与
         ///   标题栏/底部栏的 Dock 布局冲突（Fill 抢占剩余空间次序难控）；独立无边框窗体
         ///   布局最简单，且是 TopLevel 顶层窗口天然盖在一切之上。
-        /// 【为什么要移动控件实例而非复制图片】检测完成刷新图片走的是 `_windows[索引]`
+        /// 【为什么要移动控件实例而非复制图片】检测完成刷新图片走的是 `_windowControls[窗口编号]`
         ///   SetImage（见 OnInspectionFinished），全屏时若复制图片，主流程刷新不生效、画面停住；
         ///   移动同一实例则全屏窗口里的画面照常随检测实时刷新。
         /// 【还原依据】进入全屏前记录该窗口在 grid 里的原单元格（_fullScreenCell），
@@ -891,9 +904,9 @@ namespace CommandCenter.Views
         /// </summary>
         private void SubscribeRuntimeEvents()
         {
-            _coordinator.InspectionFinished += OnInspectionFinished;
-            _coordinator.StateChanged += OnStateChanged;
-            _coordinator.ErrorRaised += msg => LogHelper.Warn("界面收到错误：" + msg);
+            // 协调器业务事件（检测完成/状态变化/异常）单独订阅；主界面切型号重建协调器时
+            // 只需重挂这三个（见 SwitchModel），不重挂 PLC/相机/扫码枪灯事件（会叠加）。
+            SubscribeCoordinatorEvents();
 
             // 扫码枪（V1.8.1 多台）：每台扫到的条码都更新当前产品序列号（进 {SN} 目录与标题栏）
             foreach (var sc in _scanners)
@@ -928,6 +941,19 @@ namespace CommandCenter.Views
             }
 
             _monitor?.Start();
+        }
+
+        /// <summary>
+        /// 订阅协调器的"运行时"业务事件（构造热更与主界面切型号 SwitchModel 都会调用）：
+        /// 检测完成 / 状态变化 / 异常提醒。旧协调器在重建前已 Dispose，这里只对当前字段引用的
+        /// 新实例订阅，不会叠加（注意：只挂协调器事件，不挂 PLC/相机/扫码枪灯事件，
+        /// 那些事件的主窗订阅只在构造/热更挂一次，重复重挂会叠加出双倍刷新）。
+        /// </summary>
+        private void SubscribeCoordinatorEvents()
+        {
+            _coordinator.InspectionFinished += OnInspectionFinished;
+            _coordinator.StateChanged += OnStateChanged;
+            _coordinator.ErrorRaised += msg => LogHelper.Warn("界面收到错误：" + msg);
         }
 
         /// <summary>
@@ -1067,10 +1093,10 @@ namespace CommandCenter.Views
             if (data.IsOk) _ok++; else _ng++;
             RefreshTitle();
 
-            // 刷新目标显示窗口（1..N 环形）
-            if (windowIndex >= 1 && windowIndex <= _windows.Length)
+            // 刷新目标显示窗口（V1.12.28 起按窗口编号查字典；禁用的窗口不建控件、不参与检测，
+            // 若仍收到事件（异常路径）直接忽略，避免 null 解引用）。
+            if (_windowControls.TryGetValue(windowIndex, out var w))
             {
-                var w = _windows[windowIndex - 1];
                 var img = !string.IsNullOrEmpty(data.ImagePath) && File.Exists(data.ImagePath)
                     ? ProductionCoordinator.LoadImageSafe(data.ImagePath)
                     : null;
@@ -1081,7 +1107,7 @@ namespace CommandCenter.Views
 
         /// <summary>
         /// 流程状态文本刷新（工作线程抛出，需回 UI 线程）。
-        /// 每次流程状态更新都恢复默认深蓝灰色文字——配方切换成功的"绿色提示"只在切换成功
+        /// 每次流程状态更新都恢复默认深蓝灰色文字——型号切换成功的"绿色提示"只在切换成功
         /// 的瞬间显示，随后流程推进（如"等待PLC主站到位"）会恢复常规颜色。
         /// </summary>
         private void OnStateChanged(string text)
@@ -1092,7 +1118,7 @@ namespace CommandCenter.Views
             lblStatus.Text = "状态: " + text;
         }
 
-        /// <summary>刷新标题栏统计与产品型号（配方由下拉框自持显示，无需在这里刷）。</summary>
+        /// <summary>刷新标题栏统计与产品型号（型号由下拉框自持显示，无需在这里刷）。</summary>
         private void RefreshTitle()
         {
             lblTotal.Text = "总数: " + _total;
@@ -1135,8 +1161,9 @@ namespace CommandCenter.Views
             BuildServices();
             _coordinator.LatestSerialNumber = serial;
 
-            // ④ 重建界面与重新订阅：标题栏（相机灯/色块）→ 窗口矩阵 → 运行时事件 → 启动流程
+            // ④ 重建界面与重新订阅：标题栏（相机灯/色块）→ 型号下拉候选刷新 → 窗口矩阵 → 运行时事件 → 启动流程
             InitTitleBarFields();
+            InitModelCombo();      // 热更后：按新配置型号/候选刷新标题栏下拉
             BuildWindowGrid();
             SubscribeRuntimeEvents();
             _coordinator.Start();

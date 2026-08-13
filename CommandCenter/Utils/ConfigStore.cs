@@ -41,6 +41,10 @@ namespace CommandCenter.Utils
                     // json 没写相机时必须在此补上默认两台现场相机。
                     if (cfg.Cameras == null || cfg.Cameras.Count == 0) cfg.Cameras = Models.CameraConfig.DefaultCameras();
                     if (cfg.Scanners == null) cfg.Scanners = new List<Models.ScanConfig>();
+                    // 产品型号候选列表（V2.8）：null/空时用现场默认三型号（U171/U172/Z121），
+                    // 保证设置窗体"产品型号"下拉与"窗口/点位配置"的型号下拉有候选可点。
+                    if (cfg.ProductModels == null || cfg.ProductModels.Count == 0)
+                        cfg.ProductModels = Models.AppConfig.DefaultProductModels();
                     if (cfg.Display == null) cfg.Display = new Models.DisplayConfig();
                     if (cfg.Image == null) cfg.Image = new Models.ImageConfig();
                     if (cfg.Security == null) cfg.Security = new Models.SecurityConfig();
@@ -106,10 +110,11 @@ namespace CommandCenter.Utils
         }
 
         /// <summary>
-        /// 保证 WindowStationMap（窗口→存图点位）与显示窗口总数（Rows×Columns）对齐：
-        ///   - 长度不足 → 缺的按"点位=窗口编号"补上（默认规则）；
+        /// 保证 WindowStationMap（窗口→存图点位）与 WindowEnabled（窗口启用列表）都和
+        /// 显示窗口总数（Rows×Columns）对齐：
+        ///   - 长度不足 → 点位按"点位=窗口编号"补上、启用按 true 补上（默认规则）；
         ///   - 长度超出 → 多余截断（窗口数改小后，超出部分丢弃）。
-        /// 在加载与保存各调一次，保证运行时取 map[i] 永不越界。
+        /// 在加载与保存各调一次，保证运行时取 map[i]/enabled[i] 永不越界。
         /// </summary>
         private static void EnsureStationMap(Models.AppConfig cfg)
         {
@@ -120,8 +125,13 @@ namespace CommandCenter.Utils
             var map = cfg.Display.WindowStationMap ?? new List<int>();
             while (map.Count < windowCount) map.Add(map.Count + 1);
             if (map.Count > windowCount) map.RemoveRange(windowCount, map.Count - windowCount);
-
             cfg.Display.WindowStationMap = map;
+
+            // 窗口启用列表同步对齐（V1.12.28）：缺的按默认"启用"，多的截断
+            var enabled = cfg.Display.WindowEnabled ?? new List<bool>();
+            while (enabled.Count < windowCount) enabled.Add(true);
+            if (enabled.Count > windowCount) enabled.RemoveRange(windowCount, enabled.Count - windowCount);
+            cfg.Display.WindowEnabled = enabled;
         }
     }
 }

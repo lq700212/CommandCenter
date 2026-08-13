@@ -63,7 +63,7 @@
     <Compile Include="Views\MainForm.cs">
       <SubType>Form</SubType>
     </Compile>
-    <!-- MainForm 的 Designer 分部文件：静态控件（标题栏/配方下拉框/设置按钮/连接灯/状态栏/窗口矩阵）
+<!-- MainForm 的 Designer 分部文件：静态控件（标题栏/产品型号下拉/设置按钮/连接灯/状态栏/窗口矩阵）
          由 Visual Studio 窗体设计器可视化维护；动态控件（相机灯/窗口矩阵内容）仍在 MainForm.cs 运行时生成 -->
     <Compile Include="Views\MainForm.Designer.cs">
       <DependentUpon>MainForm.cs</DependentUpon>
@@ -111,12 +111,10 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="Models\AppConfig.cs" />
-    <Compile Include="Models\RecipeConfig.cs" />
     <Compile Include="Models\WindowData.cs" />
     <Compile Include="Services\PlcService.cs" />
     <Compile Include="Services\KeyenceIV4Camera.cs" />
     <Compile Include="Services\ImageStore.cs" />
-    <Compile Include="Services\RecipeManager.cs" />
     <Compile Include="Services\ScannerService.cs" />
     <Compile Include="Services\ScannerTcpService.cs" />
     <Compile Include="Services\ProductionCoordinator.cs" />

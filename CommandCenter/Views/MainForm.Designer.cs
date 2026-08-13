@@ -5,14 +5,14 @@ namespace CommandCenter.Views
 {
     /// <summary>
     /// MainForm 的 Visual Studio 窗体设计器分部文件（自动生成风格，可手动维护）。
-    /// 把"静态、固定数量"的控件（标题栏信息字段、配方下拉框、系统设置按钮、
+    /// 把"静态、固定数量"的控件（标题栏信息字段、产品型号下拉、系统设置按钮、
     /// PLC 状态灯、底部状态栏、窗口矩阵容器）放进设计器，便于可视化拖拽排布；
     /// 运行时才确定的"动态控件"（每台相机一个状态灯、窗口矩阵里的 CameraDisplayControl）
     /// 仍在 MainForm.cs 中生成，不放进这里。
     /// 【重要】整体顺序请参考 MainForm.cs 类注释里的 ASCII 布局图。
     ///   ┌──────────────────────────────────────────────────────────────┐
-    ///   │ 产品型号:[cmbRecipe▾] 序列号:[lblSerialTitle][txtSerial框]    │
-    ///   │  | 总数:[lblTotal] OK:[lblOk] NG:[lblNg]                     │
+    ///   │ 产品型号:[cmbModel▾] 序列号:[lblSerialTitle][txtSerial框]       │
+    ///   │   | 总数:[lblTotal] OK:[lblOk] NG:[lblNg]                     │
     ///   │          | [btnSettings系统设置]    ●[lblPlcStatus] ●[lblScannerStatus]│
     ///   ├──────────────────────────────────────────────────────────────┤
     ///   │                 gridCameraWindows（TableLayoutPanel 等分）      │
@@ -22,6 +22,9 @@ namespace CommandCenter.Views
     /// 说明：
     ///   - 标题栏面板 pnlTitleBar：Dock=Top，FixedHeight=48；内部字段用绝对坐标，
     ///     运行时由 MainForm.InitTitleBarRuntime/RelayoutTitleBar 按"显示开关"紧凑重排。
+    ///   - 产品型号（cmbModel，V2.8 可选下拉）：候选恒预置 U171/U172/Z121（配置候选去重合并），
+    ///     操作员在标题栏直接下拉切换当前生产型号，切换即生效（重建协调器按新型号查相机映射表 +
+    ///     写盘持久化），与系统设置窗体 PLC 区"产品型号"是同一个值。
     ///   - lblProductPrefix 的文案与各信息字段的 Visible 由 Display 配置控制（运行时设置）。
     ///   - 连接状态灯：PLC 灯在 Designer 中先 Add（Dock.Right 先加的靠左），扫码枪状态灯
     ///     紧跟其后（第 2 位，位于 PLC 右侧），相机动灯随后由 MainForm.cs 正序循环 Add（靠右）
@@ -61,7 +64,7 @@ namespace CommandCenter.Views
             this.lblSep1 = new System.Windows.Forms.Label();
             this.txtSerial = new System.Windows.Forms.TextBox();
             this.lblSerialTitle = new System.Windows.Forms.Label();
-            this.cmbRecipe = new System.Windows.Forms.ComboBox();
+            this.cmbModel = new System.Windows.Forms.ComboBox();
             this.lblProductPrefix = new System.Windows.Forms.Label();
             this.pnlStatusBar = new System.Windows.Forms.Panel();
             this.lblStatus = new System.Windows.Forms.Label();
@@ -90,7 +93,7 @@ namespace CommandCenter.Views
             this.pnlTitleBar.Controls.Add(this.lblSep1);
             this.pnlTitleBar.Controls.Add(this.lblSerialTitle);
             this.pnlTitleBar.Controls.Add(this.txtSerial);
-            this.pnlTitleBar.Controls.Add(this.cmbRecipe);
+            this.pnlTitleBar.Controls.Add(this.cmbModel);
             this.pnlTitleBar.Controls.Add(this.lblProductPrefix);
             this.pnlTitleBar.Dock = System.Windows.Forms.DockStyle.Top;
             this.pnlTitleBar.Location = new System.Drawing.Point(0, 0);
@@ -242,16 +245,6 @@ namespace CommandCenter.Views
             this.txtSerial.Text = "";
             this.txtSerial.BackColor = System.Drawing.Color.White;
             // 
-            // cmbRecipe
-            // 
-            this.cmbRecipe.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.cmbRecipe.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.cmbRecipe.Font = new System.Drawing.Font("微软雅黑", 10F);
-            this.cmbRecipe.Location = new System.Drawing.Point(136, 10);
-            this.cmbRecipe.Name = "cmbRecipe";
-            this.cmbRecipe.Size = new System.Drawing.Size(180, 27);
-            this.cmbRecipe.TabIndex = 2;
-            // 
             // lblProductPrefix
             // 
             this.lblProductPrefix.AutoSize = true;
@@ -262,6 +255,20 @@ namespace CommandCenter.Views
             this.lblProductPrefix.Size = new System.Drawing.Size(73, 19);
             this.lblProductPrefix.TabIndex = 1;
             this.lblProductPrefix.Text = "产品型号:";
+            // 
+            // cmbModel
+            // 
+            // 产品型号下拉（V2.8）：操作员在标题栏直接选当前生产型号，切换即生效（重建协调器
+            // 按新型号查相机映射表切程序 + 写盘持久化）。候选初始在 InitModelCombo 运行时填充，
+            // 恒预置 U171/U172/Z121（与配置 ProductModels 去重合并），DropDownList 只能从清单选。
+            // 运行坐标由 RelayoutTitleBar 按标题栏整行重排，这里只是设计器初始参照。
+            this.cmbModel.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbModel.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.cmbModel.Font = new System.Drawing.Font("微软雅黑", 10F);
+            this.cmbModel.Location = new System.Drawing.Point(136, 10);
+            this.cmbModel.Name = "cmbModel";
+            this.cmbModel.Size = new System.Drawing.Size(110, 27);
+            this.cmbModel.TabIndex = 24;
             // 
             // pnlStatusBar
             // 
@@ -338,7 +345,7 @@ namespace CommandCenter.Views
         // pnl=Panel / lbl=Label / cmb=ComboBox / btn=Button / grid=TableLayoutPanel。
         private Panel pnlTitleBar;
         private Label lblProductPrefix;
-        private ComboBox cmbRecipe;
+        private ComboBox cmbModel;
         private Label lblSerialTitle;
         private TextBox txtSerial;
         private Label lblSep1;

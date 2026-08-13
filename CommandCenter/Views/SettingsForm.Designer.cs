@@ -74,6 +74,8 @@ namespace CommandCenter.Views
             this.txtPlcIp = new System.Windows.Forms.TextBox();
             this.lblPlcPort = new System.Windows.Forms.Label();
             this.nudPlcPort = new System.Windows.Forms.NumericUpDown();
+            this.lblModel = new System.Windows.Forms.Label();
+            this.cmbModel = new System.Windows.Forms.ComboBox();
             this.lblRows = new System.Windows.Forms.Label();
             this.nudRows = new System.Windows.Forms.NumericUpDown();
             this.lblCols = new System.Windows.Forms.Label();
@@ -151,6 +153,29 @@ namespace CommandCenter.Views
             this.nudPlcPort.Size = new System.Drawing.Size(70, 25);
             this.nudPlcPort.TabIndex = 3;
             this.nudPlcPort.Value = new decimal(new int[] { 502, 0, 0, 0 });
+            //
+            // lblModel
+            //
+            this.lblModel.AutoSize = true;
+            this.lblModel.Location = new System.Drawing.Point(446, 21);
+            this.lblModel.Name = "lblModel";
+            this.lblModel.Size = new System.Drawing.Size(61, 19);
+            this.lblModel.TabIndex = 31;
+            this.lblModel.Text = "产品型号:";
+            //
+            // cmbModel
+            // 固定产品型号（V2.7 协议）：每次扫码完成上位机写入 PLC 40007~40011，最多 10 字符。
+            // V2.8 起为可编辑下拉：候选项=预置三型号 U171/U172/Z121（DefaultProductModels）∪ 配置已有
+            // ProductModels（去重合并，配置缺字段也能直接选到三型号），也可手动输入新型号；
+            // 保存时若不在候选则自动加入。型号同时决定点位→程序号查哪张表。
+            //
+            this.cmbModel.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDown;
+            this.cmbModel.Location = new System.Drawing.Point(521, 18);
+            this.cmbModel.MaxLength = 10;
+            this.cmbModel.Name = "cmbModel";
+            this.cmbModel.Size = new System.Drawing.Size(170, 25);
+            this.cmbModel.TabIndex = 32;
+            this.cmbModel.Text = "";
             //
             // lblRows
             //
@@ -467,6 +492,8 @@ namespace CommandCenter.Views
             this.pnlScroll.Controls.Add(this.lblRows);
             this.pnlScroll.Controls.Add(this.nudPlcPort);
             this.pnlScroll.Controls.Add(this.lblPlcPort);
+            this.pnlScroll.Controls.Add(this.cmbModel);
+            this.pnlScroll.Controls.Add(this.lblModel);
             this.pnlScroll.Controls.Add(this.txtPlcIp);
             this.pnlScroll.Controls.Add(this.lblPlcIp);
             this.pnlScroll.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -595,6 +622,8 @@ namespace CommandCenter.Views
         private TextBox txtPlcIp;
         private Label lblPlcPort;
         private NumericUpDown nudPlcPort;
+        private Label lblModel;
+        private ComboBox cmbModel;
         private Label lblRows;
         private NumericUpDown nudRows;
         private Label lblCols;

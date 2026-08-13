@@ -10,7 +10,7 @@ namespace CommandCenter.Views
     /// 系统设置窗体：直接编辑 AppConfig（引用同一实例，保存由上层 ConfigStore 完成）。
     ///
     /// ┌─────────────────────────────────────────────────────────────┐
-    /// │ PLC IP:  [19.87.6.1]  端口:[502]                            │
+    /// │ PLC IP:  [19.87.6.1]  端口:[502]  产品型号:[Z1212]             │
     /// │ 显示窗口: 行[4] 列[7]                                       │
     /// │ 图片保存根目录: [E:\Images]                                    │
     /// │ 目录结构: [配置目录结构...] {年月日}/{SN}/{OKNG}             │
@@ -70,6 +70,18 @@ namespace CommandCenter.Views
             // PLC 基础参数
             txtPlcIp.Text = _cfg.Plc.IpAddress;
             nudPlcPort.Value = _cfg.Plc.Port;
+            // 固定产品型号（V2.7 协议，每次扫码写入 PLC 40007~40011，最多 10 字符；V2.8 可编辑下拉）
+            // 下拉候选 = "预置三型号 U171/U172/Z121（DefaultProductModels）∪ 配置追加型号（ProductModels）"：
+            // 用户要求"直接预置"，即使 appconfig 缺 productModels 字段/为空，这里也恒能选到三型号；
+            // 手输新型号保存后自动加入候选（见 OnSave）。
+            cmbModel.Items.Clear();
+            var modelCandidates = new List<string>();
+            foreach (var m in AppConfig.DefaultProductModels())
+                if (!string.IsNullOrWhiteSpace(m)) modelCandidates.Add(m);
+            foreach (var m in _cfg.ProductModels ?? new List<string>())
+                if (!string.IsNullOrWhiteSpace(m) && !modelCandidates.Contains(m)) modelCandidates.Add(m);
+            foreach (var m in modelCandidates) cmbModel.Items.Add(m);
+            cmbModel.Text = _cfg.ProductModel ?? "";
             // 显示窗口行列
             nudRows.Value = _cfg.Display.Rows;
             nudCols.Value = _cfg.Display.Columns;
@@ -354,7 +366,11 @@ namespace CommandCenter.Views
             {
                 using (var dlg = new WindowPointForm(_cfg.Display.WindowStationMap,
                                                      (int)nudRows.Value, (int)nudCols.Value,
-                                                     CollectCamerasFromGrid()))
+                                                     CollectCamerasFromGrid(),
+                                                     _cfg.Display.WindowEnabled,
+                                                     AppConfig.DefaultProductModels()
+                                                         .Union(_cfg.ProductModels ?? new List<string>())
+                                                         .ToList()))
                 {
                     dlg.ShowDialog(this);
                 }
@@ -418,6 +434,17 @@ namespace CommandCenter.Views
         {
             _cfg.Plc.IpAddress = txtPlcIp.Text.Trim();
             _cfg.Plc.Port = (int)nudPlcPort.Value;
+            // 固定产品型号（V2.7 协议）：保存后每次扫码上位机把型号写入 PLC 40007~40011；
+            // V2.8：型号同时决定"点位→相机程序号"查哪张表。手输的新型号自动加入候选列表
+            // （ProductModels），供"窗口/点位配置"的型号下拉使用。
+            string model = cmbModel.Text.Trim();
+            _cfg.ProductModel = model;
+            if (model.Length > 0)
+            {
+                var models = _cfg.ProductModels ?? (_cfg.ProductModels = new List<string>());
+                if (!models.Any(x => string.Equals(x, model, StringComparison.OrdinalIgnoreCase)))
+                    models.Add(model);
+            }
             _cfg.Display.Rows = (int)nudRows.Value;
             _cfg.Display.Columns = (int)nudCols.Value;
             _cfg.Display.TitleOkNgHighlight = chkTitleOkNg.Checked;

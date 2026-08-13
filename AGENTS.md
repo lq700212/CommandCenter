@@ -11,13 +11,13 @@
 
 - .NET Framework **4.7.2** WinForms（非 .NET Core/.NET 5+，勿引入其语法/API），C# 语言版本 `LangVersion=7.3`
 - 通讯：**NModbus 3.0.83**（汇川 PLC Modbus TCP）；相机走基恩士 TCP 无协议通信（自写 TcpClient）
-- 序列化：**Newtonsoft.Json**（配置/配方）
+- 序列化：**Newtonsoft.Json**（配置/型号）
 - **依赖策略（重要）**：第三方库拷在 `CommandCenter/libs/` 目录由 csproj `<Reference HintPath>` 直接引用，**不依赖 NuGet restore**，离线可编译。新增第三方库请同样"拷 dll 进 libs 再引用"。
 
 ## 铁律（违反即返工）
 
 1. **文件编码 UTF-8**。禁止 `Add-Content`/`Out-File` 默认编码写中文（会成 GBK）。写文件用 write 工具；新增中文文件后自查：`[IO.File]::ReadAllText(path, UTF8).Contains("预期中文")` 要能命中。
-2. **不提交运行时数据与机密**：`Config/*.json`（appconfig/recipes 等运行时生成）、`Logs/`、`bin/`、`obj/` 一律 gitignore，绝不入库。
+2. **不提交运行时数据与机密**：`Config/*.json`（appconfig 等运行时生成）、`Logs/`、`bin/`、`obj/` 一律 gitignore，绝不入库。
 3. **改动后必须构建验证**（命令见下），禁止提交编译不过的代码。
 4. **不主动 commit/push**，除非用户明确要求；提交前先 `git status` + `git diff` 确认只包含预期改动。
 5. **代码注释要详细，让小白能看懂**：关键方法/流程/边界/配置依赖写清"做什么 + 为什么 + 怎么改"，杜绝 `i++ // 自增` 式废话。参考本仓库 `Services/ProductionCoordinator.cs` 与 `Models/AppConfig.cs` 头部注释风格。
@@ -34,8 +34,27 @@
 - **扫码枪触发指令（V1.12.1，基恩士 SR 无协议）**：Tcp 模式下扫码枪**不是连上就回数据**，上位机须先发一条打开激光/开始读取的指令（`ScanConfig.TriggerCommand`，默认 `LON`）才读码。`ScannerTcpService.TryConnect` 每次连接/重连成功后**自动发送一次**（发送时自动补 `\r\n` 帧结束符），配置留空则不发送。`IScanner.SendTrigger()` 供界面手动重发。串口扫码枪上电即读码、无需触发（串口实现 SendTrigger 为空操作）。改动扫码枪通讯必须同步 `docs/通讯接入.md` 的"扫码枪"章节与默认配置。
 - **UI 线程禁做网络 IO（V1.0.1 血泪）**：轮询/连接/读写 PLC 与相机一律放后台线程（`System.Threading.Timer`），TCP 连接必须 `BeginConnect + WaitOne` 强制超时。禁止在 UI 线程同步 `TcpClient.Connect` 或 `ReadHoldingRegisters`——对不可达 IP 会冻结整个界面（表现为"点按钮半天才响应"）。
 - **显示窗口矩阵用 TableLayoutPanel 百分比等分**：窗口数量由 `display.rows/columns` 配置，所有窗口尺寸由容器等分自动保持一致，禁止写死像素布局。
-- **PLC 寄存器约定（V1.12.11 起从站模式）**：现场 PLC(汇川)做 Modbus 主站、上位机做从站监听本机 502；配置里一律存 **D 地址**（NModbus 从站 `SlaveDataStore.HoldingRegisters.ReadPoints/WritePoints(start,…)` 的 start 即 D 地址，0-based，与原主站 `ReadHoldingRegisters` 一致，无需 +40001）。握手寄存器沿用 D100~D112、读写方向反转（PLC 写到位进来，上位机写完成/计数/配方出去给 PLC 读），配方下发用 D108 标志位握手（上位机写自己区+PLC 轮询拉取+写 0 回执）。**两阶段流程（V1.12.16）**：产线是"先扫码、后拍照"——`ProductionCoordinator` 是状态机（等"扫码到位"→触发扫码等 SN →等"相机到位"→拍图→上报→回扫码阶段）；"扫码枪到位信号"寄存器字段 `PlcConfig.ScanMoveDoneAddress`（占位 D99，**地址待现场定稿，现场只需改 json 数值**）由 `PlcService.ReadScanMoveDone/ClearScanMoveDone` 读写；扫码枪列表经 `_coordinator.AttachScanners()` 注入（协调器比扫码枪先创建，用方法注入不用构造）。改动 PLC 或相机通讯或两阶段流程必须同步 `docs/通讯接入.md`。
-- **相机 FTP 双文件归档 + 点位程序号（V1.12.18；V1.12.24 起取图改"扫目录取最新"）**：现场方案是"一台相机=一个 FTP 目录、所有点位图混放"——FTP 目录只当**中转暂存区**：基恩士每次拍照生成 jpeg+iv4p 两个文件（**文件名不保证恒为 `0000`（现场实测有 `0084` 等任意编号），上位机取图一律 `ImageStore.FindLatestPair(dir)` 扫目录取"修改时间最新"的一对、不写死文件名**），`ProductionCoordinator.OnFtpFileArrived` 按扩展名配对（`PendingCamera.FtpJpegPath/FtpIvpPath`）只作**信号加速**（两个都到齐即 `IsSnapped` 提前收尾，事件漏报也靠收尾重扫兜底），`FinishAll` 归档时经 `TryResolveFtpSources` 重新扫目录取最新对、扫描失败才回退事件路径，调 `ImageStore.SaveImageFilePair` 双格式原样归档（jpeg 显示/归档主体、iv4p 基恩士私有格式原样复制）后 **`DeleteFtpSource` 删除"实际归档的那对"FTP 源文件**（处理即删防同点位重复触发新旧图混淆；**超时兜底时只要目录里有图照样归档**，不再"有图不存"）。**现场相机映射（V1.12.22 定稿，与默认配置一致）**：相机1=**上相机**=`19.87.6.213`→FTP 取图目录 `D:\IV存图\1`；相机2=**下相机**=`19.87.6.212`→`D:\IV存图\2`（`CameraConfig.Name/FtpUploadDir` + `DefaultCameras()` 一处改）。改相机 IP/目录只动 `DefaultCameras()` 与 `appconfig.json` 的 cameras 段。**点位区分靠程序号（V1.12.25 起按相机分表，V1.12.26 支持任意台相机+下拉选择，重要）**：现场是"28 个窗口点位对应两台相机分工拍摄"（不是每台相机拍全部点位），且各相机程序库互相独立，所以点位→程序号映射**必须每相机一张表**：`CameraConfig.StationPrograms`（`List<StationProgramItem>`，`{stationNo,programNo}`，JSON 小驼峰 `stationPrograms`），设置入口与"窗口↔存图点位"矩阵**同页混排在 `WindowPointForm`**（相机下拉选相机 + **点位/程序号两列下拉选择**（V1.12.26）：**点位列候选=窗口映射点位（数量=窗口数，点位默认=窗口编号、互换/个别调整仍用同一集合）**、**程序号候选="不切换"+0~127（0 合法；程序数量与具体编号由相机程序库决定、与窗口数无关，现场动态选）**；点位不拍直接删行、"不切换"=保持相机当前程序）。**新增相机也自动有自己的独立映射表**：SettingsForm 相机表加一行即新相机（`LoadCameraRows` 把来源配置挂行 Tag、`OnSave` 经 `CollectCamerasFromGrid` 复用 Tag 对象保留 `StationPrograms`，映射配好后点保存不会丢；新增行 Tag=null→保存时建空表）。触发切程序在 `ProductionCoordinator.TriggerOneCamera`：先按"本轮该相机要填的窗口"（`_nextWindowIndex + idx`，与 FinishAll 环形窗口分配一致）经 `ResolveStation` 得点位 → `ResolveProgramForStation` 查本相机表 → 命中先 `SwitchProgram`（`PW,nnn`，**`ProgramNo >= 0` 才发，0 也是合法程序号，失败即中止该相机**）再 `T2`、**未命中不切换**（不再读固定 `CameraConfig.ProgramNo`——该字段 V1.12.25 起废弃，仅旧配置兼容）。`SetOutputFormat`（`OF,nn`，配置非空才发、失败即中止）在切程序之前；注意 **`OutputFormat` 必须恰好 2 位数字**（"00"~"03"），配置非法会让该相机触发直接失败（`SetOutputFormat` 校验长度/数字后 false）；`SwitchProgram` 程序号越界会**自动夹到 0~127**（配置 128+ 不报错而是切到 127）。PLC 点位号寄存器（`PlcConfig.PointInfoAddress`，占位 D113，**TODO 待 PLC 程序定稿**）定稿前点位由窗口映射决定。存图文件名默认加时间戳后缀（`ImageConfig.FileTimestampSuffix`）。**取图方式仅保留 Ftp**（Tcp/BR 代码留作旧配置兼容、设置窗体不再提供 Tcp 选项）。改动相机通讯/归档流程必须同步 `docs/通讯接入.md` §2.2/§2.3 与默认配置。
+- **PLC 握手协议（V2.7 定稿，从站模式）**：现场 PLC(汇川)做主站、上位机做从站监听本机 502；
+  **"请求-结果-复位"三拍握手**，寄存器固定 40001~40011（完整协议见 `docs/上位机PLC通信接口定义文档.md`）：
+  请求区（PLC只写）：`40001 扫码请求`(0/1)、`40002 上相机拍照请求`(1~255=点位)、`40003 下相机拍照请求`；
+  结果区（PLC只读，上位机写）：`40004 扫码结果`(0/1/2)、`40005 上相机`、`40006 下相机`(0/1/2，相机结果
+  另支持 **3=点位禁用跳过**）；型号区：`40007~40011`（上位机写固定产品型号，每寄存器 2 字符 ASCII、高字节
+  在前、不足补 0x00、最多 10 字符，超长从 40012 向后扩展）。**三拍流程**：PLC 写请求≠0 → 上位机处理完
+  写结果≠0 → PLC 读走并复位请求=0 → 上位机看请求清零再复位结果=0 → 进入下一拍。**地址约定**：配置里存
+  协议地址（40001~40011）= NModbus 从站 DataStore start（0-based、与原主站 `ReadHoldingRegisters` 一致，
+  **零偏移无需 ±40001**）；地址全部收进 `PlcConfig`（`ScanRequestAddress/CamUpRequestAddress/…/
+ProductModelAddress/ProductModelLen`）+ 顶层 `ProductModel`（**两处可改，同一个值**：① 设置窗体 PLC 区
+   "产品型号" **cmbModel 可编辑下拉**（候选=预置三型号 ∪ 顶层 `ProductModels`，手输新型号保存自动加入）；
+   ② **主界面标题栏型号下拉 `cmbModel`（V2.8，操作员日常切型号用，候选恒预置 U171/U172/Z121 不依赖配置
+   文件）：`SwitchModel` 更新 ProductModel + 写盘 + 只重建协调器**（PLC/相机/扫码枪复用、设备不断连，
+   新型号随下次扫码写 PLC、按新型号查 `modelStationPrograms` 切程序）），
+   每次扫码 `ProductionCoordinator` 调 `PlcService.WriteProductModel` 写 40007~40011）。版本化流程：
+  `ProductionCoordinator` 是**三通道状态机**（通道①扫码 40001/40004、通道②上相机 40002/40005、
+  通道③下相机 40003/40006），相机触发前按窗口映射解析点位 → 按"当前型号→点位"查本相机映射表
+  （先 `ModelStationPrograms` 型号表、型号没配表回退 `StationPrograms` 默认表）`PW` 切程序。
+  扫码枪列表经 `_coordinator.AttachScanners()` 注入（协调器比扫码枪先创建，用方法注入不用构造）。
+  改动 PLC 或相机通讯或握手流程必须同步 `docs/通讯接入.md` 与 `docs/上位机PLC通信接口定义文档.md`。
+- **相机 FTP 双文件归档 + 点位程序号（V1.12.18；V1.12.24 起取图改"扫目录取最新"）**：现场方案是"一台相机=一个 FTP 目录、所有点位图混放"——FTP 目录只当**中转暂存区**：基恩士每次拍照生成 jpeg+iv4p 两个文件（**文件名不保证恒为 `0000`（现场实测有 `0084` 等任意编号），上位机取图一律 `ImageStore.FindLatestPair(dir)` 扫目录取"修改时间最新"的一对、不写死文件名**），`ProductionCoordinator.OnFtpFileArrived` 按扩展名配对（`PendingCamera.FtpJpegPath/FtpIvpPath`）只作**信号加速**（两个都到齐即 `IsSnapped` 提前收尾，事件漏报也靠收尾重扫兜底），`FinishAll` 归档时经 `TryResolveFtpSources` 重新扫目录取最新对、扫描失败才回退事件路径，调 `ImageStore.SaveImageFilePair` 双格式原样归档（jpeg 显示/归档主体、iv4p 基恩士私有格式原样复制）后 **`DeleteFtpSource` 删除"实际归档的那对"FTP 源文件**（处理即删防同点位重复触发新旧图混淆；**超时兜底时只要目录里有图照样归档**，不再"有图不存"）。**现场相机映射（V1.12.22 定稿，与默认配置一致）**：相机1=**上相机**=`19.87.6.213`→FTP 取图目录 `D:\IV存图\1`；相机2=**下相机**=`19.87.6.212`→`D:\IV存图\2`（`CameraConfig.Name/FtpUploadDir` + `DefaultCameras()` 一处改）。改相机 IP/目录只动 `DefaultCameras()` 与 `appconfig.json` 的 cameras 段。**V2.8 型号映射预置也在 `DefaultCameras()`（与默认配置一致）**：上相机 U171=P000~P012 / U172=P013~P028、下相机 U171=P000~P003 / Z121=P005~P007；型号候选预置 `ProductModels=["U171","U172","Z121"]`，改型号映射/加新型号优先走界面（设置页"产品型号"下拉 + WindowPointForm 型号下拉），不手改 json。**点位区分靠程序号（V1.12.25 起按相机分表，V1.12.26 支持任意台相机+下拉选择，V2.8 起按产品型号分表，重要）**：现场是"28 个窗口点位对应两台相机分工拍摄"（不是每台相机拍全部点位），且各相机程序库互相独立，所以点位→程序号映射**必须每相机一张表**，**且同一台相机在不同产品型号下程序号/点位归属不同**（如"上相机"型号 U171 用 P000~P012、U172 用 P013~P028），故再**按型号分表**：`CameraConfig.StationPrograms`（`List<StationProgramItem>`，`{stationNo,programNo}`，JSON `stationPrograms`）作"默认/不区分型号"表 + `ModelStationPrograms`（`[{modelName,programs:[{stationNo,programNo},…]}]`，JSON `modelStationPrograms`）每型号一张；运行时 `ResolveProgramForStation` 先查当前型号同名表（大小写不敏感）、型号没配表回退默认表、仍无该点位就不切换。型号候选走顶层 `ProductModels`（预置 U171/U172/Z121，设置页可手输加入）。设置入口与"窗口↔存图点位"矩阵**同页混排在 `WindowPointForm`**（**相机 + 型号双下拉**（型号="默认（不区分型号）"+候选；"默认"编辑旧 `StationPrograms`、其余编辑对应 `ModelStationPrograms`）+ **点位/程序号两列下拉选择**（V1.12.26）：**点位列候选=窗口映射点位（数量=窗口数，点位默认=窗口编号、互换/个别调整仍用同一集合）**、**程序号候选="不切换"+0~127（0 合法；程序数量与具体编号由相机程序库决定、与窗口数无关，现场动态选）**；点位不拍直接删行、"不切换"=保持相机当前程序）。**新增相机也自动有自己的独立映射表**：SettingsForm 相机表加一行即新相机（`LoadCameraRows` 把来源配置挂行 Tag、`OnSave` 经 `CollectCamerasFromGrid` 复用 Tag 对象保留 `StationPrograms`+`ModelStationPrograms`，映射配好后点保存不会丢；新增行 Tag=null→保存时建空表）。触发切程序在 `ProductionCoordinator.TriggerOneCamera`：先按"本轮该相机要填的窗口"（`_nextWindowIndex + idx`，与 FinishAll 环形窗口分配一致）经 `ResolveStation` 得点位 → `ResolveProgramForStation` 查**本相机当前型号表** → 命中先 `SwitchProgram`（`PW,nnn`，**`ProgramNo >= 0` 才发，0 也是合法程序号，失败即中止该相机**）再 `T2`、**未命中不切换**（不再读固定 `CameraConfig.ProgramNo`——该字段 V1.12.25 起废弃，仅旧配置兼容）。`SetOutputFormat`（`OF,nn`，配置非空才发、失败即中止）在切程序之前；注意 **`OutputFormat` 必须恰好 2 位数字**（"00"~"03"），配置非法会让该相机触发直接失败（`SetOutputFormat` 校验长度/数字后 false）；`SwitchProgram` 程序号越界会**自动夹到 0~127**（配置 128+ 不报错而是切到 127）。V2.7 起点位来源 = PLC 请求 `40002`/`40003` 里带的点位编号（触发前再按窗口映射确认归属相机，不再有单独的点位寄存器）。存图文件名默认加时间戳后缀（`ImageConfig.FileTimestampSuffix`）。**取图方式仅保留 Ftp**（Tcp/BR 代码留作旧配置兼容、设置窗体不再提供 Tcp 选项）。改动相机通讯/归档流程必须同步 `docs/通讯接入.md` §2.2/§2.3 与默认配置。
 - **删除/清理旧代码的自检纪律（必须遵守，2026-08 血泪总结）**：删除"旧配置兼容/冗余判断"这类代码时，先分清两类再动手：
   - **真·旧配置兼容**（可删）：为"旧版本缺字段/旧格式"写的兜底，项目未上线时是死代码；
   - **防 NRE 的空安全**（不可删，否则留坑）：`obj.Prop.Trim()`、`obj.Method()` 这类链式调用，删掉外层判空后，配置被手改成 null/空值时直接崩溃。
@@ -53,7 +72,7 @@
 
 | 文件 | 作用 |
 | --- | --- |
-| `CommandCenter/Views/MainForm.cs` | 主窗体：标题栏 + 窗口矩阵 + 事件接线；序列号框 txtSerial 点击直录（Enter 提交/Esc 还原/失焦非空提交，V1.12.19，见 SetupSerialEditor） |
+| `CommandCenter/Views/MainForm.cs` | 主窗体：标题栏 + 窗口矩阵 + 事件接线；**标题栏型号下拉 cmbModel（V2.8，操作员直接切型号，见 SwitchModel/InitModelCombo）**；序列号框 txtSerial 点击直录（Enter 提交/Esc 还原/失焦非空提交，V1.12.19，见 SetupSerialEditor） |
 | `CommandCenter/Services/ProductionCoordinator.cs` | 生产流程编排（两阶段状态机：扫码到位→扫SN→相机到位→拍到图→上报→循环），业务核心 |
 | `CommandCenter/Services/ConnectionMonitor.cs` | 连接健康监控：后台心跳 + 断连自动重连 + 边沿日志（对齐 AgingTestSystem） |
 | `CommandCenter/Services/PlcService.cs` | 汇川 PLC Modbus TCP 读写（NModbus 3.0.83） |

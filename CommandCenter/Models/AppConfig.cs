@@ -35,6 +35,37 @@ namespace CommandCenter.Models
         /// <summary>PLC 通讯配置（汇川，Modbus TCP 从站）</summary>
         public PlcConfig Plc { get; set; } = new PlcConfig();
 
+        /// <summary>
+        /// 固定产品型号（V2.7 协议）：每次扫码完成，上位机把本值写入 PLC 40007~40011
+        /// （最多 10 个 ASCII 字符，多余部分用 0x00 补齐）。现场型号固定不变，改这里即可，
+        /// 不用每次从 SN 解析。设置窗体"系统设置"里可改。
+        /// 【V2.8 型号切换】型号同时决定"点位→相机程序号"映射查哪张表（见
+        ///   CameraConfig.ModelStationPrograms）——切型号时把本值改成对应型号，上位机
+        ///   就会按该型号的表切相机程序。保存热更后立即生效（coordinator 重建）。
+        /// </summary>
+        public string ProductModel { get; set; } = "";
+
+        /// <summary>
+        /// 产品型号候选列表（V2.8）：现场可切换的型号清单，默认预置现场三型号
+        ///   ["U171", "U172", "Z121"]（见 DefaultProductModels）。
+        /// 用途：
+        ///   ① 设置窗体"产品型号"可编辑下拉的候选项（也可手动输入新型号，保存时自动加入本列表）；
+        ///   ② "窗口/点位配置…"里"点位→相机程序号"映射按型号分表编辑时的型号下拉候选。
+        /// 【为什么不写成属性初始化器默认值】与 Cameras 同理（V1.9.9）：Newtonsoft 反序列化对
+        ///   已有实例的集合是复用并 Add 进 json 元素而非整值替换，预置默认会把 json 里的型号
+        ///   叠加重复。故初始化器给空列表，默认三型号统一交给 ConfigStore.Load 的"空/缺省兜底"。
+        /// </summary>
+        public List<string> ProductModels { get; set; } = new List<string>();
+
+        /// <summary>
+        /// 现场默认产品型号候选（V2.8，见 ProductModels）。三型号对应现场两套相机程序映射：
+        ///   U171：上相机 P000~P012、下相机 P000~P003；U172：上相机 P013~P028；
+        ///   Z121：下相机 P005~P007（具体点位→程序号见 CameraConfig.DefaultCameras）。
+        /// 返回全新列表实例，调用方可直接 AddRange/复制，不共享引用。
+        /// </summary>
+        public static List<string> DefaultProductModels() =>
+            new List<string> { "U171", "U172", "Z121" };
+
         /// <summary>主界面显示窗口 / 标题栏配置</summary>
         public DisplayConfig Display { get; set; } = new DisplayConfig();
 
@@ -117,6 +148,11 @@ namespace CommandCenter.Models
         /// 所以点位→程序号必须按相机分表：某相机表里配了哪些点位 == 这台相机负责拍哪些点位；
         /// 且不同相机的同名程序（P000/P001…）是各相机自己的程序库，互相独立，必须各自配置。
         ///
+        /// 【V2.8 按型号分表】本字段作为"无型号/默认"的表兜底——运行时优先查本相机
+        ///   ModelStationPrograms 里与当前产品型号同名的那张表（见 ProductionCoordinator
+        ///   ResolveProgramForStation），没配该型号的表才回退本默认表。历史上本字段是唯一映射源，
+        ///   保留它保证旧配置兼容、也让"不管型号"的场景不用每个型号都建表。
+        ///
         /// 【触发逻辑】ProductionCoordinator.TriggerOneCamera 在触发前查出"本轮该相机要填的窗口"对应
         /// 的点位号，在本表里查该点位对应的程序号：命中→发 PW 切换后再触发；未命中→不切换
         /// （该点位不归本相机拍，或还没配映射，保持相机当前程序）。不会像旧固定 ProgramNo 那样误切。
@@ -125,6 +161,19 @@ namespace CommandCenter.Models
         /// 点位号对应存图点位（DisplayConfig.WindowStationMap 的取值，1~9999）；程序号 0~127 合法（0 也是程序）。
         /// </summary>
         public List<StationProgramItem> StationPrograms { get; set; } = new List<StationProgramItem>();
+
+        /// <summary>
+        /// 本相机按【产品型号】分组的"点位→相机程序号"映射表（V2.8，设置页 WindowPointForm 型号下拉编辑）。
+        ///
+        /// 【为什么按型号分表】现场同一台相机的程序库分型号：U171/U172 等不同产品型号对应的相机
+        ///   程序号不同（例：上相机型号 U171 用 P000~P012、型号 U172 用 P013~P028，点位归属也不同）。
+        ///   型号列表来自 AppConfig.ProductModels，切型号后查对应型号的表切程序，型号没配的表就
+        ///   回退 StationPrograms 默认表。每张表结构同 StationPrograms（点位→程序号）。
+        ///
+        /// 【JSON 形态】modelStationPrograms: [
+        ///     { "modelName":"U171", "programs":[ { "stationNo":1, "programNo":0 }, ... ] }, ... ]。
+        /// </summary>
+        public List<ModelStationPrograms> ModelStationPrograms { get; set; } = new List<ModelStationPrograms>();
 
         /// <summary>
         /// 判定结果输出格式（OF 指令，V1.12.18）：留空/非法则不发送（相机用默认标准格式）。
@@ -195,17 +244,70 @@ namespace CommandCenter.Models
         /// 相机1=上相机=19.87.6.213 → FTP 取图目录 D:\IV存图\1；
         /// 相机2=下相机=19.87.6.212 → FTP 取图目录 D:\IV存图\2。
         /// 其余参数取模型默认。
+        /// 【V2.8 预置型号映射】每台相机按型号预置"点位→程序号"表（ModelStationPrograms，
+        ///   现场定稿，见下）：切到对应型号后触发相机前自动切程序。
+        ///   上相机：U171→P000~P012、U172→P013~P028；下相机：U171→P000~P003、Z121→P005~P007。
+        ///   没列出的型号（如上相机 Z121）运行时查不到型号表，回退默认表 StationPrograms
+        ///   （本次未预置 → 不切换程序，保持相机当前程序）。
         /// 【为什么收敛成一个方法】三处需要"默认两台相机"（未配置时 AppConfig.Cameras 的
         ///   初值、主窗体 BuildServices 的空配置兜底、设置窗体空表格默认行/添加行），
         ///   若各自硬编码 IP，改现场 IP 要改好几个地方、极易漏。统一走本方法，
         ///   现场换相机 IP 只改这一处即可。
         /// 【注意】返回的是全新实例列表，调用方可直接 AddRange/遍历，不会与原来的配置共享引用。
         /// </summary>
-        public static List<CameraConfig> DefaultCameras() => new List<CameraConfig>
+        public static List<CameraConfig> DefaultCameras()
         {
-            new CameraConfig { Name = "上相机", IpAddress = "19.87.6.213", FtpUploadDir = @"D:\IV存图\1" },
-            new CameraConfig { Name = "下相机", IpAddress = "19.87.6.212", FtpUploadDir = @"D:\IV存图\2" }
-        };
+            return new List<CameraConfig>
+            {
+                new CameraConfig
+                {
+                    Name = "上相机",
+                    IpAddress = "19.87.6.213",
+                    FtpUploadDir = @"D:\IV存图\1",
+                    ModelStationPrograms = new List<ModelStationPrograms>
+                    {
+                        new ModelStationPrograms { ModelName = "U171", Programs = Table(
+                            (1, 0), (2, 1), (3, 2), (4, 2), (5, 2), (6, 2), (7, 3), (8, 4),
+                            (9, 5), (10, 6), (11, 7), (12, 8), (13, 9), (14, 10), (15, 10),
+                            (16, 10), (17, 11), (18, 12)) },
+                        new ModelStationPrograms { ModelName = "U172", Programs = Table(
+                            (1, 13), (2, 14), (3, 14), (4, 28), (5, 15), (6, 15), (7, 15),
+                            (8, 15), (9, 15), (10, 16), (11, 17), (12, 18), (13, 18),
+                            (14, 19), (15, 20), (16, 21), (17, 21), (18, 22), (19, 23),
+                            (20, 19), (21, 24), (22, 25), (23, 26), (24, 26), (25, 27), (26, 27)) }
+                    }
+                },
+                new CameraConfig
+                {
+                    Name = "下相机",
+                    IpAddress = "19.87.6.212",
+                    FtpUploadDir = @"D:\IV存图\2",
+                    ModelStationPrograms = new List<ModelStationPrograms>
+                    {
+                        new ModelStationPrograms { ModelName = "U171", Programs = Table(
+                            (1, 0), (2, 1), (3, 2), (4, 3)) },
+                        new ModelStationPrograms { ModelName = "Z121", Programs = Table(
+                            (1, 5), (2, 6), (3, 7)) }
+                    }
+                }
+            };
+        }
+
+        /// <summary>
+        /// 构建一张"点位→程序号"映射表（默认相机预置表用，见 DefaultCameras 与
+        /// ModelStationPrograms）。每个参数是 (点位, 程序号) 元组，直接转成 StationProgramItem。
+        /// 程序号范围 0~127（0 是合法程序 P000），越界值可在触发时由 SwitchProgram 自动夹取。
+        /// </summary>
+        private static List<StationProgramItem> Table(params (int station, int program)[] rows)
+        {
+            var list = new List<StationProgramItem>();
+            if (rows != null)
+            {
+                foreach (var r in rows)
+                    list.Add(new StationProgramItem { StationNo = r.station, ProgramNo = r.program });
+            }
+            return list;
+        }
     }
 
     /// <summary>
@@ -225,17 +327,35 @@ namespace CommandCenter.Models
     }
 
     /// <summary>
+    /// 某个【产品型号】下，本相机的"点位→相机程序号"映射表（V2.8，装在
+    /// CameraConfig.ModelStationPrograms 列表里，每个型号一张表）。
+    /// - ModelName：产品型号名（对应 AppConfig.ProductModels 里的型号，如 "U171"；
+    ///   运行时与 AppConfig.ProductModel 按名称匹配，大小写不敏感）；
+    /// - Programs：与 StationPrograms 相同结构的点位→程序号表（StationProgramItem 列表）。
+    /// 触发切程序时按当前型号查本表；型号没配表 → 回退 CameraConfig.StationPrograms 默认表。
+    /// </summary>
+    public class ModelStationPrograms
+    {
+        /// <summary>产品型号名（与 AppConfig.ProductModel/ProductModels 对应，如 "U171"）</summary>
+        public string ModelName { get; set; } = "";
+
+        /// <summary>该型号下本相机的"点位→相机程序号"映射表（结构同 StationPrograms）</summary>
+        public List<StationProgramItem> Programs { get; set; } = new List<StationProgramItem>();
+    }
+
+    /// <summary>
     /// PLC 通讯配置（V1.12.11 起角色反转：现场汇川 PLC 做 Modbus TCP 主站，上位机做从站）。
     /// 上位机监听本机 Port 端口（标准 502），等汇川主站 TCP 连入并读写上位机的保持寄存器区。
     /// IpAddress = 上位机监听绑定 IP（"0.0.0.0"=监听所有网卡，现场主机多网卡时可绑指定 IP）。
     ///
-    /// 【寄存器地址沿用 D100~D112，读写方向反转】
-    ///   D100 到位信号：PLC 主站写 1 → 上位机读后清 0；
-    ///   D101 开始信号：上位机写自己区，PLC 来读；
-    ///   D102 完成信号：上位机写自己区(1=成功/2=取像异常)，PLC 来读；
-    ///   D103~D(103+len-1) 配方号：上位机写自己区(ASCII)，D108 配方更新标志=1，PLC 读走后写 0 回执；
-    ///   D110/111/112 总数/OK/NG：上位机写自己区，PLC 来读。
-    /// （Modbus 是主从问答协议，从站不能主动发；"上位机→PLC"全靠 PLC 轮询来读）
+    /// 【V2.7 协议（docs/上位机PLC通信接口定义文档.md）】请求-结果-复位三拍式握手：
+    ///   PLC只写（上位机读）：40001 扫码请求(0/1)、40002 上相机拍照请求(1~255=点位)、40003 下相机拍照请求；
+    ///   PLC只读（上位机写）：40004 扫码结果(0/1/2)、40005 上相机结果、40006 下相机结果、
+    ///                        40007~40011 产品型号(10 字符 ASCII，每寄存器 2 字符，高字节在前)。
+    ///   流程：PLC 写请求=非0 → 上位机处理完写结果≠0 → PLC 读结果并复位请求=0 →
+    ///         上位机看到请求=0 再复位结果=0，进入下一请求。
+    ///   【地址说明】地址值存 PLC 侧地址（40001~40011），与从站 DataStore 偏移零换算
+    ///     （现场实测 PLC 写 40001 上位机 ReadPoints(40001) 即见，见 PlcService.ReadLocal 注释）。
     /// </summary>
     public class PlcConfig
     {
@@ -251,52 +371,32 @@ namespace CommandCenter.Models
         /// <summary>单次读写超时（毫秒，从站模式主要用于日志/容错，不再阻塞主动连接）</summary>
         public int TimeoutMs { get; set; } = 2000;
 
-        // ─── 寄存器地址映射（与现场 PLC 程序确认后调整；方向见类注释） ───
+        // ─── 寄存器地址映射（V2.7 协议，见 docs/上位机PLC通信接口定义文档.md）───
+        // 设计原则：定长请求放前面，结果与变长数据（型号）放后面，地址可向后扩展。
 
-        /// <summary>
-        /// PLC→上位机：扫码枪运动到位信号（V1.12.16 两阶段流程新增，D 地址）。
-        /// 位 1=机器人/机械臂带着扫码枪运动到位、可以扫码；上位机读到后清 0 复位。
-        /// ⚠️ **地址为占位待定稿（默认 D99）**：与现场 PLC 程序核对后统一替换本值即可，
-        ///    不必改程序（其余字段同理，见 docs/通讯接入.md §3.2）。
-        /// </summary>
-        public ushort ScanMoveDoneAddress { get; set; } = 99;
+        /// <summary>PLC→上位机：扫码请求（V2.7）。PLC 写 1=请求扫码、0=无请求；上位机读到 1 触发扫码枪。</summary>
+        public ushort ScanRequestAddress { get; set; } = 40001;
 
-        /// <summary>PLC→上位机：相机运动到位信号（D 地址，PLC 写 1，上位机读后清 0）</summary>
-        public ushort MoveDoneAddress { get; set; } = 100;
+        /// <summary>PLC→上位机：上相机拍照请求（V2.7，对应相机列表第 1 台/上相机）。PLC 写 1~255=点位编号、0=无请求。</summary>
+        public ushort CamUpRequestAddress { get; set; } = 40002;
 
-        /// <summary>
-        /// PLC→上位机：当前到位点位号（D 地址，V1.12.18 占位，默认 D113，待与 PLC 沟通定稿）。
-        /// 【背景】现场一个相机可能拍多个点位、每个点位用不同相机程序（见 CameraConfig.ProgramNo）。
-        ///   为支持"按点位切程序"，PLC 在相机到位信号（MoveDoneAddress）的同时，应把当前点位号
-        ///   写入本寄存器；上位机触发前读它、查"点位→程序号"映射后再发 PW 切换。
-        /// 【TODO】当前未实现读取/映射：点位号含义与映射规则待现场 PLC 程序定稿，
-        ///   届时在 ProductionCoordinator 触发流程中补"读点位号→按映射切程序"逻辑，本字段只做占位。
-        /// </summary>
-        public ushort PointInfoAddress { get; set; } = 113;
+        /// <summary>PLC→上位机：下相机拍照请求（V2.7，对应相机列表第 2 台/下相机）。PLC 写 1~255=点位编号、0=无请求。</summary>
+        public ushort CamDownRequestAddress { get; set; } = 40003;
 
-        /// <summary>上位机→PLC：触发相机工作的"开始"信号（D，上位机写自己区，PLC 来读）</summary>
-        public ushort StartSignalAddress { get; set; } = 101;
+        /// <summary>上位机→PLC：扫码结果（V2.7）。0=默认/复位，1=扫码OK，2=扫码NG（超时）。</summary>
+        public ushort ScanResultAddress { get; set; } = 40004;
 
-        /// <summary>上位机→PLC：拍照完成信号（D，上位机写自己区：1=成功 2=取像失败，PLC 来读）</summary>
-        public ushort DoneSignalAddress { get; set; } = 102;
+        /// <summary>上位机→PLC：上相机拍照结果（V2.7）。0=默认/复位，1=OK，2=NG（判定NG/触发失败/取图失败）。</summary>
+        public ushort CamUpResultAddress { get; set; } = 40005;
 
-        /// <summary>上位机→PLC：配方号起始 D 地址（连续写 N 个字，ASCII 每字 2 字符）</summary>
-        public ushort RecipeAddress { get; set; } = 103;
+        /// <summary>上位机→PLC：下相机拍照结果（V2.7）。取值同上相机结果。</summary>
+        public ushort CamDownResultAddress { get; set; } = 40006;
 
-        /// <summary>配方号写入的字数（支持 1~20，ASCII 每字 2 字符）</summary>
-        public ushort RecipeLen { get; set; } = 5;
+        /// <summary>上位机→PLC：产品型号起始地址（V2.7，连续写 ProductModelLen 个寄存器，最多 10 字符）。</summary>
+        public ushort ProductModelAddress { get; set; } = 40007;
 
-        /// <summary>上位机→PLC：配方更新标志位（V1.12.11 新增，D108）。上位机写 1=有新配方待切换，PLC 读走后写 0 回执。</summary>
-        public ushort RecipeFlagAddress { get; set; } = 108;
-
-        /// <summary>上位机→PLC：检测总数（D，上位机写自己区，PLC 来读）</summary>
-        public ushort TotalCountAddress { get; set; } = 110;
-
-        /// <summary>上位机→PLC：OK 数（D，上位机写自己区，PLC 来读）</summary>
-        public ushort OkCountAddress { get; set; } = 111;
-
-        /// <summary>上位机→PLC：NG 数（D，上位机写自己区，PLC 来读）</summary>
-        public ushort NgCountAddress { get; set; } = 112;
+        /// <summary>产品型号寄存器数（V2.7，每个寄存器 2 字符，默认 5 个=10 字符；超 10 字符按文档从 40012 扩展地址后调整本值）。</summary>
+        public int ProductModelLen { get; set; } = 5;
     }
 
     /// <summary>
@@ -337,6 +437,17 @@ namespace CommandCenter.Models
         /// </summary>
         public List<int> WindowStationMap { get; set; } = new List<int>();
 
+        /// <summary>
+        /// 窗口是否启用（V1.12.28 新增，与 WindowStationMap 同长度=窗口总数 Rows×Columns）。
+        /// 第 i+1 号窗口的点位坏了/停用时把对应元素置 false：
+        ///   - 主界面矩阵"完全移除"该格子，剩余窗口重新紧凑排列（窗口编号保留原值）；
+        ///   - PLC 拍照请求写到该点位时，上位机不触发相机、不显示、不存图、不计数，
+        ///     直接把结果写成 3（跳过，等同告诉 PLC"本点位未检测，请走下一工位"）。
+        /// 编辑入口：系统设置 →"窗口/点位配置…"里右键格子或点"禁用/启用选中窗口"。
+        /// 长度由 ConfigStore.EnsureStationMap 在加载/保存时自动对齐（缺的补 true，多的截断）。
+        /// </summary>
+        public List<bool> WindowEnabled { get; set; } = new List<bool>();
+
         /// <summary>标题栏是否显示各字段（复用项目时可整体隐藏）</summary>
         public bool ShowProductModel { get; set; } = true;
 
@@ -360,7 +471,7 @@ namespace CommandCenter.Models
         /// <summary>标题栏是否显示 NG 数</summary>
         public bool ShowNgCount { get; set; } = true;
 
-        /// <summary>标题栏左侧固定文案（产品型号说明），可含当前配方名</summary>
+        /// <summary>标题栏左侧固定文案（产品型号说明），如"产品型号"</summary>
         public string ProductModelPrefix { get; set; } = "产品型号";
 
         /// <summary>OK 徽标颜色名（与 Windows 颜色名一致，如 Green）</summary>

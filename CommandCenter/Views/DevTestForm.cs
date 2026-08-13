@@ -39,10 +39,12 @@ namespace CommandCenter.Views
     /// │  偏移:[txtOffset]提示:实际D地址=输入地址+偏移量(默认0按D地址)   │
     /// │  读地址测试:[txtReadAddr] [btnReadReg 读] →读到的值[txtReadVal] │
     /// │  写地址测试:[txtWriteAddr] [txtWriteVal] [btnWriteReg 写]       │
-    /// │  到位:[btnReadMoveDone 读] 值[lblMoveVal] [btnClearMoveDone 清] │
-    /// │  触发:[btnStartOn ON] [btnStartOff OFF]                         │
-    /// │  完成:[btnDone0 复位0] [btnDone1 成功1] [btnDone2 失败2]         │
-    /// │  配方:[txtRecipe] [btnWriteRecipe 下发配方]                     │
+    /// │  请求:[btnReadScanReq 读扫码请求] [btnReadCamReq 读相机请求]    │
+    /// │        值:[lblMoveVal]                                          │
+    /// │  型号:[btnWriteModel 写产品型号] [txtModel] (→PLC 40007~40011) │
+    /// │  结果:[btnResScan0 复位0] [btnResScan1 OK1] [btnResScan2 NG2]   │
+    /// │  相机:[btnResCamUp 上相机OK1] [btnResCamDown 下相机OK1]        │
+    /// │       [btnResCamReset 相机复位0]                                │
     /// ├────────────────────────────────────────────────────────────────┤
     /// │【日志】 [txtLog 多行只读滚动]                                    │
     /// └────────────────────────────────────────────────────────────────┘
@@ -240,14 +242,15 @@ namespace CommandCenter.Views
             btnReadProgramNo.Enabled = !busy;
             btnSwProg1.Enabled = !busy;
             btnSwProg2.Enabled = !busy;
-            btnReadMoveDone.Enabled = !busy;
-            btnClearMoveDone.Enabled = !busy;
-            btnStartOn.Enabled = !busy;
-            btnStartOff.Enabled = !busy;
-            btnDone0.Enabled = !busy;
-            btnDone1.Enabled = !busy;
-            btnDone2.Enabled = !busy;
-            btnWriteRecipe.Enabled = !busy;
+            btnReadScanReq.Enabled = !busy;
+            btnReadCamReq.Enabled = !busy;
+            btnWriteModel.Enabled = !busy;
+            btnResScan0.Enabled = !busy;
+            btnResScan1.Enabled = !busy;
+            btnResScan2.Enabled = !busy;
+            btnResCamUp.Enabled = !busy;
+            btnResCamDown.Enabled = !busy;
+            btnResCamReset.Enabled = !busy;
             btnReadReg.Enabled = !busy;
             btnWriteReg.Enabled = !busy;
             btnScannerTrigger.Enabled = !busy;
@@ -586,114 +589,133 @@ namespace CommandCenter.Views
             });
         }
 
-        // ────────────── PLC 操作（全部后台线程；V1.12.11 起从站模式）────────────────
+        // ────────────── PLC 操作（全部后台线程；V1.12.11 起从站模式，V2.7 三拍握手）────────────────
         // 【角色反转】PLC(汇川)做主站、上位机做从站。下列 _plc 调用底层已改为读写上位机自己
-        //   DataStore 寄存器区（不连远端 PLC）：读 D100 到位=读 PLC 写入自己区的值；写寄存器=
-        //   写自己区供 PLC 主站来读。功能测试这里验证"从站数据存储读写正常 + PLC 主站能读到/写入"。
+        //   DataStore 寄存器区（不连远端 PLC）：读请求（40001~40003）=读 PLC 写入自己区的值；写
+        //   结果/型号（40004~40011）=写自己区供 PLC 主站来读。功能测试这里验证
+        //   "从站数据存储读写正常 + PLC 主站能读到/写入"（三拍握手：请求→结果→复位）。
 
-        /// <summary>读到位信号（ReadMoveDone）：返回 true 表示到位寄存器≠0（PLC 主站写入 1）。</summary>
-        private void BtnReadMoveDone_Click(object sender, EventArgs e)
+        /// <summary>读扫码请求（V2.7，读 40001）：显示 PLC 主站是否请求扫码（1=请求，0=无）。</summary>
+        private void BtnReadScanReq_Click(object sender, EventArgs e)
         {
             if (!EnsurePlc()) return;
             SetBusy(true);
-            AppendLog("→ 读到位信号 …");
+            AppendLog("→ 读扫码请求（40001）…");
             Task.Run(() =>
             {
-                bool done = _plc.ReadMoveDone();
+                bool ok = _plc.ReadScanRequest(out bool requested);
                 SafeInvoke(() =>
                 {
-                    lblMoveVal.Text = done ? "1（已到位）" : "0（未到位）";
-                    lblMoveVal.ForeColor = done ? Color.Green : Color.Gray;
-                    AppendLog("← 到位信号 = " + (done ? "1" : "0"));
+                    lblMoveVal.Text = ok ? (requested ? "扫码请求=1" : "扫码请求=0") : "读取失败";
+                    lblMoveVal.ForeColor = ok ? (requested ? Color.Green : Color.Gray) : Color.Red;
+                    AppendLog(ok ? $"← 扫码请求 = {(requested ? 1 : 0)}" : "← 读扫码请求失败");
                     FinishOp();
                 });
             });
         }
 
-        /// <summary>清到位信号（写 0 复位），防止同一信号被重复处理。</summary>
-        private void BtnClearMoveDone_Click(object sender, EventArgs e)
+        /// <summary>读相机请求（V2.7，读 40002/40003）：显示 PLC 主站请求哪台相机拍照（点位编号，0=无请求）。</summary>
+        private void BtnReadCamReq_Click(object sender, EventArgs e)
         {
             if (!EnsurePlc()) return;
             SetBusy(true);
-            AppendLog("→ 清到位信号（写 0）…");
+            AppendLog("→ 读相机请求（40002/40003）…");
             Task.Run(() =>
             {
-                _plc.ClearMoveDone();
+                bool okUp = _plc.ReadCamUpRequest(out int up);
+                bool okDown = _plc.ReadCamDownRequest(out int down);
                 SafeInvoke(() =>
                 {
-                    lblMoveVal.Text = "0（已复位）";
-                    lblMoveVal.ForeColor = Color.Gray;
-                    AppendLog("← 已发送清到位信号");
+                    if (okUp && okDown)
+                    {
+                        lblMoveVal.Text = $"上={up} 下={down}";
+                        lblMoveVal.ForeColor = (up > 0 || down > 0) ? Color.Green : Color.Gray;
+                    }
+                    else
+                    {
+                        lblMoveVal.Text = "读取失败";
+                        lblMoveVal.ForeColor = Color.Red;
+                    }
+                    AppendLog(okUp && okDown ? $"← 相机请求：上相机={up} 下相机={down}" : "← 读相机请求失败");
                     FinishOp();
                 });
             });
         }
 
-        /// <summary>触发信号置 1（通知 PLC 开始工作） / 置 0。</summary>
-        private void BtnStartOn_Click(object sender, EventArgs e) => WriteStartSignal(true);
-        private void BtnStartOff_Click(object sender, EventArgs e) => WriteStartSignal(false);
-
-        /// <summary>写触发信号公共流程：置 1/置 0 共用一个后台线程入口。</summary>
-        private void WriteStartSignal(bool on)
+        /// <summary>写产品型号（V2.7，写 40007~40011）：把 txtModel 内容（≤10 字符）写入型号区供 PLC 主站读取。</summary>
+        private void BtnWriteModel_Click(object sender, EventArgs e)
         {
             if (!EnsurePlc()) return;
             SetBusy(true);
-            AppendLog($"→ 写触发信号 = {(on ? 1 : 0)} …");
+            string model = txtModel.Text.Trim();
+            AppendLog($"→ 写产品型号 [{model}]（40007~40011）…");
             Task.Run(() =>
             {
-                _plc.SetStartSignal(on);
+                bool ok = _plc.WriteProductModel(model);
                 SafeInvoke(() =>
                 {
-                    AppendLog($"← 已发送触发信号 {(on ? "1" : "0")}");
+                    AppendLog(ok ? "← 型号已写入" : "← 型号写入失败（从站未就绪）");
                     FinishOp();
                 });
             });
         }
 
-        /// <summary>写完成信号：1=成功，2=取像失败，0=复位。</summary>
-        private void BtnDone1_Click(object sender, EventArgs e) => WriteDone(1);
-        private void BtnDone2_Click(object sender, EventArgs e) => WriteDone(2);
-        private void BtnDone0_Click(object sender, EventArgs e) => WriteDone(0);
+        /// <summary>写扫码结果（V2.7，写 40004）：0=复位 / 1=OK / 2=NG。三个按钮共用 WriteScanRes。</summary>
+        private void BtnResScan0_Click(object sender, EventArgs e) => WriteScanRes(0);
+        private void BtnResScan1_Click(object sender, EventArgs e) => WriteScanRes(1);
+        private void BtnResScan2_Click(object sender, EventArgs e) => WriteScanRes(2);
 
-        /// <summary>写完成信号公共流程。</summary>
-        private void WriteDone(int code)
+        /// <summary>写扫码结果公共流程。</summary>
+        private void WriteScanRes(int code)
         {
             if (!EnsurePlc()) return;
             SetBusy(true);
-            AppendLog($"→ 写完成信号 = {code} …");
+            AppendLog($"→ 写扫码结果 = {code}（40004）…");
             Task.Run(() =>
             {
-                _plc.SetDone(code);
+                _plc.WriteScanResult(code);
                 SafeInvoke(() =>
                 {
-                    AppendLog($"← 已发送完成信号 {code}（{(code == 1 ? "成功" : code == 2 ? "取像失败" : "复位")}）");
+                    AppendLog($"← 已写扫码结果 {code}（{(code == 0 ? "复位" : code == 1 ? "OK" : "NG")}）");
                     FinishOp();
                 });
             });
         }
 
-        /// <summary>下发配方号（WriteRecipe，ASCII 数字串写入连续寄存器）。</summary>
-        private void BtnWriteRecipe_Click(object sender, EventArgs e)
+        /// <summary>写上相机结果 = 1（V2.7，写 40005）。</summary>
+        private void BtnResCamUp_Click(object sender, EventArgs e) => WriteCamRes(0, 1);
+
+        /// <summary>写下相机结果 = 1（V2.7，写 40006）。</summary>
+        private void BtnResCamDown_Click(object sender, EventArgs e) => WriteCamRes(1, 1);
+
+        /// <summary>相机结果复位 = 0（V2.7，40005/40006 同时写 0）。</summary>
+        private void BtnResCamReset_Click(object sender, EventArgs e) => WriteCamRes(0, 0, resetBoth: true);
+
+        /// <summary>写相机结果公共流程：channel 0=上相机、1=下相机；code 1=OK / 0=复位。</summary>
+        private void WriteCamRes(int channel, int code, bool resetBoth = false)
         {
             if (!EnsurePlc()) return;
-            int recipeId;
-            if (!int.TryParse(txtRecipe.Text.Trim(), out recipeId))
-            {
-                MessageBox.Show("配方号需为整数。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
             SetBusy(true);
-            AppendLog($"→ 下发配方号 {recipeId} …");
+            string target = resetBoth ? "40005/40006" : (channel == 0 ? "40005" : "40006");
+            AppendLog($"→ 写{(resetBoth ? "上下相机" : channel == 0 ? "上相机" : "下相机")}结果 = {code}（{target}）…");
             Task.Run(() =>
             {
-                bool ok = _plc.WriteRecipe(recipeId);
+                if (resetBoth)
+                {
+                    _plc.WriteCamUpResult(code);
+                    _plc.WriteCamDownResult(code);
+                }
+                else if (channel == 0)
+                {
+                    _plc.WriteCamUpResult(code);
+                }
+                else
+                {
+                    _plc.WriteCamDownResult(code);
+                }
                 SafeInvoke(() =>
                 {
-                    // 从站模式（V1.12.13）：WriteRecipe 返回 false = PLC 主站未连入（配方已缓存待拉取）
-                    // 或从站监听未就绪。文案如实区分，不再一律报"下发成功"。
-                    AppendLog(ok
-                        ? "← 配方已写入且 PLC 主站可拉取"
-                        : "← 配方已缓存，PLC 主站未连入（连入后由主站轮询拉取）");
+                    AppendLog("← 相机结果已写入");
                     FinishOp();
                 });
             });
