@@ -49,6 +49,8 @@ namespace CommandCenter.Views
     ///   【禁用窗口/点位（V1.12.28）】右键点击格子、或选中后点"禁用/启用"按钮切换某窗口的启停：
     ///   禁用的格子显示灰底"已禁用"；生效后主界面该窗口不显示（矩阵紧凑重排）、PLC 拍照请求写到
     ///   该点位时上位机不触发相机、不显示、不存图、不计数，直接把结果写成 3（跳过）让 PLC 走下一工位。
+    ///   V2.10.1：禁用状态【跟随点位】——"交换位置"时禁用状态随点位一起搬到另一格（现场语义是
+    ///   "禁用的是这个点位"，不是"禁用的是这个格子"）。
     ///   所有改动先落在内存编辑副本上，点"确定"才写回 DisplayConfig.WindowStationMap 与
     ///   WindowEnabled、各 CameraConfig.StationPrograms（同一实例引用，保证设置窗体保存时拿到最新值）。
     /// </summary>
@@ -225,14 +227,7 @@ namespace CommandCenter.Views
             // 为什么不再加"所有相机已配点位"当候选（V1.12.26 澄清）：点位数量应能被窗口数量确定，
             // 混入异常点位会让下拉多出不存在的点位号。此处仅兜底追加"已配但窗口里没有"的存量点位
             // （老数据），保证下拉里已配置的行仍能显示/重选，正常情况集合就等于窗口映射点位。
-            var stationSet = new SortedSet<int>();
-            foreach (var s in _map) if (s >= 1) stationSet.Add(s);
-            foreach (var cam in _cameras)
-                if (cam.StationPrograms != null)
-                    foreach (var it in cam.StationPrograms)
-                        if (it.StationNo >= 1) stationSet.Add(it.StationNo);
-            colStation.Items.Clear();
-            foreach (var s in stationSet) colStation.Items.Add(s);
+            RefillStationColumn();
 
             // 程序号下拉候选："不切换"（-1，保持相机当前程序，等价于该点位未配映射）+ 0~127。
             // 注意：程序号数量和具体编号是【相机侧程序库】定的，与窗口数量无关——相机装了几个程序、
@@ -258,6 +253,22 @@ namespace CommandCenter.Views
 
         /// <summary>型号下拉"默认"项文案（不区分型号 = 查相机默认表 StationPrograms）。</summary>
         private const string DefaultModelText = "默认（不区分型号）";
+
+        /// <summary>重建"点位列"下拉候选（V2.10.1）：候选 = 窗口映射里的点位 ∪ 各相机已配点位。
+        /// 构造时调用一次；【矩阵里"编辑点位"输入新点位号后也必须调用】——旧代码只在构造时构建
+        /// 一次，用户把窗口点位改成候选外的号后，程序映射区点位列永远选不到它，那个点位就配不上
+        /// 程序（运行时查不出映射、不切程序，可能拍到错误的对应程序）。</summary>
+        private void RefillStationColumn()
+        {
+            var set = new SortedSet<int>();
+            foreach (var s in _map) if (s >= 1) set.Add(s);
+            foreach (var cam in _cameras)
+                if (cam.StationPrograms != null)
+                    foreach (var it in cam.StationPrograms)
+                        if (it.StationNo >= 1) set.Add(it.StationNo);
+            colStation.Items.Clear();
+            foreach (var s in set) colStation.Items.Add(s);
+        }
 
         /// <summary>当前"相机+型号"组合的编辑槽位表；型号槽不存在时自动建空表（首次切过去即可编辑）。</summary>
         private List<StationProgramItem> _slot()
@@ -404,12 +415,20 @@ namespace CommandCenter.Views
             RefreshCells();
         }
 
-        /// <summary>互换两个窗口的存图点位（即"调整窗口位置"，编号固定跟随格子）。</summary>
+        /// <summary>互换两个窗口的存图点位（即"调整窗口位置"，编号固定跟随格子）。
+        /// V2.10.1：禁用状态【跟随点位】一起交换——现场语义是"禁用的是这个点位，不是这个格子"，
+        /// 交换后该点位搬到的窗口保持禁用、原窗口恢复为对方反过来的启用状态。</summary>
         private void SwapCells(int a, int b)
         {
             int t = _map[a];
             _map[a] = _map[b];
             _map[b] = t;
+            if (a >= 0 && a < _enabled.Count && b >= 0 && b < _enabled.Count)
+            {
+                bool te = _enabled[a];
+                _enabled[a] = _enabled[b];
+                _enabled[b] = te;
+            }
         }
 
         /// <summary>常驻提示文案（Designer 里的默认 Text 也保持一致）。</summary>
@@ -479,6 +498,8 @@ namespace CommandCenter.Views
                 return;
             }
             _map[_selectedIdx] = n;
+            // V2.10.1：新点位并入程序映射区点位列候选（否则该点位在下拉里选不到、配不上程序）
+            RefillStationColumn();
             RefreshCells();
         }
 
@@ -547,6 +568,10 @@ namespace CommandCenter.Views
             _enabledTarget.Clear();
             _enabledTarget.AddRange(_enabled);
 
+            // 被删空、本次【不写回】的型号槽（V2.10.1）：逐个收集，结尾弹窗提示用户，
+            // 避免"删光映射行却发现没生效、也没提示"。
+            var emptySlots = new List<string>();
+
             for (int i = 0; i < _cameras.Count; i++)
             {
                 var cam = _cameras[i];
@@ -559,7 +584,13 @@ namespace CommandCenter.Views
                 foreach (var kv in dict)
                 {
                     if (string.IsNullOrEmpty(kv.Key)) continue;          // ""=默认表，已写 StationPrograms
-                    if (kv.Value == null || kv.Value.Count == 0) continue; // 空表=该型号不配映射，不写
+                    if (kv.Value == null || kv.Value.Count == 0)
+                    {
+                        // V2.10.1 空表【沿用该型号既有映射、不写空表】：防止用户删光映射行把配置
+                        // 误删掉。但"删了没生效"需要明示，否则现场以为清掉了其实还在按旧表切程序。
+                        emptySlots.Add($"相机「{(string.IsNullOrWhiteSpace(cam.Name) ? "相机" + (i + 1) : cam.Name)}」型号「{kv.Key}」");
+                        continue;
+                    }
                     var m = dest.FirstOrDefault(x =>
                         string.Equals(x?.ModelName, kv.Key, StringComparison.OrdinalIgnoreCase));
                     if (m == null)
@@ -571,6 +602,18 @@ namespace CommandCenter.Views
                 }
                 cam.ModelStationPrograms = dest;
             }
+
+            if (emptySlots.Count > 0)
+            {
+                MessageBox.Show(
+                    "以下【相机+型号】的程序映射表已清空，本次【保留该型号原有映射】、不写入空表：\r\n" +
+                    string.Join("\r\n", emptySlots) +
+                    "\r\n\r\n解释：型号表为空时运行时仍会按该型号既有的 programStationPrograms 配置切程序。" +
+                    "如确实要让整张型号表失效，请直接编辑 appconfig.json 的 modelStationPrograms 删掉对应型号节点；" +
+                    "只删部分点位则直接在表里删掉那几行即可。",
+                    "映射表为空", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+
             DialogResult = DialogResult.OK;
         }
 

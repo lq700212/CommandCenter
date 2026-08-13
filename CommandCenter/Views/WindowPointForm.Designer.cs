@@ -137,11 +137,13 @@ namespace CommandCenter.Views
             // 
             // lblProgHint
             // 
+            this.lblProgHint.AutoSize = false;
             this.lblProgHint.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(100)))), ((int)(((byte)(100)))), ((int)(((byte)(100)))));
-            this.lblProgHint.Location = new System.Drawing.Point(410, 30);
+            this.lblProgHint.Location = new System.Drawing.Point(410, 26);
             this.lblProgHint.Name = "lblProgHint";
-            this.lblProgHint.Size = new System.Drawing.Size(178, 34);
+            this.lblProgHint.Size = new System.Drawing.Size(178, 40);
             this.lblProgHint.TabIndex = 10;
+            this.lblProgHint.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             this.lblProgHint.Text = "按“相机+型号”查表切程序；\r\n选“默认”查相机的旧映射表。";
             // 
             // dgvPrograms
