@@ -649,7 +649,7 @@ namespace CommandCenter.Views
             this.tip.SetToolTip(this.txtFileNameTpl,
                 "图片文件名规则，占位符会自动替换：\r\n{点位}→窗口点位号（如 1.png）  {SN}→序列号  {OKNG}→OK 或 NG\r\n{年}/{月}/{日}→日期  {时间}→毫秒时间戳；其余文字原样保留。\r\n目录结构里的层级同样支持这些占位符。");
             this.tip.SetToolTip(this.btnEditPoints,
-                "可视化设置每个窗口对应的相机点位与程序（默认\"前上相机后下相机\"铺排）。\r\n点格子选中→\"编辑点位\"（从相机点位表候选里换点）；\"交换位置\"同相机内互换两窗口；\"恢复默认\"重置该型号铺排并全部启用。\r\n改动随本次\"保存\"一起写盘（存按型号的 WindowPointMaps）；自适应/非自适应都可编辑。");
+                "可视化设置每个窗口对应的相机点位与程序（默认\"前上相机后下相机\"铺排）。\r\n点格子选中→\"编辑点位\"（从相机点位表候选里换点）；\"交换位置\"可互换任意两窗口（含上/下相机，交换的是\"窗口↔点位\"对应，不改相机点位/程序表）；\"恢复默认\"重置该型号铺排并全部启用。\r\n改动随本次\"保存\"一起写盘（存按型号的 WindowPointMaps）；自适应/非自适应都可编辑。");
             this.tip.SetToolTip(this.btnAddCam,
                 "在列表末尾添加一台相机（默认值可直接改 IP / 端口 / FTP 上传目录）。");
             this.tip.SetToolTip(this.chkTitleOkNg,

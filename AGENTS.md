@@ -48,7 +48,10 @@
   `ResolveWindowPointMap` 按型号查表、长度≠窗口总数时回退默认；`ConfigStore.EnsureWindowPointMaps`
   加载/保存自动对齐）。**编辑规则**：编辑点位候选=当前型号各相机点位表已有点位、自动排除已被其他窗口
   占用的组合（同"相机+点位"只对应一个窗口，`ProductionCoordinator.TryResolveActiveWindow` 据此反查
-  唯一窗口）；交换位置仅同相机内允许（上下相机同号点位跨相机交换会让反查语义混乱，提示改用编辑点位）；
+  唯一窗口）；**交换位置任意两窗口可互换（含跨相机，V2.13.1 放开）**——窗口↔点位映射本来就是
+  "归属相机+点位号"二元组（`WindowPointItem{CameraIndex,StationNo}`），上相机·点位3 与下相机·点位3
+  是不同点位，反查键=(相机,点位) 在两窗口互换后仍唯一（值集合不变），故跨相机交换不会让反查混乱；
+  交换只改"窗口↔点位"对应（写回 WindowPointMaps），**不改各相机点位表/程序映射 ModelStationPrograms**；
   恢复默认=重置该型号出厂铺排+全部窗口重新启用。设置页勾选自适应仅置灰行/列输入框并弹 ToolTip
   明示"自适应只影响行列形状、不影响点位编辑"。
    **默认型号（V2.12.3）**：`AppConfig.ProductModel` 默认 **"U171"**（非空），无配置文件首次启动也

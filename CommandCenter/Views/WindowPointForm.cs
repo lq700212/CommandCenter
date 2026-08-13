@@ -13,8 +13,9 @@ namespace CommandCenter.Views
     ///   ① 【窗口 ↔ 相机点位】可视化格子矩阵（V2.12.1 起统一模型，V2.13 起支持手动编辑）：
     ///      每个格子=一个显示窗口，默认按"前上相机后下相机、各相机点位表顺序"铺排（点数=
     ///      各相机点位表条目和），格子下方标注"归属相机·点位号"（如上相机·点位3）；
-    ///      **V2.13 恢复手动编辑**：编辑点位（从相机点位表已有点位里选）/ 交换位置（同相机内
-    ///      互换两窗口）/ 恢复默认（重置出厂铺排 + 全部启用）——自适应/非自适应都可用，
+    ///      **V2.13 恢复手动编辑**：编辑点位（从相机点位表已有点位里选）/ 交换位置（任意两窗口
+    ///      互换，含跨相机——不同相机点号相同但点位不同，靠"归属相机·点位号"二元组区分）/
+    ///      恢复默认（重置出厂铺排 + 全部启用）——自适应/非自适应都可用，
     ///      结果存进 DisplayConfig.WindowPointMaps（按型号分表）。
     ///   ② 【点位 → 相机程序号】每台相机各自一张表（V1.12.25 新增），**V2.8 起再按产品型号分表**：
     ///      同一台相机的程序库会随产品型号变化（如"上相机"型号 U171 用 P000~P012、U172 用 P013~P028），
@@ -93,7 +94,8 @@ namespace CommandCenter.Views
         /// <summary>确定时写回的"窗口↔点位映射"目标（DisplayConfig.WindowPointMaps 的引用，V2.13）。</summary>
         private readonly List<ModelWindowPointMap> _windowPointMapsTarget;
 
-        /// <summary>是否处于"交换位置"模式（点完两个窗口自动互换，V2.13 恢复；仅同相机内允许）。</summary>
+        /// <summary>是否处于"交换位置"模式（点完两个窗口自动互换，V2.13 恢复；V2.13.1 起放开
+        /// 跨相机——任意两窗口可互换，窗口↔点位映射用"归属相机+点位号"二元组区分同名点位）。</summary>
         private bool _swapping;
 
         /// <summary>交换模式里已选中的第一个窗口序号（-1 = 还没选第一个）。</summary>
@@ -695,7 +697,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         /// <summary>
         /// 格子点击：单击选中/取消选中（供"禁用/启用"按钮定位高亮）。
         /// V2.13 起支持交换：处于"交换位置"模式（_swapping）时，第一次点记起点（_swapA）、
-        /// 第二次点执行交换（同相机内互换点位，跨相机提示不允许）；不在交换模式时仅选中/取消。
+        /// 第二次点执行交换（任意两窗口互换点位，含跨相机）；不在交换模式时仅选中/取消。
         /// 右键点击格子仍走禁用/启用（见 BuildMatrix 里挂的 MouseUp）。
         /// </summary>
         private void OnCellClick(int idx)
@@ -705,7 +707,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 if (_swapA < 0)
                 {
                     _swapA = idx;                      // 第一次点击：记起点并高亮
-                    lblHint.Text = "已选中" + (idx + 1) + "号窗口作为交换起点，请再点一个要互换点位的窗口（同相机内）。";
+                    lblHint.Text = "已选中" + (idx + 1) + "号窗口作为交换起点，请再点一个要互换点位的窗口（可跨相机）。";
                     RefreshCells();
                 }
                 else
@@ -727,7 +729,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         private const string HintDefault =
             "每个格子 = 主界面一个显示窗口。上方是【窗口编号】；下方是【归属相机·相机点位号】。\r\n" +
             "默认按\"前上相机后下相机、各相机点位表顺序\"铺排（随下方\"型号\"下拉联动）。\r\n" +
-            "可选中窗口后点【编辑点位】（从相机点位表候选里换点）、【交换位置】（同相机内点两个窗口互换）、\r\n" +
+            "可选中窗口后点【编辑点位】（从相机点位表候选里换点）、【交换位置】（点两个窗口互换，可跨相机）、\r\n" +
             "【恢复默认】（重置该型号出厂铺排并全部启用）；【右键格子】或选中后点\"禁用/启用\"停用某窗口。\r\n" +
             "下方\"相机程序映射\"区照常可配：相机+型号 → 点位 → 相机程序号。";
 
@@ -850,21 +852,28 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             RefreshCells();
         }
 
-        /// <summary>切换"交换位置"模式：进入后点两个窗口交换点位（同相机内）；再点一次本按钮取消。</summary>
+        /// <summary>切换"交换位置"模式：进入后点两个窗口交换点位（任意两窗口，可跨相机）；
+        /// 再点一次本按钮取消。</summary>
         private void ToggleSwapMode()
         {
             _swapping = !_swapping;
             _swapA = -1;
             lblHint.Text = _swapping
-                ? "交换模式：请依次点击两个要互换点位的窗口（仅同相机内允许，跨相机请用\"编辑点位\"）。\r\n" +
-                  "再次点击\"交换位置\"按钮可取消交换模式。"
+                ? "交换模式：请依次点击两个要互换点位的窗口（可跨相机；交换的是\"窗口↔归属相机·点位号\"\r\n" +
+                  "的对应关系，不改相机自身的点位/程序表）。再次点击\"交换位置\"按钮可取消交换模式。"
                 : HintDefault;
             RefreshCells();
         }
 
         /// <summary>
-        /// 交换两个窗口的点位（V2.13）：仅同一台相机内允许（上下相机点位号各自从 1 起会重复，
-        /// 跨相机交换点位会让"相机+点位→窗口"反查语义混乱）。交换后两窗口的标注跟随更新。
+        /// 交换两个窗口的点位（V2.13；V2.13.1 起放开跨相机）：**任意两窗口**（含跨相机）直接互换
+        /// 它们对应的 (归属相机, 点位号)。
+        /// 为什么跨相机允许（V2.13.1 修正）：窗口↔点位映射用"归属相机+点位号"**二元组**区分同名点位
+        /// （上相机·点位3 与下相机·点位3 是不同的点位），运行时反查键 = (CameraIndex, StationNo)，
+        /// 两窗口互换只是互换映射值、值集合不变且每个值仍只占一个窗口，所以"相机+点位→窗口"反查
+        /// 保持唯一、不会混乱——V2.13 曾误判"跨相机交换会让反查语义混乱"而禁止，经复核该担心不成立。
+        /// 交换位置【不改变相机和点位的对应关系】（各相机点位表 / 程序映射 ModelStationPrograms 不动），
+        /// 只改变【窗口和点位的对应关系】（写回 WindowPointMaps），与"编辑点位"同语义、只是快速互换。
         /// 被禁用的窗口照常参与交换（交换的是点位归属，与启用状态无关）。
         /// </summary>
         private void SwapCells(int a, int b)
@@ -875,15 +884,6 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             var ia = map[a];
             var ib = map[b];
             if (ia == null || ib == null) return;
-            if (ia.CameraIndex != ib.CameraIndex)
-            {
-                MessageBox.Show($"窗口{a + 1} 与窗口{b + 1} 属于不同相机（{ResolveWindowSource(a + 1)} 与 " +
-                    $"{ResolveWindowSource(b + 1)}），不能直接交换。\r\n" +
-                    "交换位置仅限同一台相机内（上下相机点位号各自从 1 起，跨相机交换会让点位反查语义混乱）。\r\n" +
-                    "如需跨相机调整，请用\"编辑点位\"逐窗口改。", "无法交换",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
             var tmp = map[a];
             map[a] = new WindowPointItem { CameraIndex = ib.CameraIndex, StationNo = ib.StationNo };
             map[b] = new WindowPointItem { CameraIndex = tmp.CameraIndex, StationNo = tmp.StationNo };
