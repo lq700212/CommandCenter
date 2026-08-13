@@ -332,7 +332,7 @@ namespace CommandCenter.Services
             int camIdx = channel; // 通道号==相机下标：上=0、下=1（V2.7 固定映射）
 
             // 跳过判定：请求点位无对应启用窗口（禁用/未配）或该通道没有相机
-            bool skip = !TryResolveActiveWindow(stationNo, out int windowIndex);
+            bool skip = !TryResolveActiveWindow(camIdx, stationNo, out int windowIndex);
             if (!skip && (camIdx >= _cameras.Count || camIdx >= _cameraCfgs.Count))
                 skip = true;
 
@@ -405,6 +405,12 @@ namespace CommandCenter.Services
             int code = 2;                 // 默认 NG，成功路径改 1
             string archived = null;
             string resultText = "";
+            // 存图点位号（V2.12.0）：自适应下必须用【全局窗口编号】windowIndex，不能直接用 PLC 点位
+            // 号 stationNo——自适应里上下相机的点位号各自从 1 起会重复（如上相机 1~18、下相机 1~4），
+            // 若直接拿 stationNo 存图，上下相机同一点位号会重名/混淆。windowIndex 是"前上后下分组"的
+            // 全局唯一编号（上相机窗口 1..N1、下相机窗口 N1+1..N1+N2），正好把存图按相机天然分开。
+            // 非自适应保持历史行为（stationNo 即窗口存图点位 DisplayConfig.WindowStationMap 的值）。
+            int storeStation = _display.AutoFit ? windowIndex : stationNo;
             try
             {
                 // ① 触发前的输出格式 + 程序切换（V1.12.18/V1.12.25）：
@@ -466,7 +472,7 @@ namespace CommandCenter.Services
                     var img = cam.ReadImage();
                     if (img.Succeeded && img.ImageData != null)
                     {
-                        archived = _imageStore.SaveImageBytes(img.ImageData, stationNo, isOk, LatestSerialNumber);
+                        archived = _imageStore.SaveImageBytes(img.ImageData, storeStation, isOk, LatestSerialNumber);
                         hasImage = archived != null;
                         if (!hasImage)
                             LogHelper.Warn($"相机[{camIdx}] 点位{stationNo} 图像归档失败（TCP 取图）");
@@ -491,7 +497,7 @@ namespace CommandCenter.Services
                     }
                     else
                     {
-                        archived = _imageStore.SaveImageFilePair(jpeg, iv4p, stationNo, isOk, LatestSerialNumber);
+                        archived = _imageStore.SaveImageFilePair(jpeg, iv4p, storeStation, isOk, LatestSerialNumber);
                         if (archived != null)
                         {
                             // 归档成功 → 删除 FTP 源文件（"处理即删"，防同点位新旧图混淆）；删失败不阻断
@@ -592,10 +598,33 @@ namespace CommandCenter.Services
         /// ① 在窗口映射 WindowStationMap 里找所有==该点位的窗口，取第一个【启用】的；
         /// ② 映射里没有该点位（自定义点位不在映射内）→ 兜底"点位=窗口编号"且该窗口启用；
         /// ③ 都找不到启用窗口 → 返回 false（调用方按"点位禁用跳过"处理，不拍照不计数）。
+        /// 【自适应模式（V2.12.0）】不走上面的全局映射查找——上下相机点位号各自从 1 起、
+        /// 会重复，必须按相机通道定位窗口（"前上后下分组"：窗口=相机表条目序号 + 相机起始窗口偏移）：
+        /// 在该相机当前型号点位表里找 StationNo==请求点位 的条目位置，窗口 = 该相机起始窗口 + 位置；
+        /// 表里没有该点位（点位不归本相机拍）→ 返回 false（跳过）。
         /// </summary>
-        private bool TryResolveActiveWindow(int stationNo, out int windowIndex)
+        private bool TryResolveActiveWindow(int camIdx, int stationNo, out int windowIndex)
         {
             windowIndex = -1;
+
+            // 自适应模式：按相机通道 + 相机表解析窗口（上下点位号可重复，不能全局查）
+            if (_display.AutoFit)
+            {
+                if (camIdx < 0 || camIdx >= _cameraCfgs.Count) return false;
+                var table = _cameraCfgs[camIdx].ProgramsFor(_productModel);
+                if (table == null) return false;
+                int pos = -1;
+                for (int i = 0; i < table.Count; i++)
+                {
+                    if (table[i] != null && table[i].StationNo == stationNo) { pos = i; break; }
+                }
+                if (pos < 0) return false;          // 该相机点位表里没有此点位 → 不归本相机拍
+                var starts = DisplayConfig.AutoFitCameraStarts(_cameraCfgs, _productModel);
+                if (camIdx >= starts.Count) return false;
+                windowIndex = starts[camIdx] + pos; // 起始窗口 + 表内位置（表第 1 条=窗口 1）
+                return IsWindowEnabled(windowIndex);
+            }
+
             int count = _windowCount();
             if (_windowStationMap != null)
             {
@@ -624,8 +653,15 @@ namespace CommandCenter.Services
             return _windowEnabled[w - 1];
         }
 
-        /// <summary>显示窗口总数（Rows×Columns，至少 1）。</summary>
-        private int _windowCount() => Math.Max(1, _display.Rows * _display.Columns);
+        /// <summary>显示窗口总数（V2.12.0 自适应下 = 各相机按当前型号点位表条目数之和，
+        /// 与主窗体 BuildWindowGrid / 设置页预览统一走 DisplayConfig.AutoFitLayout）。
+        /// 非自适应保持 Rows×Columns（至少 1）。</summary>
+        private int _windowCount()
+        {
+            if (_display.AutoFit)
+                return DisplayConfig.AutoFitLayout(_cameraCfgs, _productModel).windowCount;
+            return Math.Max(1, _display.Rows * _display.Columns);
+        }
 
         /// <summary>
         /// 查某相机"点位→程序号"映射表（V1.12.25；V2.8 起按产品型号分表）：

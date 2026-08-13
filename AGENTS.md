@@ -34,6 +34,14 @@
 - **扫码枪触发指令（V1.12.1，基恩士 SR 无协议）**：Tcp 模式下扫码枪**不是连上就回数据**，上位机须先发一条打开激光/开始读取的指令（`ScanConfig.TriggerCommand`，默认 `LON`）才读码。`ScannerTcpService.TryConnect` 每次连接/重连成功后**自动发送一次**（发送时自动补 `\r\n` 帧结束符），配置留空则不发送。`IScanner.SendTrigger()` 供界面手动重发。串口扫码枪上电即读码、无需触发（串口实现 SendTrigger 为空操作）。改动扫码枪通讯必须同步 `docs/CommandCenter.md` 的"扫码枪"章节与默认配置。
 - **UI 线程禁做网络 IO（V1.0.1 血泪）**：轮询/连接/读写 PLC 与相机一律放后台线程（`System.Threading.Timer`），TCP 连接必须 `BeginConnect + WaitOne` 强制超时。禁止在 UI 线程同步 `TcpClient.Connect` 或 `ReadHoldingRegisters`——对不可达 IP 会冻结整个界面（表现为"点按钮半天才响应"）。
 - **显示窗口矩阵用 TableLayoutPanel 百分比等分**：窗口数量由 `display.rows/columns` 配置，所有窗口尺寸由容器等分自动保持一致，禁止写死像素布局。
+- **显示窗口矩阵"自适应"模式（V2.12.0）**：`DisplayConfig.AutoFit=true` 时窗口行列/数量由静态
+  `AutoFitLayout(cameras, productModel)` 统一计算（总数=各相机按型号点位表 `ProgramsFor(型号)` 条目和、
+  列=min(7,总数)、行=ceil(总数/列)、点数≤7 单行铺满）、`AutoFitCameraStarts` 返回各相机窗口起始序号
+  （"前上相机后下相机"分组），主窗体 BuildWindowGrid / 设置页预览 / 协调器 / WindowPointForm **共用同一套
+  计算，禁止各层再各写一套**。自适应下 **存图点位=全局窗口编号 windowIndex**（上下相机点位号各自从 1 起会
+  重复，绝不能用 PLC 点位号/stationNo 存图，否则上下相机同点位重名覆盖）；手动点位编辑（编辑点位/交换位置/
+  恢复默认）在 WindowPointForm 里**锁定置灰**（按钮禁用+方法内双保险），设置页勾选自适应即置灰行/列输入框并
+  弹 ToolTip 明示"自适应下哪些功能不可用"、相关控件 ToolTip 同步说明。
 - **PLC 握手协议（V2.7 定稿，从站模式）**：现场 PLC(汇川)做主站、上位机做从站监听本机 502；
   **"请求-结果-复位"三拍握手**，寄存器固定 40001~40011（完整协议见 `docs/CommandCenter.md` §5.5）：
   请求区（PLC只写）：`40001 扫码请求`(0/1)、`40002 上相机拍照请求`(1~255=点位)、`40003 下相机拍照请求`；
@@ -85,7 +93,7 @@ ProductModelAddress/ProductModelLen`）+ 顶层 `ProductModel`（**两处可改�
 | `CommandCenter/Views/DevTestForm.cs` | 功能测试窗体（开发者专用：相机 T1/T2 触发（T2 取图闪图存图，V1.12.24）+ PLC 寄存器交互 + 扫码枪读码展示/发触发指令，复用主窗体连接，V1.12.0） |
 | `CommandCenter/Controls/CameraDisplayControl.cs` | 相机显示窗 + 右下角自绘 OK/NG 徽标（主界面不显示点位标识，点位只走设置界面查询）；左上角窗口编号显隐由配置 `DisplayConfig.WindowIndexVisible` 控制（V2.10.6） |
 | `CommandCenter/Views/DirTreeEditForm.cs` | 图片存储目录结构可视化配置（逐级目录 + 文件名规则 + 实时预览） |
-| `CommandCenter/Views/WindowPointForm.cs` | 窗口↔存图点位 + 点位↔相机程序号 可视化配置（格子矩阵编辑点位/交换/恢复默认 + 相机下拉点位程序表，V1.12.25 同页混排、V1.12.26 两列改下拉选择） |
+| `CommandCenter/Views/WindowPointForm.cs` | 窗口↔存图点位 + 点位↔相机程序号 可视化配置（格子矩阵编辑点位/交换/恢复默认 + 相机下拉点位程序表，V1.12.25 同页混排、V1.12.26 两列改下拉选择、V2.12.0 自适应下按相机表铺排矩阵/格子标"相机名·点位号"/锁定点位编辑） |
 | `docs/CommandCenter.md` | **项目文档（V2.10 合并版）**：① 用户使用说明（操作手册）② 系统总览与设备清单 ③ 扫码枪对接 ④ 相机对接 ⑤ PLC 通讯对接与对外协议定义（§5.5）⑥ 计数与结果流转 ⑦ IP/参数速查 ⑧ 版本演进 |
 | `docs/上位机通讯封装范式.md` | 通讯架构技术总结（连接/心跳/重连/UI 解耦范式，跨项目可复用，独立保留） |
 | `CHANGELOG.md` | 版本改动记录（最新在前） |

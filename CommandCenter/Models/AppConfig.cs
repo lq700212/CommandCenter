@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 
@@ -174,6 +175,28 @@ namespace CommandCenter.Models
         ///     { "modelName":"U171", "programs":[ { "stationNo":1, "programNo":0 }, ... ] }, ... ]。
         /// </summary>
         public List<ModelStationPrograms> ModelStationPrograms { get; set; } = new List<ModelStationPrograms>();
+
+        /// <summary>
+        /// 当前产品型号下的"点位→程序号"映射表（V2.12.1，自适应布局/窗口解析共用）：
+        ///   ① 优先在 ModelStationPrograms 里找与指定型号同名的那张表（大小写不敏感），命中即返回它；
+        ///   ② 型号没配表 / ModelStationPrograms 为空 → 回退默认表 StationPrograms（旧兼容 + 不区分型号）。
+        /// 返回的列表可能为空（该相机在当前型号下没有任何点位配置），调用方按空表处理即可。
+        /// 【为什么抽出来】自适应窗口布局（窗口总数=各相机点位和）、运行时"PLC点位→窗口"解析、
+        ///   点位矩阵相机标签展示三处都需要"按型号取某相机的点位表"，收敛成一处查表逻辑避免三处各写。
+        /// </summary>
+        public List<StationProgramItem> ProgramsFor(string productModel)
+        {
+            if (!string.IsNullOrWhiteSpace(productModel) && ModelStationPrograms != null)
+            {
+                foreach (var m in ModelStationPrograms)
+                {
+                    if (m != null && m.Programs != null
+                        && string.Equals(m.ModelName, productModel, StringComparison.OrdinalIgnoreCase))
+                        return m.Programs;
+                }
+            }
+            return StationPrograms ?? new List<StationProgramItem>();
+        }
 
         /// <summary>
         /// 判定结果输出格式（OF 指令，V1.12.18）：留空/非法则不发送（相机用默认标准格式）。
@@ -412,6 +435,59 @@ namespace CommandCenter.Models
         public int Columns { get; set; } = 7;
 
         /// <summary>
+        /// 显示窗口矩阵是否"自适应"（V2.12.0）：窗口行列不再由 Rows/Columns 手工指定，
+        /// 而是【按当前运营产品型号 + 各相机点位表】自动铺排：
+        ///   ① 窗口总数 = 各相机按当前型号查到的"点位→程序号"表（ModelStationPrograms 对应型号表，
+        ///      型号没配表回退 StationPrograms 默认表）点位条目数之和，即上相机点位 + 下相机点位；
+        ///   ② 列数 = min(7, 总点数)，行数 = ceil(总点数 / 列数)——点数不超 7 就单行铺满
+        ///      （1 个点=1×1 大窗占满全区、2 个=左右各半…）；点数多则固定 7 列、自动加行；
+        ///   ③ 窗口编号按"前上后下分组"连续排：前若干窗=上相机点位、后若干窗=下相机点位，
+        ///      与各相机点位表条目【一一对应】（表里第 i 条点位 = 第 i 个窗口）。
+        /// 勾选自适应后，设置在设置窗体的"显示窗口"行、切型号（标题栏/设置页）时自动重算；
+        /// 不勾选自适应则维持历史 Rows×Columns 手动矩阵。
+        /// 【为什么加】现场 28 个窗口点位由两台相机分工，窗口数与型号点位强相关，手填行列容易
+        /// 对不上；让窗口数跟随点位自动铺排，换型号即所见即所得。
+        /// </summary>
+        public bool AutoFit { get; set; } = false;
+
+        /// <summary>
+        /// 计算自适应布局（V2.12.0）：根据相机列表 + 当前产品型号，返回 (行, 列, 窗口总数)。
+        /// 窗口总数 = 各相机 ProgramsFor(型号) 点位表条目数之和（空相机/空表跳过），至少 1；
+        /// 列 = min(7, 总点数)（点数≤7 时单行铺满），行 = ceil(总点数 / 列)。
+        /// 主窗体 BuildWindowGrid / 设置窗体预览 / 协调器等处统一调用，保证各层看到的行列一致。
+        /// </summary>
+        public static (int rows, int cols, int windowCount) AutoFitLayout(
+            IEnumerable<CameraConfig> cameras, string productModel)
+        {
+            int total = 0;
+            foreach (var cam in cameras ?? new List<CameraConfig>())
+                if (cam != null)
+                    total += cam.ProgramsFor(productModel).Count;
+            total = Math.Max(1, total);                                  // 至少 1 个窗口，防除 0
+            int cols = Math.Min(7, total);                               // 点数≤7 → 单行；否则固定 7 列
+            int rows = (int)Math.Ceiling(total / (double)Math.Max(1, cols));
+            return (rows, cols, total);
+        }
+
+        /// <summary>
+        /// 计算自适应下"每台相机的窗口起始序号"（V2.12.0）：第 i 台相机的点位表条目排在
+        /// 窗口区间的起点（前缀和）。用于"前上后下分组"定位某个点位对应哪个窗口编号；
+        /// 也供 WindowPointForm 按相机标注每个窗口的归属与点位描述。
+        /// 返回列表长度=相机数；元素=该相机点位表首条目的窗口编号（1 起），下一台是其前缀和+1。
+        /// </summary>
+        public static List<int> AutoFitCameraStarts(IEnumerable<CameraConfig> cameras, string productModel)
+        {
+            var starts = new List<int>();
+            int acc = 1;                                                 // 窗口编号从 1 开始
+            foreach (var cam in cameras ?? new List<CameraConfig>())
+            {
+                starts.Add(acc);
+                if (cam != null) acc += cam.ProgramsFor(productModel).Count;
+            }
+            return starts;
+        }
+
+        /// <summary>
         /// 窗口逻辑宽（px）。说明：现代码由 MainForm 用 TableLayoutPanel 将主区域等分，
         /// 所有窗口尺寸严格一致并铺满，本字段不参与布局计算，仅作为人工参考。
         /// </summary>
@@ -503,6 +579,14 @@ namespace CommandCenter.Models
         /// 现场嫌编号碍眼时可在系统设置"窗口点位"行勾掉"显示窗口编号"，保存后即时生效。
         /// </summary>
         public bool WindowIndexVisible { get; set; } = true;
+
+        /// <summary>
+        /// 主界面各显示窗口【悬停气泡提示】是否显示（V2.10.8）。
+        /// 默认 true：鼠标放到任一显示窗口内停留片刻，气泡提示"双击放大（全屏查看）；再双击还原"，
+        /// 方便新手操作员发现双击功能。现场觉得气泡挡画面时可在系统设置里勾掉
+        /// "窗口点位"行的"悬停提示"，保存后即时生效。
+        /// </summary>
+        public bool WindowToolTipVisible { get; set; } = true;
 
         /// <summary>按配置反解出 OK/NG 实际画刷色，配置非法时回退默认</summary>
         public Color OkColor => ColorFromName(OkColorName, Color.Green);

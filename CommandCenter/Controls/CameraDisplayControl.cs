@@ -40,6 +40,12 @@ namespace CommandCenter.Controls
         /// <summary>窗口编号（1 起）</summary>
         private int _windowIndex;
 
+        /// <summary>悬停提示（V2.10.7）：提示操作员可双击放大/还原该窗口。</summary>
+        private readonly ToolTip _toolTip;
+
+        /// <summary>悬停气泡提示文案（V2.10.7，开关关闭后再开启时恢复用）。</summary>
+        private const string DoubleClickTipText = "双击放大（全屏查看）；再双击还原";
+
         /// <summary>
         /// 构造：创建图像区、编号标签并摆好位置。
         /// 使用 Dock 覆盖思路做简易布局。
@@ -102,6 +108,15 @@ namespace CommandCenter.Controls
             var handler = new MouseEventHandler(HandleDoubleClick);
             _pictureBox.MouseDoubleClick += handler;
             _windowIndexLabel.MouseDoubleClick += handler;
+
+            // ④ 悬停提示（V2.10.7）：提示操作员"双击放大/还原"。
+            //   ★ 挂到"真实命中双击"的同一批子控件上（PictureBox Dock=Fill 占满整窗、
+            //   编号标签覆盖左上角），与双击订阅同批，保证鼠标悬停到任意位置都有提示；
+            //   不要只挂 UserControl 自身——鼠标实际落在子控件上，单独挂父控件会提示不出来。
+            //   显隐由配置 DisplayConfig.WindowToolTipVisible 控制（V2.10.8），构造默认显示。
+            _toolTip = new ToolTip();
+            _toolTip.SetToolTip(_pictureBox, DoubleClickTipText);
+            _toolTip.SetToolTip(_windowIndexLabel, DoubleClickTipText);
         }
 
         /// <summary>
@@ -131,6 +146,27 @@ namespace CommandCenter.Controls
         public void SetWindowIndexVisible(bool visible)
         {
             _windowIndexLabel.Visible = visible;
+        }
+
+        /// <summary>
+        /// 设置悬停气泡提示是否显示（V2.10.8，由主窗体按配置调用）。
+        /// 默认显示（true）；配置关掉后移除气泡，画面更干净。
+        /// </summary>
+        /// <param name="visible">true=悬停显示气泡提示，false=关闭提示</param>
+        public void SetToolTipVisible(bool visible)
+        {
+            if (visible)
+            {
+                // 恢复提示（文本是常量，与构造时保持一致）
+                _toolTip.SetToolTip(_pictureBox, DoubleClickTipText);
+                _toolTip.SetToolTip(_windowIndexLabel, DoubleClickTipText);
+            }
+            else
+            {
+                // 移除提示：SetToolTip 传 null 即解除该控件的气泡
+                _toolTip.SetToolTip(_pictureBox, null);
+                _toolTip.SetToolTip(_windowIndexLabel, null);
+            }
         }
 
         /// <summary>
@@ -186,7 +222,10 @@ namespace CommandCenter.Controls
         protected override void Dispose(bool disposing)
         {
             if (disposing)
+            {
                 _pictureBox?.Image?.Dispose();
+                _toolTip?.Dispose();
+            }
             base.Dispose(disposing);
         }
     }

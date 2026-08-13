@@ -11,12 +11,12 @@ namespace CommandCenter.Views
     ///
     /// ┌─────────────────────────────────────────────────────────────┐
     /// │ PLC IP:  [19.87.6.1]  端口:[502]  产品型号:[Z1212]             │
-    /// │ 显示窗口: 行[4] 列[7]                                       │
+    /// │ 显示窗口: 行[4] 列[7] [√自适应]                              │
     /// │ 图片保存根目录: [E:\Images]                                    │
     /// │ 目录结构: [配置目录结构...] {年月日}/{SN}/{OKNG}             │
     /// │           ↑ 下方与文件名模板行留 12px 空隙（上下一致）      │
     /// │ 文件名模板:   [{点位}]   （占位符提示见界面）              │
-    /// │ 窗口点位: [窗口/点位配置...] [√显示窗口编号] 点格改存图点位/可交换窗口位置 │
+    /// │ 窗口点位: [窗口/点位配置...] [√显示窗口编号] [√悬停提示] 点格改存图点位/可交换窗口位置 │
     /// │ OK/NG显示: [√标题栏高亮] [√窗口徽标]                        │
     /// │ 相机列表: ┌────┬────────┬────┬──────────┬────────────────────────┐ │
     /// │            │序号│ 相机IP │端口│ 取图方式  │ FTP上传目录            │ │
@@ -93,15 +93,17 @@ namespace CommandCenter.Views
             if (string.IsNullOrWhiteSpace(curModel) && cmbModel.Items.Count > 0)
                 curModel = cmbModel.Items[0].ToString();
             cmbModel.Text = curModel;
-            // 显示窗口行列
-            nudRows.Value = _cfg.Display.Rows;
-            nudCols.Value = _cfg.Display.Columns;
+            // 显示窗口行列（V2.12.0 自适应开关：勾选后行/列输入框置灰，行列按相机点位表自动算）
+            chkAutoFit.Checked = _cfg.Display.AutoFit;
+            UpdateAutoFitUi();
             // OK/NG 显示配置（V1.5.0：标题栏 OK/NG 计数色块高亮开关；
             // V2.10.3：主界面窗口右下角 OK/NG 徽标显隐开关）
             chkTitleOkNg.Checked = _cfg.Display.TitleOkNgHighlight;
             chkWindowOkNg.Checked = _cfg.Display.WindowOkNgVisible;
             // V2.10.4：主界面窗口左上角窗口编号显示开关（默认开，与历史画面一致）
             chkWindowIndex.Checked = _cfg.Display.WindowIndexVisible;
+            // V2.10.8：窗口悬停气泡提示开关（默认开，与历史行为一致）
+            chkWindowToolTip.Checked = _cfg.Display.WindowToolTipVisible;
             // 图片保存根目录、目录结构与文件名模板（目录结构用只读预览，实际编辑进可视化对话框）
             txtSaveDir.Text = _cfg.Image.SaveRootDir;
             RefreshDirPreview();
@@ -113,6 +115,53 @@ namespace CommandCenter.Views
             SetupScannerGridColumns();
             LoadScannerRows();
         }
+
+        /// <summary>
+        /// 同步"自适应"勾选与相关控件的可用状态（V2.12.0）：
+        /// 【勾选后】行/列输入框置灰（行列由相机点位表 AutoFitLayout 自动计算，回填只读参考值）、
+        /// "窗口/点位配置..."按钮的 ToolTip 换成"自适应已锁定手动点位编辑"的说明；
+        /// 【取消勾选】恢复手动行列编辑，ToolTip 恢复普通说明。
+        /// 本方法在 LoadFromConfig 与 CheckedChanged 两处调用；内部的 AutoFitLayout 用 _cfg.Cameras
+        /// 计算（保存前表格未提交的新增相机不参与，行列只是给用户看的参考值，不写回配置）。
+        /// </summary>
+        private void UpdateAutoFitUi()
+        {
+            bool fit = chkAutoFit.Checked;
+            nudRows.Enabled = !fit;
+            nudCols.Enabled = !fit;
+            if (fit)
+            {
+                var layout = DisplayConfig.AutoFitLayout(_cfg.Cameras, cmbModel.Text?.Trim() ?? "");
+                nudRows.Value = Math.Max(1, Math.Min(10, layout.rows));
+                nudCols.Value = Math.Max(1, Math.Min(10, layout.cols));
+            }
+            else
+            {
+                nudRows.Value = _cfg.Display.Rows;
+                nudCols.Value = _cfg.Display.Columns;
+            }
+            tip.SetToolTip(btnEditPoints, fit ? AutoFitPointsButtonTip : AutoFitPointsButtonTipNormal);
+        }
+
+        /// <summary>勾选"自适应"后弹出的提示文案：明示自适下哪些功能不可用（用户要求提示功能）。</summary>
+        private const string AutoFitDisabledHint =
+            "已开启【自适应】：窗口矩阵按\"当前产品型号 + 各相机点位表\"自动铺排。\r\n" +
+            "以下功能不可用（相关输入框/按钮已置灰，避免误操作）：\r\n" +
+            "· 显示窗口 行/列（行数与列数由系统自动计算）；\r\n" +
+            "· 窗口/点位配置里的【编辑点位】【交换位置】【恢复默认】（点位由相机点位表决定，不可手改）。\r\n" +
+            "仍可用：【禁用/启用】窗口、相机程序映射（点位→程序号）。";
+
+        /// <summary>普通模式"窗口/点位配置..."按钮 ToolTip（未开自适应）。</summary>
+        private const string AutoFitPointsButtonTipNormal =
+            "可视化设置每个窗口的存图点位与相机程序映射。\r\n" +
+            "点格子选中→\"编辑点位\"改存图号；\"交换位置\"互换两个窗口内容；\"恢复默认\"一键还原；\r\n" +
+            "改动随本次\"保存\"一起写盘。";
+
+        /// <summary>自适应模式"窗口/点位配置..."按钮 ToolTip（点位编辑已锁定）。</summary>
+        private const string AutoFitPointsButtonTip =
+            "自适应已开启：窗口矩阵由相机点位表自动铺排。\r\n" +
+            "本页仍可配【禁用/启用】窗口与【相机程序映射】（点位→程序号）；\r\n" +
+            "【编辑点位】【交换位置】【恢复默认】已锁定（点位归属由相机点位表决定）。";
 
         /// <summary>
         /// 刷新"配置目录结构..."按钮的 ToolTip：把当前目录结构（层级用 / 拼接）动态挂到按钮上，
@@ -323,6 +372,15 @@ namespace CommandCenter.Views
         /// </summary>
         private void WireButtonEvents()
         {
+            // V2.12.0 自适应开关：勾选变化即时同步相关控件可用状态；
+            // 刚勾选时弹气泡明示"自适下哪些功能不可用"，避免误操作（见 UpdateAutoFitUi / AutoFitDisabledHint）
+            chkAutoFit.CheckedChanged += (s, e) =>
+            {
+                UpdateAutoFitUi();
+                if (chkAutoFit.Checked)
+                    tip.Show(AutoFitDisabledHint, chkAutoFit, 150, 28, 9000);
+            };
+
             // 添加一台相机：直接往表格追加一行默认值（默认取现场相机1：上相机 19.87.6.213 +
             // FTP 目录 D:\IV存图\1，V1.12.22），现场改 IP/端口/取图方式即可
             btnAddCam.Click += (s, e) =>
@@ -377,6 +435,8 @@ namespace CommandCenter.Views
             // 相机区传"当前表格里所有相机行"（V1.12.26：含刚新增未保存的行，均带各自 Tag 上
             // 的映射表），确定时各相机映射写回原位、点保存一起落盘；未保存的新增相机也能立刻
             // 配它自己的"点位→程序号"映射表（保存时按 Tag 复用同对象，映射不丢）。
+            // V2.12.0 自适应：把勾选状态与当前型号一并传入，自适应下窗体按相机点位表自动铺排
+            // 矩阵、锁定手动点位编辑（详见 WindowPointForm）。
             btnEditPoints.Click += (s, e) =>
             {
                 using (var dlg = new WindowPointForm(_cfg.Display.WindowStationMap,
@@ -385,7 +445,9 @@ namespace CommandCenter.Views
                                                      _cfg.Display.WindowEnabled,
                                                      AppConfig.DefaultProductModels()
                                                          .Union(_cfg.ProductModels ?? new List<string>())
-                                                         .ToList()))
+                                                         .ToList(),
+                                                     chkAutoFit.Checked,
+                                                     cmbModel.Text?.Trim() ?? ""))
                 {
                     dlg.ShowDialog(this);
                 }
@@ -460,11 +522,18 @@ namespace CommandCenter.Views
                 if (!models.Any(x => string.Equals(x, model, StringComparison.OrdinalIgnoreCase)))
                     models.Add(model);
             }
-            _cfg.Display.Rows = (int)nudRows.Value;
-            _cfg.Display.Columns = (int)nudCols.Value;
+            // 显示窗口行列与自适应（V2.12.0）：勾选自适应时行列由系统按相机点位表自动算、不落盘
+            // （保留用户手动行列作参考，关掉自适应后仍用原手填值；不污染 Rows/Columns）。
+            if (!chkAutoFit.Checked)
+            {
+                _cfg.Display.Rows = (int)nudRows.Value;
+                _cfg.Display.Columns = (int)nudCols.Value;
+            }
+            _cfg.Display.AutoFit = chkAutoFit.Checked;
             _cfg.Display.TitleOkNgHighlight = chkTitleOkNg.Checked;
             _cfg.Display.WindowOkNgVisible = chkWindowOkNg.Checked; // V2.10.3：窗口右下角 OK/NG 徽标开关
             _cfg.Display.WindowIndexVisible = chkWindowIndex.Checked; // V2.10.4：窗口左上角窗口编号开关
+            _cfg.Display.WindowToolTipVisible = chkWindowToolTip.Checked; // V2.10.8：窗口悬停气泡提示开关
             _cfg.Image.SaveRootDir = txtSaveDir.Text.Trim();
             _cfg.Image.FileNameTemplate = txtFileNameTpl.Text.Trim();
             // 目录结构由 DirTreeEditForm 直接写入 _cfg.Image.SubDirs，这里不用回写；

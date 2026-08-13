@@ -1,5 +1,99 @@
 # 版本改动记录
 
+## V2.12.0（2026-08-13）显示窗口矩阵"自适应"模式：按产品型号+相机点位表自动铺排
+
+> 现场 28 个窗口点位由上下两台相机分工拍摄，窗口总数与型号点位强相关，手填行列容易
+> 对不上；且切换型号后点位归属会变，手动矩阵与点位表容易错位。本次新增**自适应模式**：
+> 勾选后窗口行列/数量完全由"当前产品型号 + 各相机点位表"自动铺排（前上相机、后下相机），
+> 换型号即所见即所得；存图点位改为**全局窗口编号**（自适应下上下相机点位号各自从 1 起会
+> 重复，绝不能拿 PLC 点位号当存图点位，否则上下相机同点位重名覆盖——存图按相机天然分开）。
+
+### 改动范围
+- **`Models/AppConfig.cs`**：`DisplayConfig` 新增 **`AutoFit`**（JSON `autoFit`，默认 `false`）。
+  新增静态 **`AutoFitLayout(cameras, productModel)`**（返回 行/列/窗口总数：总数=各相机按型号
+  点位表条目和，列=min(7,总数)、行=ceil(总数/列)）、**`AutoFitCameraStarts(...)`**（各相机窗口
+  起始序号，前缀和）与 `CameraConfig.ProgramsFor(productModel)`（按型号查点位表、型号没配表
+  回退默认表，三处共用）。
+- **`Utils/ConfigStore.cs`**：`EnsureStationMap` 自适应下窗口总数按 `AutoFitLayout` 计算。
+- **`Services/ProductionCoordinator.cs`**：`TryResolveActiveWindow(camIdx, stationNo, …)` 增加
+  自适应分支（在相机表中定位点位位置 → 起始窗口+位置）；`DoCameraShot` 存图点位自适应下用
+  **windowIndex**（全局唯一，非自适应用 stationNo 不变）；`_windowCount()` 加自适应分支。
+- **`Views/MainForm.cs`**：`BuildWindowGrid` 自适应下按 `AutoFitLayout` 铺排行列与窗口数
+  （不再看 Rows/Columns），保存即热更生效。
+- **`Views/SettingsForm.cs` / `SettingsForm.Designer.cs`**：显示窗口行新增 **`chkAutoFit 自适应`**
+  勾选框（紧跟列框右侧）；勾选后 **行/列输入框自动置灰**并回填自动算出的行列参考值，同时
+  弹出气泡 ToolTip 明示"自适应下哪些功能不可用"（行/列手填、窗口/点位里的点位编辑/交换/恢复），
+  相关控件的悬停 ToolTip 同步提示；`OnSave` 写入 `AutoFit`。
+- **`Views/WindowPointForm.cs`**：构造新增 `autoFit`、`productModel` 参数。自适应下矩阵按
+  相机点位表铺排、格子下方显示 **"相机名·点位号"**（如上相机·点位3），**【编辑点位/交换位置/
+  恢复默认】锁定置灰**（按钮禁用 + 方法内双保险），仅保留"禁用/启用"与相机程序映射区；
+  打开时默认选中当前型号的映射表；确定时不再写回 WindowStationMap（自适应存图走 windowIndex，不依赖它）。
+- **文档**：`README.md`、`docs/CommandCenter.md`、`AGENTS.md`、`CHANGELOG.md`。
+
+### 为什么这么改
+- 窗口数是"两台相机点位之和"——它天然跟着型号走，手填行列本质上是"人工重复计算"，错了
+  就导致窗口与点位对不上、切程序错位；自适应让窗口数跟随点位自动铺排。
+- 上下相机点位号**各自从 1 编号**（上 1~18、下 1~4），自适应下若拿 PLC 点位号直接存图，
+  上下相机会重名覆盖；改用全局窗口编号（前上后下分组）既唯一、又把存图按相机分开。
+- 自适应下点位由相机点位表"说了算"，若再允许手改 WindowStationMap 会造成"窗口点位与相机
+  表不一致"的隐形坑——所以锁定手动点位编辑并置灰，从入口杜绝误操作。
+
+### 优化点
+- 非自适应（默认）行为与旧版完全一致，老配置无回归；
+- 自适应信息全程走同一套 `AutoFitLayout`/`AutoFitCameraStarts`/`ProgramsFor`，主窗体/设置页/
+  协调器/点位窗体四层看到的行列与点位归属完全一致；
+- 切型号（主界面标题栏下拉）后自适应窗口矩阵自动重排，不重启、不手动改 json。
+
+## V2.10.8（2026-08-13）窗口气泡提示显隐可配置（与窗口编号开关同行）
+
+> 承接 V2.10.7（悬停气泡提示）：气泡提示能给新操作员带路，但从画面考虑不是人人
+> 都想一直看。本次把气泡提示做成开关，紧挨"显示窗口编号"右边、垂直居中对齐，
+> 取消勾选后主界面各窗口不再弹出提示。
+
+### 改动范围
+- **`Models/AppConfig.cs`**：`DisplayConfig` 新增 **`WindowToolTipVisible`**（JSON
+  `windowToolTipVisible`，默认 `true`）。
+- **`Controls/CameraDisplayControl.cs`**：提示文案提取为常量
+  `DoubleClickTipText`（构造与开关恢复共用，不漂移）；新增 `SetToolTipVisible(bool)`——
+  false 时 `SetToolTip(..., null)` 解除气泡、true 时重新挂回（挂到 PictureBox / 编号
+  标签这批"真实命中双击"的控件上，与 V2.10.7 一致）。
+- **`Views/MainForm.cs`**：`BuildWindowGrid` 创建窗口后调用
+  `win.SetToolTipVisible(_config.Display.WindowToolTipVisible)`，构造与热更共用入口，
+  保存后即时生效。
+- **`Views/SettingsForm.Designer.cs` / `SettingsForm.cs`**：新增 `chkWindowToolTip`
+  （"悬停提示"），位于 `chkWindowIndex` 右侧（x=402、y=219，与整行垂直居中对齐）；
+  `LoadFromConfig`/`OnSave` 读写，两处 ASCII 布局图与 ToolTip 同步更新。
+- **文档**：`README.md`（可配置项-显示）、`docs/CommandCenter.md`（第一部分"显示"段 +
+  第八部分版本）补充 `windowToolTipVisible`；`CHANGELOG.md` 记录。
+
+### 为什么这么改
+- 气泡提示是"给新手的功能介绍"，熟练后它就是干扰；设开关后现场可按喜好取舍，
+  不必改 json 或改代码。
+
+### 优化点
+- 默认 `true` 等价 V2.10.7 行为，老配置不回归；
+- 开关占"窗口点位"行剩余右侧空间，设置页不加高度、不重排布局。
+
+## V2.10.7（2026-08-13）主界面显示窗口悬停提示"双击放大/还原"
+
+> 现场新操作员不知道显示窗口可以双击放大/还原全屏查看，以前只能口口相传。
+> 本次给每个显示窗口加**悬停气泡提示**：鼠标放到任意窗口内停留片刻，气泡提示
+> "双击放大（全屏查看）；再双击还原"，操作员一看就明白。
+
+### 改动范围
+- **`Controls/CameraDisplayControl.cs`**：新增 ToolTip 气泡，`SetToolTip` 挂到
+  **真实命中双击的同一批子控件**（`_pictureBox` 占满整窗、`_windowIndexLabel` 覆盖
+  左上角）上，与 `MouseDoubleClick` 订阅同批——悬停到任意位置都必有提示，不依赖
+  父控件冒泡；`Dispose` 时释放气泡组件。提示文案："双击放大（全屏查看）；再双击还原"。
+- **文档**：`docs/CommandCenter.md`（第一部分双击说明）+ `CHANGELOG.md` 记录。
+
+### 为什么这么改
+- 悬停提示应跟随"真正能触发双击的控件"：双击逻辑只挂在 `PictureBox`/编号标签上，
+  气泡也挂同批，保证"鼠标在哪能触发双击、在哪就有提示"完全一致，不误导现场。
+
+### 优化点
+- 纯 UI 提示、零配置、零布局改动，不占用设置页，不影响现有双击/全屏流程。
+
 ## V2.10.6（2026-08-13）主界面窗口左上角窗口编号显隐可配置
 
 > 现场反馈：每格窗口左上角悬浮的窗口编号（辅助定位第几路）在画面较满时略显碍眼，

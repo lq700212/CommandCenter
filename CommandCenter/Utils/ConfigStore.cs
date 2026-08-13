@@ -111,16 +111,21 @@ namespace CommandCenter.Utils
 
         /// <summary>
         /// 保证 WindowStationMap（窗口→存图点位）与 WindowEnabled（窗口启用列表）都和
-        /// 显示窗口总数（Rows×Columns）对齐：
-        ///   - 长度不足 → 点位按"点位=窗口编号"补上、启用按 true 补上（默认规则）；
-        ///   - 长度超出 → 多余截断（窗口数改小后，超出部分丢弃）。
+        /// 显示窗口总数对齐：
+        ///   - 非自适应模式：窗口总数 = Rows×Columns（历史行为）；
+        ///   - 自适应模式（V2.12.0）：窗口总数 = 各相机按当前型号点位表条目数之和
+        ///     （见 DisplayConfig.AutoFitLayout），Rows/Columns 仅作历史值保留、不参与。
+        /// 对齐规则不变：长度不足 → 点位按"点位=窗口编号"补上、启用按 true 补上（默认规则）；
+        /// 长度超出 → 多余截断（窗口数改小后，超出部分丢弃）。
         /// 在加载与保存各调一次，保证运行时取 map[i]/enabled[i] 永不越界。
         /// </summary>
         private static void EnsureStationMap(Models.AppConfig cfg)
         {
             int rows = Math.Max(1, cfg.Display.Rows);
             int cols = Math.Max(1, cfg.Display.Columns);
-            int windowCount = rows * cols;
+            int windowCount = cfg.Display.AutoFit
+                ? Models.DisplayConfig.AutoFitLayout(cfg.Cameras, cfg.ProductModel).windowCount
+                : rows * cols;
 
             var map = cfg.Display.WindowStationMap ?? new List<int>();
             while (map.Count < windowCount) map.Add(map.Count + 1);

@@ -17,7 +17,7 @@ namespace CommandCenter.Views
     ///   │ 目录结构: [btnEditDirs 配置目录结构…]                     │
     ///   │    （上下各留 12px 空隙，避免与文件名模板行挤在一起）     │
     ///   │ 文件名模板:     [txtFileNameTpl]                          │
-    ///   │ 窗口点位: [btnEditPoints 窗口/点位配置…] [√chkWindowIndex 窗口编号] │
+    ///   │ 窗口点位: [btnEditPoints 窗口/点位配置…] [√chkWindowIndex 窗口编号] [√chkWindowToolTip 悬停提示] │
     ///   │ OK/NG显示: [√标题栏高亮] [√窗口徽标]                        │
     ///   │ 相机列表:                                                │
     ///   │   ┌──────────────────────────────────────────────────┐   │
@@ -91,6 +91,8 @@ namespace CommandCenter.Views
             this.chkTitleOkNg = new System.Windows.Forms.CheckBox();
             this.chkWindowOkNg = new System.Windows.Forms.CheckBox();
             this.chkWindowIndex = new System.Windows.Forms.CheckBox();
+            this.chkWindowToolTip = new System.Windows.Forms.CheckBox();
+            this.chkAutoFit = new System.Windows.Forms.CheckBox();
             this.lblCams = new System.Windows.Forms.Label();
             this.gridCameras = new System.Windows.Forms.DataGridView();
             this.btnAddCam = new System.Windows.Forms.Button();
@@ -336,6 +338,32 @@ namespace CommandCenter.Views
             this.chkWindowIndex.Text = "显示窗口编号";
             this.chkWindowIndex.UseVisualStyleBackColor = true;
             //
+            // chkWindowToolTip
+            // 主界面窗口"悬停气泡提示"显示开关（V2.10.8）：鼠标放到任一显示窗口内停留片刻，
+            // 气泡提示"双击放大（全屏查看）；再双击还原"，方便新手发现双击功能。默认开；
+            // 现场觉得气泡挡画面可取消勾选。位于"显示窗口编号"右侧、垂直居中对齐。
+            //
+            this.chkWindowToolTip.AutoSize = true;
+            this.chkWindowToolTip.Location = new System.Drawing.Point(402, 219);
+            this.chkWindowToolTip.Name = "chkWindowToolTip";
+            this.chkWindowToolTip.Size = new System.Drawing.Size(90, 23);
+            this.chkWindowToolTip.TabIndex = 18;
+            this.chkWindowToolTip.Text = "悬停提示";
+            this.chkWindowToolTip.UseVisualStyleBackColor = true;
+            //
+            // chkAutoFit
+            // 显示窗口矩阵"自适应"开关（V2.12.0）：勾选后窗口行列按当前型号 + 各相机点位表自动铺排，
+            // 行/列输入框自动置灰；配合 tooltip 明示自适下不可用的功能（见 UpdateAutoFitUi）。
+            // 与"显示窗口行/列"同一行、紧跟列框右侧，垂直居中。
+            //
+            this.chkAutoFit.AutoSize = true;
+            this.chkAutoFit.Location = new System.Drawing.Point(320, 61);
+            this.chkAutoFit.Name = "chkAutoFit";
+            this.chkAutoFit.Size = new System.Drawing.Size(90, 23);
+            this.chkAutoFit.TabIndex = 33;
+            this.chkAutoFit.Text = "自适应";
+            this.chkAutoFit.UseVisualStyleBackColor = true;
+            //
             // lblCams
             // 相机列表标题，加粗醒目
             //
@@ -505,6 +533,8 @@ namespace CommandCenter.Views
             this.pnlScroll.Controls.Add(this.btnAddCam);
             this.pnlScroll.Controls.Add(this.gridCameras);
             this.pnlScroll.Controls.Add(this.lblCams);
+            this.pnlScroll.Controls.Add(this.chkAutoFit);
+            this.pnlScroll.Controls.Add(this.chkWindowToolTip);
             this.pnlScroll.Controls.Add(this.chkWindowIndex);
             this.pnlScroll.Controls.Add(this.chkWindowOkNg);
             this.pnlScroll.Controls.Add(this.chkTitleOkNg);
@@ -600,9 +630,9 @@ namespace CommandCenter.Views
             this.tip.SetToolTip(this.nudPlcPort,
                 "上位机从站监听端口（Modbus TCP 标准 502，需与汇川主站通讯指令里的端口一致）。\r\n保存后即时生效（自动重启从站监听）。");
             this.tip.SetToolTip(this.nudRows,
-                "主界面显示窗口的行数。窗口总数=行×列；保存后即时生效。\r\n新增窗口的存图点位默认=窗口编号，可在下方\"窗口/点位配置...\"里改。");
+                "主界面显示窗口的行数。窗口总数=行×列；保存后即时生效。\r\n新增窗口的存图点位默认=窗口编号，可在下方\"窗口/点位配置...\"里改。\r\n勾选\"自适应\"后本框自动置灰（行数由相机点位表自动计算）。");
             this.tip.SetToolTip(this.nudCols,
-                "主界面显示窗口的列数。窗口总数=行×列；保存后即时生效。\r\n新增窗口的存图点位默认=窗口编号，可在下方\"窗口/点位配置...\"里改。");
+                "主界面显示窗口的列数。窗口总数=行×列；保存后即时生效。\r\n新增窗口的存图点位默认=窗口编号，可在下方\"窗口/点位配置...\"里改。\r\n勾选\"自适应\"后本框自动置灰（列数由相机点位表自动计算）。");
             this.tip.SetToolTip(this.txtSaveDir,
                 "图片保存的根目录（绝对路径）。\r\n实际目录结构按\"配置目录结构...\"里的层级逐级创建。");
             this.tip.SetToolTip(this.btnEditDirs,
@@ -610,7 +640,7 @@ namespace CommandCenter.Views
             this.tip.SetToolTip(this.txtFileNameTpl,
                 "图片文件名规则，占位符会自动替换：\r\n{点位}→窗口点位号（如 1.png）  {SN}→序列号  {OKNG}→OK 或 NG\r\n{年}/{月}/{日}→日期  {时间}→毫秒时间戳；其余文字原样保留。\r\n目录结构里的层级同样支持这些占位符。");
             this.tip.SetToolTip(this.btnEditPoints,
-                "可视化设置每个窗口的存图点位（默认点位=窗口编号）。\r\n点格子选中→\"编辑点位\"改存图号；\"交换位置\"互换两个窗口的内容（编号固定跟随格子）；\"恢复默认\"一键还原。\r\n改动随本次\"保存\"一起写盘。");
+                "可视化设置每个窗口的存图点位（默认点位=窗口编号）。\r\n点格子选中→\"编辑点位\"改存图号；\"交换位置\"互换两个窗口的内容（编号固定跟随格子）；\"恢复默认\"一键还原。\r\n改动随本次\"保存\"一起写盘。\r\n勾选\"自适应\"后仅【禁用/启用】窗口与相机程序映射可用，点位编辑/交换/恢复 自动锁定。");
             this.tip.SetToolTip(this.btnAddCam,
                 "在列表末尾添加一台相机（默认值可直接改 IP / 端口 / FTP 上传目录）。");
             this.tip.SetToolTip(this.chkTitleOkNg,
@@ -619,6 +649,10 @@ namespace CommandCenter.Views
                 "主界面每个显示窗口右下角叠加一个【矩形框 OK/NG 徽标】（样子同标题栏色块，\r\n颜色随 \"OK颜色/NG颜色\" 配置）。默认关闭（保持画面干净），需要实时看每格结果时可勾选。\r\n保存后即时生效。");
             this.tip.SetToolTip(this.chkWindowIndex,
                 "主界面每个显示窗口左上角是否显示【窗口编号】（半透明白底 + 深蓝灰字，辅助现场定位第几路）。\r\n默认勾选（与历史画面一致）；现场嫌编号碍眼可取消勾选，保存后即时生效。");
+            this.tip.SetToolTip(this.chkWindowToolTip,
+                "鼠标放到主界面任一显示窗口内停留片刻，是否弹出【双击放大/还原】气泡提示。\r\n默认勾选（方便新手操作员发现双击功能）；现场嫌气泡挡画面可取消勾选，保存后即时生效。");
+            this.tip.SetToolTip(this.chkAutoFit,
+                "勾选【自适应】后主界面窗口矩阵【不再手动指定行列】，而是按当前产品型号 + 各相机\r\n\"点位→程序号\"表自动铺排（窗口总数=各相机点位和、前上相机后下相机）。\r\n\r\n【同时锁定以下功能（相关输入/按钮自动置灰，避免误操作）】\r\n· 显示窗口 行/列 输入框（行列由系统自动算）；\r\n· 窗口/点位配置里的【编辑点位】【交换位置】【恢复默认】（点位由相机点位表决定，不可手改）；\r\n仍可用：【禁用/启用】窗口、相机程序映射（点位→程序号）。");
             this.tip.SetToolTip(this.btnDelCam,
                 "删除选中的相机行；未选中时先点选要删的行。");
             this.tip.SetToolTip(this.lblScannersTcp,
@@ -673,6 +707,8 @@ namespace CommandCenter.Views
         private CheckBox chkTitleOkNg;
         private CheckBox chkWindowOkNg;
         private CheckBox chkWindowIndex;
+        private CheckBox chkWindowToolTip;
+        private CheckBox chkAutoFit;
         private Label lblCams;
         private DataGridView gridCameras;
         private Button btnAddCam;

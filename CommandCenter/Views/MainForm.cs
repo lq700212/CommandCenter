@@ -700,9 +700,22 @@ namespace CommandCenter.Views
         /// </summary>
         private void BuildWindowGrid()
         {
-            int rows = Math.Max(1, _config.Display.Rows);
-            int cols = Math.Max(1, _config.Display.Columns);
-            int total = rows * cols;
+            // V2.12.0 自适应：窗口行列与数量由"当前产品型号 + 各相机点位表"自动铺排，
+            // 不再看 Rows/Columns（布局规则见 DisplayConfig.AutoFitLayout 注释）。
+            // 当产品型号在各相机点位表里查不到任何点位时 windowCount≥1，矩阵至少保留一个窗口。
+            int rows, cols, total;
+            if (_config.Display.AutoFit)
+            {
+                var layout = DisplayConfig.AutoFitLayout(_config.Cameras, _config.ProductModel);
+                rows = layout.rows; cols = layout.cols; total = layout.windowCount;
+            }
+            else
+            {
+                rows = Math.Max(1, _config.Display.Rows);
+                cols = Math.Max(1, _config.Display.Columns);
+                total = rows * cols;
+            }
+            int gridCells = rows * cols; // 矩阵总格子数（自适应下 ≥ 窗口总数，尾行空余格子留空）
 
             // 重置容器：先释放旧窗口（热更时旧窗口 PictureBox 持有图片句柄，必须 Dispose 防泄漏），
             // 再清掉设计器默认的 1×1 行列与可能残留的子控件。
@@ -732,7 +745,7 @@ namespace CommandCenter.Views
             {
                 bool on = enabled.Count < w || enabled[w - 1]; // 越界按启用（新窗口默认开）
                 if (!on) continue;                             // 禁用窗口：不显示、不占格子
-                if (cellIdx >= total) break;                   // 格子已填满（理论上不会）
+                if (cellIdx >= gridCells) break;               // 格子已填满（理论上不会）
                 int r = cellIdx / cols, c = cellIdx % cols;
                 cellIdx++;
 
@@ -744,6 +757,8 @@ namespace CommandCenter.Views
                 win.SetWindowIndex(w); // 显示"原窗口编号"（点位归属仍按 WindowStationMap[w-1]）
                 // V2.10.4：按配置控制左上角窗口编号显隐（默认显示；关掉画面更干净）
                 win.SetWindowIndexVisible(_config.Display.WindowIndexVisible);
+                // V2.10.8：按配置控制悬停气泡提示显隐（默认显示；勾掉画面更干净）
+                win.SetToolTipVisible(_config.Display.WindowToolTipVisible);
                 // V2.10.3：按配置控制右下角 OK/NG 徽标显隐与颜色（默认关；BuildWindowGrid 在
                 // 构造与热更都会调用，改配置保存后即时生效）
                 win.SetOkNgVisible(_config.Display.WindowOkNgVisible);
