@@ -84,6 +84,8 @@ namespace CommandCenter.Utils
 
             // 保证窗口→存图点位映射长度与窗口总数一致（缺的补默认、多的截断）
             EnsureStationMap(cfg);
+            // V2.13：保证窗口↔点位独立映射（WindowPointMaps）各型号表长度与窗口总数一致
+            EnsureWindowPointMaps(cfg);
             // V2.12.1：归档子目录必须含 {相机} 层（上下相机同号点位靠它隔开），缺则自动补
             EnsureCameraSubDir(cfg);
         }
@@ -97,6 +99,7 @@ namespace CommandCenter.Utils
             {
                 Directory.CreateDirectory(ConfigDir);
                 EnsureStationMap(config);   // 保存前把点位映射对齐到窗口总数，避免写盘出越界/缺项
+                EnsureWindowPointMaps(config); // V2.13：窗口↔点位独立映射对齐（缺型号表补默认）
                 EnsureCameraSubDir(config); // 保存前保证归档目录含 {相机} 层（见类注释第 4 点）
                 string json = JsonConvert.SerializeObject(config, new JsonSerializerSettings
                 {
@@ -160,6 +163,64 @@ namespace CommandCenter.Utils
             while (enabled.Count < windowCount) enabled.Add(true);
             if (enabled.Count > windowCount) enabled.RemoveRange(windowCount, enabled.Count - windowCount);
             cfg.Display.WindowEnabled = enabled;
+        }
+
+        /// <summary>
+        /// 保证"窗口↔点位独立映射"（DisplayConfig.WindowPointMaps，V2.13）与窗口总数对齐。
+        /// 【为什么需要】V2.13 起允许手动编辑窗口↔(相机,点位) 的对应（WindowPointForm 的
+        ///   编辑点位/交换位置/恢复默认）。映射按产品型号分表（ModelWindowPointMap），
+        ///   每张表长度必须 = 该型号窗口总数（各相机点位表条目和，见 WindowCountFor），
+        ///   否则运行时 ResolveWindowPointMap 因长度不匹配回退默认铺排、用户编辑白改。
+        /// 【做法】为每个候选型号（ProductModels ∪ 当前 ProductModel）补一张表：
+        ///   - 型号没配表 → 新建默认铺排表（DefaultWindowPointMap，前上相机后下相机）；
+        ///   - 已有表长度 ≠ 窗口总数（相机点位表增删点位后没跟着改）→ 整表重置为默认铺排
+        ///     （点位由相机点位表唯一决定，数量变了只能回默认，避免"窗口↔点位"错位越界）。
+        /// 注意：不能覆盖"长度恰好匹配"的用户自定义表——那是现场手动编辑的结果，保留。
+        /// </summary>
+        private static void EnsureWindowPointMaps(Models.AppConfig cfg)
+        {
+            if (cfg.Display == null) cfg.Display = new Models.DisplayConfig();
+            var maps = cfg.Display.WindowPointMaps;
+            if (maps == null) cfg.Display.WindowPointMaps = maps = new List<Models.ModelWindowPointMap>();
+
+            // 候选型号集合：全局型号候选 ∪ 当前运营型号（保证切到任何型号都有映射表可用）。
+            // 本文件无 System.Linq，用 IndexOf 大小写不敏感去重。
+            var models = new List<string>();
+            if (!string.IsNullOrWhiteSpace(cfg.ProductModel)) models.Add(cfg.ProductModel);
+            foreach (var m in cfg.ProductModels ?? new List<string>())
+            {
+                if (string.IsNullOrWhiteSpace(m)) continue;
+                if (models.FindIndex(x => string.Equals(x, m, StringComparison.OrdinalIgnoreCase)) < 0)
+                    models.Add(m);
+            }
+
+            foreach (var model in models)
+            {
+                // 每个型号一张默认铺排表（长度=该型号窗口总数）
+                var def = Models.DisplayConfig.DefaultWindowPointMap(cfg.Cameras, model);
+                Models.ModelWindowPointMap found = null;          // 手工查找同名型号表（无 Linq）
+                for (int i = 0; i < maps.Count; i++)
+                {
+                    if (maps[i] != null && string.Equals(maps[i].ModelName, model, StringComparison.OrdinalIgnoreCase))
+                    { found = maps[i]; break; }
+                }
+                if (found == null)
+                {
+                    // 型号没配表：新建默认铺排表（用户在该型号下未编辑过 → 默认=出厂铺排）
+                    maps.Add(new Models.ModelWindowPointMap
+                    {
+                        ModelName = model,
+                        Points = def
+                    });
+                }
+                else if (found.Points == null || found.Points.Count != def.Count)
+                {
+                    // 表存在但长度与窗口总数不一致（点位表增删点位后没跟上）：
+                    // 点位由相机点位表唯一决定，数量变了只能重置默认，防越界/错位
+                    found.Points = def;
+                }
+                // 长度恰好匹配 → 保留用户手动编辑过的映射，不动
+            }
         }
 
         /// <summary>

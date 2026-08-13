@@ -57,10 +57,9 @@ namespace CommandCenter.Views
             this.lblHint.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(100)))), ((int)(((byte)(100)))), ((int)(((byte)(100)))));
             this.lblHint.Location = new System.Drawing.Point(20, 14);
             this.lblHint.Name = "lblHint";
-            this.lblHint.Size = new System.Drawing.Size(600, 42);
+            this.lblHint.Size = new System.Drawing.Size(720, 42);
             this.lblHint.TabIndex = 0;
-            this.lblHint.Text = "每个格子 = 主界面一个显示窗口。上方是【固定编号】；下方是它的【存图点位】。\r\n单击格子选中，点\"编辑点位\"改存图号；点\"交换位置\"可把两个窗口的内容互换（编" +
-    "号固定）。";
+            this.lblHint.Text = "每个格子 = 主界面一个显示窗口。上方是【窗口编号】；下方是【归属相机·相机点位号】。\r\n默认按\"前上相机后下相机\"铺排；可选中窗口后点【编辑点位】【交换位置】【恢复默认】，右键或选中后点\"禁用/启用\"停用窗口。";
             // 
             // pnlMatrix
             // 
@@ -68,7 +67,7 @@ namespace CommandCenter.Views
             this.pnlMatrix.Controls.Add(this.tblMatrix);
             this.pnlMatrix.Location = new System.Drawing.Point(20, 64);
             this.pnlMatrix.Name = "pnlMatrix";
-            this.pnlMatrix.Size = new System.Drawing.Size(600, 296);
+            this.pnlMatrix.Size = new System.Drawing.Size(720, 296);
             this.pnlMatrix.TabIndex = 1;
             // 
             // tblMatrix
@@ -80,7 +79,7 @@ namespace CommandCenter.Views
             this.tblMatrix.Name = "tblMatrix";
             this.tblMatrix.RowCount = 1;
             this.tblMatrix.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
-            this.tblMatrix.Size = new System.Drawing.Size(598, 294);
+            this.tblMatrix.Size = new System.Drawing.Size(718, 294);
             this.tblMatrix.TabIndex = 0;
             // 
             // grpProgram
@@ -96,7 +95,7 @@ namespace CommandCenter.Views
             this.grpProgram.Controls.Add(this.dgvPrograms);
             this.grpProgram.Location = new System.Drawing.Point(20, 368);
             this.grpProgram.Name = "grpProgram";
-            this.grpProgram.Size = new System.Drawing.Size(600, 228);
+            this.grpProgram.Size = new System.Drawing.Size(720, 228);
             this.grpProgram.TabIndex = 7;
             this.grpProgram.TabStop = false;
             this.grpProgram.Text = "相机程序映射（点位 → 相机程序号，每台相机各自一张表）";
@@ -141,10 +140,10 @@ namespace CommandCenter.Views
             this.lblProgHint.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(100)))), ((int)(((byte)(100)))), ((int)(((byte)(100)))));
             this.lblProgHint.Location = new System.Drawing.Point(410, 26);
             this.lblProgHint.Name = "lblProgHint";
-            this.lblProgHint.Size = new System.Drawing.Size(178, 40);
+            this.lblProgHint.Size = new System.Drawing.Size(294, 40);
             this.lblProgHint.TabIndex = 10;
             this.lblProgHint.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            this.lblProgHint.Text = "按“相机+型号”查表切程序；\r\n选“默认”查相机的旧映射表。";
+            this.lblProgHint.Text = "按“相机+型号”查表切程序；\r\n型号没配表时回退该相机的旧映射表。";
             // 
             // dgvPrograms
             // 
@@ -160,7 +159,7 @@ namespace CommandCenter.Views
             this.dgvPrograms.Name = "dgvPrograms";
             this.dgvPrograms.RowHeadersVisible = false;
             this.dgvPrograms.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.CellSelect;
-            this.dgvPrograms.Size = new System.Drawing.Size(568, 116);
+            this.dgvPrograms.Size = new System.Drawing.Size(688, 116);
             this.dgvPrograms.TabIndex = 11;
             // 
             // colStation
@@ -200,7 +199,7 @@ namespace CommandCenter.Views
             this.lblProgNote.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(150)))), ((int)(((byte)(150)))), ((int)(((byte)(150)))));
             this.lblProgNote.Location = new System.Drawing.Point(224, 202);
             this.lblProgNote.Name = "lblProgNote";
-            this.lblProgNote.Size = new System.Drawing.Size(360, 26);
+            this.lblProgNote.Size = new System.Drawing.Size(480, 26);
             this.lblProgNote.TabIndex = 14;
             this.lblProgNote.Text = "点位从下拉选（数量=窗口数）；程序号选'不切换'或相机实际程序号（0~127，数量/编号跟相机程序库走，与窗口数无关）";
             this.lblProgNote.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
@@ -243,7 +242,7 @@ namespace CommandCenter.Views
             // 
             // btnOk
             // 
-            this.btnOk.Location = new System.Drawing.Point(430, 614);
+            this.btnOk.Location = new System.Drawing.Point(540, 614);
             this.btnOk.Name = "btnOk";
             this.btnOk.Size = new System.Drawing.Size(90, 32);
             this.btnOk.TabIndex = 5;
@@ -253,7 +252,7 @@ namespace CommandCenter.Views
             // btnCancel
             // 
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(530, 614);
+            this.btnCancel.Location = new System.Drawing.Point(640, 614);
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(90, 32);
             this.btnCancel.TabIndex = 6;
@@ -266,7 +265,7 @@ namespace CommandCenter.Views
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 19F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(640, 664);
+            this.ClientSize = new System.Drawing.Size(760, 664);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnOk);
             this.Controls.Add(this.btnDisable);

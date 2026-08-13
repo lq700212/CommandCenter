@@ -384,8 +384,43 @@ namespace CommandCenter.Models
         /// <summary>产品型号名（与 AppConfig.ProductModel/ProductModels 对应，如 "U171"）</summary>
         public string ModelName { get; set; } = "";
 
-        /// <summary>该型号下本相机的"点位→相机程序号"映射表（结构同 StationPrograms）</summary>
+        /// <summary>该型号下本相机的"点位→程序号"映射表（结构同 StationPrograms）</summary>
         public List<StationProgramItem> Programs { get; set; } = new List<StationProgramItem>();
+    }
+
+    /// <summary>
+    /// 单个"窗口→(相机, 点位)"映射条目（V2.13，装在 ModelWindowPointMap.Points 列表里）。
+    /// 含义：某个显示窗口对应"相机列表第 CameraIndex 台相机的点位 StationNo"。
+    /// - CameraIndex：相机列表下标（0 起，与 AppConfig.Cameras 顺序一致；点数=窗口总数，
+    ///   "前上相机后下相机"分组，见 DisplayConfig.DefaultWindowPointMap）；
+    /// - StationNo：相机点位号（1~9999，本相机点位表里的点位号，上下相机各自从 1 起会重复）。
+    /// 运行时 PLC 请求 (相机, 点位) → 反查本表定位唯一窗口（见 ProductionCoordinator
+    /// TryResolveActiveWindow）；存图点位=StationNo（文件名 {点位}，靠 {相机} 目录层隔离）。
+    /// </summary>
+    public class WindowPointItem
+    {
+        /// <summary>相机列表下标（0 起）</summary>
+        public int CameraIndex { get; set; }
+
+        /// <summary>相机点位号（1~9999，本相机点位表里的点位号）</summary>
+        public int StationNo { get; set; }
+    }
+
+    /// <summary>
+    /// 某个【产品型号】下，窗口↔点位 的独立映射表（V2.13，装在
+    /// DisplayConfig.WindowPointMaps 列表里，每个型号一张表）。
+    /// - ModelName：产品型号名（与 AppConfig.ProductModel/ProductModels 对应，如 "U171"）；
+    /// - Points：窗口→(相机,点位) 映射（长度 = 该型号窗口总数 = 各相机点位表条目和）。
+    /// 默认铺排 = "前上相机后下相机、各相机点位表顺序"（DefaultWindowPointMap）；
+    /// 手动编辑点位/交换位置后此表偏离默认；恢复默认=重置为默认铺排。
+    /// </summary>
+    public class ModelWindowPointMap
+    {
+        /// <summary>产品型号名（与 AppConfig.ProductModel/ProductModels 对应，如 "U171"）</summary>
+        public string ModelName { get; set; } = "";
+
+        /// <summary>窗口→(相机,点位) 映射（长度=该型号窗口总数，Points[i]=窗口 i+1）</summary>
+        public List<WindowPointItem> Points { get; set; } = new List<WindowPointItem>();
     }
 
     /// <summary>
@@ -439,6 +474,9 @@ namespace CommandCenter.Models
     /// 主界面显示配置：决定显示窗口矩阵、标题栏显示哪些项、OK/NG 颜色。
     /// V2.12.1 起窗口总数由"相机点位表"唯一决定（见 WindowCountFor），Rows/Columns
     /// 只在非自适模式下决定"排列宽度"（列数），行数不够自动补（见 ResolveLayout）。
+    /// 【V2.13 窗口↔点位独立映射（WindowPointMaps）】在"窗口总数=各相机点位表条目和"的
+    /// 前提下，允许手动调整"每个窗口显示哪个相机的哪个点位"（编辑点位/交换位置/恢复默认），
+    /// 见 WindowPointMaps 字段注释。
     /// </summary>
     public class DisplayConfig
     {
@@ -540,6 +578,63 @@ namespace CommandCenter.Models
         }
 
         /// <summary>
+        /// 生成某型号的【默认窗口↔点位映射】（V2.13）：按"前上相机后下相机、各相机点位表
+        /// 条目顺序"铺排——窗口 1 起，依次取相机 0 点位表第 1、2…条，再取相机 1 点位表第 1、2…条。
+        /// 返回列表长度 = 该型号窗口总数（各相机点位表条目和，≥1，见 WindowCountFor）；
+        /// 若各相机点位表全空则兜底给一条"相机0·点位1"（防空列表，与 WindowCountFor 的 ≥1 一致）。
+        /// 与 V2.12.1 的"窗口=相机点位表条目"隐式铺排等价——不编辑时默认映射=这个，行为零变化。
+        /// </summary>
+        public static List<WindowPointItem> DefaultWindowPointMap(
+            IEnumerable<CameraConfig> cameras, string productModel)
+        {
+            var list = new List<WindowPointItem>();
+            int ci = 0;                                          // 相机列表下标（从 0 起，与相机通道号对应）
+            foreach (var cam in cameras ?? new List<CameraConfig>())
+            {
+                if (cam == null) { ci++; continue; }             // 空安全：跳过被手改成 null 的元素，下标照常累加
+                var table = cam.ProgramsFor(productModel);
+                if (table != null)
+                {
+                    foreach (var it in table)
+                    {
+                        if (it == null) continue;                // 空安全：点位表里混入 null 条目时跳过
+                        list.Add(new WindowPointItem { CameraIndex = ci, StationNo = it.StationNo });
+                    }
+                }
+                ci++;
+            }
+            if (list.Count == 0) list.Add(new WindowPointItem { CameraIndex = 0, StationNo = 1 }); // 兜底≥1
+            return list;
+        }
+
+        /// <summary>
+        /// 解析"某型号当前的窗口↔点位映射"（V2.13，主窗体/协调器/点位窗体/设置页统一调用）：
+        ///   ① WindowPointMaps 里找到与指定型号同名（大小写不敏感）且长度=该型号窗口总数的表
+        ///      → 返回该表（用户手动编辑/交换过的映射）；
+        ///   ② 型号没配表 / 表长度不对（相机点位表改动后数量变了）→ 回退默认铺排
+        ///      （DefaultWindowPointMap），保证运行时窗口与点位一一对应、永不越界。
+        /// 【为什么长度必须校验】窗口总数 = 相机点位表条目和，若映射表长度与它不一致
+        ///   （点位表增删点位后旧的映射没跟着变），反查会越界/找不到窗口，必须回退默认。
+        /// </summary>
+        public static List<WindowPointItem> ResolveWindowPointMap(
+            IEnumerable<CameraConfig> cameras, string productModel,
+            List<ModelWindowPointMap> maps)
+        {
+            var def = DefaultWindowPointMap(cameras, productModel);
+            if (maps == null || string.IsNullOrWhiteSpace(productModel)) return def;
+            foreach (var m in maps)
+            {
+                if (m == null || m.Points == null) continue;
+                if (string.Equals(m.ModelName, productModel, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (m.Points.Count == def.Count) return m.Points;   // 长度一致 → 用用户映射
+                    return def;                                        // 数量变了 → 回退默认
+                }
+            }
+            return def;
+        }
+
+        /// <summary>
         /// 窗口逻辑宽（px）。说明：现代码由 MainForm 用 TableLayoutPanel 将主区域等分，
         /// 所有窗口尺寸严格一致并铺满，本字段不参与布局计算，仅作为人工参考。
         /// </summary>
@@ -575,6 +670,25 @@ namespace CommandCenter.Models
         /// 长度由 ConfigStore.EnsureStationMap 在加载/保存时自动对齐（缺的补 true，多的截断）。
         /// </summary>
         public List<bool> WindowEnabled { get; set; } = new List<bool>();
+
+        /// <summary>
+        /// 【V2.13】窗口↔点位独立映射（按产品型号分表，JSON `windowPointMaps`）。
+        /// 【背景】V2.12.1 统一模型：窗口总数 = 各相机按型号点位表条目和，存图点位=相机点位号
+        ///   （上下相机各自从 1 起、会重复，靠 {相机} 目录层隔离）。在此基础上现场仍需要手动
+        ///   【调整窗口与点位的对应】——例如"窗口 3 想显示上相机点位 5"、"两个窗口内容互换"、
+        ///   "一键恢复出厂铺排"，故引入本独立映射，让窗口↔(相机,点位) 的对应可编辑。
+        /// 【结构】每台产品型号一张表（ModelWindowPointMap）：Points 长度 = 该型号窗口总数
+        ///   （各相机点位表条目和），Points[i] = 窗口 i+1 对应的（相机列表下标, 相机点位号）。
+        /// 【默认值】默认铺排 = "前上相机后下相机、各相机点位表顺序"（见 DefaultWindowPointMap），
+        ///   即不编辑时与 V2.12.1 行为完全一致；只有手动编辑/交换后才偏离默认。
+        /// 【约束】同一"（相机, 点位）"只能分配给一个窗口（运行时 PLC 请求点位需反查唯一窗口，
+        ///   见 ProductionCoordinator.TryResolveActiveWindow），编辑点位时界面做唯一性校验。
+        /// 【对齐】ConfigStore.EnsureWindowPointMaps 在加载/保存时：缺型号表补默认铺排、
+        ///   长度不对按默认铺排对齐（点位由相机点位表决定，长度必须跟随窗口总数）。
+        /// 【运行时】协调器/主窗体/点位窗体统一走 ResolveWindowPointMap 解析（缺表回退默认），
+        ///   与 ResolveLayout/WindowCountFor 是同一套"四层共用"的配套。
+        /// </summary>
+        public List<ModelWindowPointMap> WindowPointMaps { get; set; } = new List<ModelWindowPointMap>();
 
         /// <summary>标题栏是否显示各字段（复用项目时可整体隐藏）</summary>
         public bool ShowProductModel { get; set; } = true;

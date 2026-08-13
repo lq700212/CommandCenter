@@ -42,9 +42,15 @@
   （行列自动铺排）；不勾时手填行/列只当"排列宽度/期望行数"，放不下**自动补行**，窗口总数仍=点位和，
   两种模式所见完全一致。**存图点位统一 = 相机点位号（StationNo）**（上下相机各自从 1 起会重复，靠
   ImageStore 归档子目录 **`{相机}` 层隔开**——`SubDirs` 默认含 `{相机}`，旧配置加载自动补，绝不拿
-  WindowStationMap/windowIndex 当存图点位）；手动点位编辑（编辑点位/交换位置/恢复默认）在 WindowPointForm
-  里两种模式**都锁定置灰**（点位由相机点位表唯一决定，按钮禁用+方法内双保险），设置页勾选自适应即置灰
-  行/列输入框并弹 ToolTip 明示"自适应下哪些功能不可用"、相关控件 ToolTip 同步说明。
+   WindowStationMap/windowIndex 当存图点位）；手动点位编辑（编辑点位/交换位置/恢复默认）在 WindowPointForm
+  里两种模式**都可编辑（V2.13 恢复）**：结果按型号分表存 `DisplayConfig.WindowPointMaps`
+  （`WindowPointItem{CameraIndex,StationNo}`，默认=前上相机后下相机铺排、不编辑行为与旧版零差异；
+  `ResolveWindowPointMap` 按型号查表、长度≠窗口总数时回退默认；`ConfigStore.EnsureWindowPointMaps`
+  加载/保存自动对齐）。**编辑规则**：编辑点位候选=当前型号各相机点位表已有点位、自动排除已被其他窗口
+  占用的组合（同"相机+点位"只对应一个窗口，`ProductionCoordinator.TryResolveActiveWindow` 据此反查
+  唯一窗口）；交换位置仅同相机内允许（上下相机同号点位跨相机交换会让反查语义混乱，提示改用编辑点位）；
+  恢复默认=重置该型号出厂铺排+全部窗口重新启用。设置页勾选自适应仅置灰行/列输入框并弹 ToolTip
+  明示"自适应只影响行列形状、不影响点位编辑"。
    **默认型号（V2.12.3）**：`AppConfig.ProductModel` 默认 **"U171"**（非空），无配置文件首次启动也
    按该型号点位表铺出对应窗口（U171=上18+下4=22 窗），不会因型号空串把窗口塌成 1 个（此前 `Load()`
    无文件分支直接 new AppConfig() 连相机列表也是空的，窗口=0→兜底 1 个的回归根因）；`ConfigStore.Load`
@@ -104,7 +110,7 @@ ProductModelAddress/ProductModelLen`）+ 顶层 `ProductModel`（**两处可改�
 | `CommandCenter/Views/DevTestForm.cs` | 功能测试窗体（开发者专用：相机 T1/T2 触发（T2 取图闪图存图，V1.12.24）+ PLC 寄存器交互 + 扫码枪读码展示/发触发指令，复用主窗体连接，V1.12.0） |
 | `CommandCenter/Controls/CameraDisplayControl.cs` | 相机显示窗 + 右下角自绘 OK/NG 徽标（主界面不显示点位标识，点位只走设置界面查询）；左上角窗口编号显隐由配置 `DisplayConfig.WindowIndexVisible` 控制（V2.10.6） |
 | `CommandCenter/Views/DirTreeEditForm.cs` | 图片存储目录结构可视化配置（逐级目录 + 文件名规则 + 实时预览） |
-| `CommandCenter/Views/WindowPointForm.cs` | 窗口↔存图点位 + 点位↔相机程序号 可视化配置（格子矩阵编辑点位/交换/恢复默认 + 相机下拉点位程序表，V1.12.25 同页混排、V1.12.26 两列改下拉选择、V2.12.0 自适应下按相机表铺排矩阵/格子标"相机名·点位号"/锁定点位编辑） |
+| `CommandCenter/Views/WindowPointForm.cs` | 窗口↔存图点位 + 点位↔相机程序号 可视化配置（格子矩阵编辑点位/交换/恢复默认，V2.13 恢复编辑并按型号存 WindowPointMaps + 相机下拉点位程序表，V1.12.25 同页混排、V1.12.26 两列改下拉选择、V2.12.0 自适应下按相机表铺排矩阵/格子标"相机名·点位号"） |
 | `docs/CommandCenter.md` | **项目文档（V2.10 合并版）**：① 用户使用说明（操作手册）② 系统总览与设备清单 ③ 扫码枪对接 ④ 相机对接 ⑤ PLC 通讯对接与对外协议定义（§5.5）⑥ 计数与结果流转 ⑦ IP/参数速查 ⑧ 版本演进 |
 | `docs/上位机通讯封装范式.md` | 通讯架构技术总结（连接/心跳/重连/UI 解耦范式，跨项目可复用，独立保留） |
 | `CHANGELOG.md` | 版本改动记录（最新在前） |

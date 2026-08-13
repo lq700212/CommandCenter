@@ -53,6 +53,9 @@ namespace CommandCenter.Services
         private readonly ImageStore _imageStore;
         private readonly List<bool> _windowEnabled;         // 窗口→是否启用（V1.12.28）
         private readonly string _productModel;              // 固定产品型号（V2.7，每次扫码写入 PLC）
+        /// <summary>窗口↔点位独立映射（V2.13，当前型号解析结果）：Points[i] = 窗口 i+1 对应的
+        /// (相机下标, 点位号)。PLC 请求点位据此反查唯一窗口（见 TryResolveActiveWindow）。</summary>
+        private readonly List<WindowPointItem> _windowPointMap;
 
         private readonly System.Threading.Timer _positionTimer;  // 请求轮询（后台线程）
         private volatile bool _running;   // 总开关
@@ -117,7 +120,8 @@ namespace CommandCenter.Services
                                      List<CameraConfig> cameraCfgs,
                                      ImageStore imageStore,
                                      List<bool> windowEnabled,
-                                     string productModel)
+                                     string productModel,
+                                     List<ModelWindowPointMap> windowPointMaps)
         {
             _plc = plc;
             _cameras = cameras ?? new List<KeyenceIV4Camera>();
@@ -125,6 +129,10 @@ namespace CommandCenter.Services
             _imageStore = imageStore;
             _windowEnabled = windowEnabled;
             _productModel = productModel ?? "";
+            // V2.13：窗口↔点位独立映射（按型号分表）。解析当前型号的映射（缺表/长度不对回退
+            // 默认铺排），PLC 请求点位据此反查唯一窗口（见 TryResolveActiveWindow）。
+            _windowPointMap = Models.DisplayConfig.ResolveWindowPointMap(
+                _cameraCfgs, _productModel, windowPointMaps);
 
             // 请求轮询：后台线程 200ms 一问 PLC。
             // ★ 必须用 System.Threading.Timer：此前用 Forms.Timer 在 UI 线程同步读 PLC，
@@ -599,19 +607,39 @@ namespace CommandCenter.Services
             && cfg.ImageSource.Trim().Equals("Tcp", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
-        /// 把"某台相机拍到某个点位"解析成显示窗口编号（V2.12.1 起统一相机表驱动，不再分自适应/非自适应）。
+        /// 把"某台相机拍到某个点位"解析成显示窗口编号（V2.12.1 起统一相机表驱动，不再分自适应/非自适应；
+        /// V2.13 起支持手动编辑的"窗口↔(相机,点位)"独立映射，见 DisplayConfig.WindowPointMaps）。
         ///
-        /// 点位由相机点位表唯一决定：上下相机点位号各自从 1 起会重复（如上相机 1~18、下相机 1~4），
-        /// 全局查 WindowStationMap 一定会错位/撞窗，必须【按相机通道】定位：
-        ///   在该相机当前型号点位表里找 StationNo==请求点位 的条目位置 pos，窗口编号 =
-        ///   该相机起始窗口（AutoFitCameraStarts，"前上后下分组"）+ pos，即"窗口=相机表条目"。
-        /// 找不到 pos：
+        /// 点位由相机点位表唯一决定：上下相机点位号各自从 1 起会重复（如上相机 1~18、下相机 1~4）。
+        /// 定位方式（V2.13 起）：
+        ///   - 默认（未手动编辑）：按"前上相机后下相机"分组，窗口 = 相机点位表条目位置
+        ///     （= DisplayConfig.DefaultWindowPointMap 的铺排，与旧逻辑等价）；
+        ///   - 手动编辑/交换过（WindowPointForm）：查该型号的 WindowPointMaps 表，
+        ///     找"相机=本通道且点位=请求点位"的唯一窗口（同一"相机+点位"只分配给一个窗口）。
+        /// 找不到窗口：
         ///   - 该点位不归本相机拍（另一台相机的点位）→ 返回 false，调用方按"跳过"处理（写结果 3）；
         /// 该窗口被禁用（WindowEnabled=false）→ 返回 false（同样是跳过，不拍照不计数）。
         /// </summary>
         private bool TryResolveActiveWindow(int camIdx, int stationNo, out int windowIndex)
         {
             windowIndex = -1;
+            // V2.13 独立映射反查：遍历当前型号的窗口→(相机,点位)表，找"相机=camIdx 且点位=stationNo"
+            // 的窗口编号（下标+1）。默认铺排就是"前上相机后下相机"分组，行为与旧版一致。
+            if (_windowPointMap != null)
+            {
+                for (int i = 0; i < _windowPointMap.Count; i++)
+                {
+                    var it = _windowPointMap[i];
+                    if (it != null && it.CameraIndex == camIdx && it.StationNo == stationNo)
+                    {
+                        windowIndex = i + 1;
+                        return IsWindowEnabled(windowIndex);
+                    }
+                }
+                return false;   // 映射里没有该"相机+点位" → 不归本相机拍/未分配窗口 → 跳过
+            }
+
+            // 兜底（_windowPointMap 为 null 的极端情况）：退回按相机点位表条目位置定位
             if (camIdx < 0 || camIdx >= _cameraCfgs.Count) return false;
             var table = _cameraCfgs[camIdx].ProgramsFor(_productModel);
             if (table == null) return false;

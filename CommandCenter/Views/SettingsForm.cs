@@ -117,12 +117,12 @@ namespace CommandCenter.Views
         }
 
         /// <summary>
-        /// 同步"自适应"勾选与相关控件的可用状态（V2.12.0；V2.12.1 统一模型）：
+        /// 同步"自适应"勾选与相关控件的可用状态（V2.12.0；V2.12.1 统一模型；V2.13 放开点位编辑）：
         ///   - 窗口总数【两模式都】= 各相机按当前型号点位表条目和（见 DisplayConfig.ResolveLayout），
         ///     行/列仅在非自适时决定"排列宽度/行数"、放不下自动补行；
         ///   - 【勾选自适应】行/列输入框置灰（行列由相机点位表自动算，回填只读参考值）；
-        ///   - 点位编辑（编辑/交换/恢复默认）在自适应与非自适应下【都锁定】（点位由相机点位表决定），
-        ///     ToolTip 恒为锁定说明。
+        ///   - 【V2.13 起】点位编辑（编辑/交换/恢复默认）在自适应与非自适应下【都可用】——
+        ///     只影响矩阵行列形状，不影响"窗口↔点位"编辑（结果存 DisplayConfig.WindowPointMaps）。
         /// 本方法在 LoadFromConfig 与 CheckedChanged 两处调用；内部的 AutoFitLayout 用 _cfg.Cameras
         /// 计算（保存前表格未提交的新增相机不参与，行列只是给用户看的参考值，不写回配置）。
         /// </summary>
@@ -142,23 +142,24 @@ namespace CommandCenter.Views
                 nudRows.Value = _cfg.Display.Rows;
                 nudCols.Value = _cfg.Display.Columns;
             }
-            // V2.12.1：编辑点位/交换/恢复在两种模式下都锁定（点位由相机点位表决定），ToolTip 恒同一份
+            // V2.13：点位编辑已放开（两模式都可编辑，见 WindowPointForm），ToolTip 说明可编辑能力
             tip.SetToolTip(btnEditPoints, AutoFitPointsButtonTip);
         }
 
-        /// <summary>勾选"自适应"后弹出的提示文案：明示自适下的行为（V2.12.1 统一模型说明）。</summary>
+        /// <summary>勾选"自适应"后弹出的提示文案：明示自适下的行为（V2.12.1 统一模型说明；V2.13 更新）。</summary>
         private const string AutoFitDisabledHint =
             "已开启【自适应】：窗口矩阵按\"当前产品型号 + 各相机点位表\"自动铺排（行列自动算）。\r\n" +
-            "两模式下点数位都不可手改：\r\n" +
+            "自适应只影响【行/列形状】，不影响【点位配置】：\r\n" +
             "· 显示窗口 行/列（勾选自适应时由系统自动计算，不勾时可手填\"排列宽度\"，窗口总数仍是点位和）；\r\n" +
-            "· 窗口/点位配置里的【编辑点位】【交换位置】【恢复默认】（点位由相机点位表决定，单选一种型号配备）。\r\n" +
+            "· 窗口/点位配置里的【编辑点位】【交换位置】【恢复默认】两模式下都可用（结果存按型号的 WindowPointMaps）。\r\n" +
             "仍可用：【禁用/启用】窗口、相机程序映射（点位→程序号）。";
 
-        /// <summary>"窗口/点位配置..."按钮 ToolTip（V2.12.1 统一模型：点位由相机点位表决定，恒锁定）。</summary>
+        /// <summary>"窗口/点位配置..."按钮 ToolTip（V2.12.1 统一模型；V2.13 起支持手动编辑）。</summary>
         private const string AutoFitPointsButtonTip =
             "窗口/点位配置：格子显示\"归属相机·点位号\"，矩阵跟随【型号】联动。\r\n" +
-            "点位由相机点位表唯一决定（上下相机点位号各自从 1 起），故【编辑点位/交换位置/恢复默认】已锁定；\r\n" +
-            "本页仍可配【禁用/启用】窗口与【相机程序映射】（相机+型号 → 点位 → 相机程序号）。";
+            "默认按\"前上相机后下相机\"铺排；可【编辑点位】（从相机点位表候选里换点）、【交换位置】\r\n" +
+            "（同相机内互换两窗口）、【恢复默认】（重置该型号铺排并全部启用）、【禁用/启用】窗口、\r\n" +
+            "并配置【相机程序映射】（相机+型号 → 点位 → 相机程序号）。";
 
         /// <summary>
         /// 刷新"配置目录结构..."按钮的 ToolTip：把当前目录结构（层级用 / 拼接）动态挂到按钮上，
@@ -473,7 +474,8 @@ namespace CommandCenter.Views
                                                          .Union(_cfg.ProductModels ?? new List<string>())
                                                          .ToList(),
                                                      chkAutoFit.Checked,
-                                                     cmbModel.Text?.Trim() ?? ""))
+                                                     cmbModel.Text?.Trim() ?? "",
+                                                     _cfg.Display.WindowPointMaps))
                 {
                     dlg.ShowDialog(this);
                 }

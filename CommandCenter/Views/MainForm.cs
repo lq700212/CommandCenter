@@ -113,7 +113,7 @@ namespace CommandCenter.Views
 
             _imageStore = new ImageStore(_config.Image);
             _coordinator = new ProductionCoordinator(_plc, _cameras, cams, _imageStore,
-                _config.Display.WindowEnabled, _config.ProductModel);
+                _config.Display.WindowEnabled, _config.ProductModel, _config.Display.WindowPointMaps);
 
             // 连接健康监控：后台心跳 + 断连自动重连 + 边沿日志（不影响任何 UI 刷新）
             _monitor = new ConnectionMonitor(_plc, _cameras);
@@ -673,7 +673,7 @@ namespace CommandCenter.Views
 
             _coordinator = new ProductionCoordinator(_plc, _cameras,
                 _config.Cameras ?? new List<CameraConfig>(), _imageStore,
-                _config.Display.WindowEnabled, _config.ProductModel);
+                _config.Display.WindowEnabled, _config.ProductModel, _config.Display.WindowPointMaps);
             _coordinator.AttachScanners(_scanners);
             _coordinator.LatestSerialNumber = serial;
             SubscribeCoordinatorEvents();

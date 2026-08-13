@@ -1,5 +1,63 @@
 # 版本改动记录
 
+## V2.13（2026-08-14）恢复窗口↔点位手动编辑：编辑点位/交换位置/恢复默认，结果按型号存 WindowPointMaps
+
+> V2.12.1 统一模型把"窗口↔点位"锁死为由相机点位表唯一决定（编辑点位/交换位置/恢复默认全部置灰），
+> 现场反馈需要能在保持"窗口总数 = 各相机点位表条目和"的前提下，手动调整"哪个窗口对应哪台相机
+> 的哪个点位"（换路内容、给窗口换点位）。本次恢复三件编辑能力，并把编辑结果从"运行时临时逻辑"
+> 升级为**按产品型号分表持久化的独立映射 `DisplayConfig.WindowPointMaps`**：
+> 默认不编辑时行为与 V2.12.1 完全一致（前上相机后下相机铺排），编辑后运行时按映射反查窗口。
+
+### 改动范围
+- **`Models/AppConfig.cs`**：
+  - 新增 `WindowPointItem`（`{CameraIndex, StationNo}`，窗口→(相机,点位) 单项）与
+    `ModelWindowPointMap`（`{ModelName, Points}`，按产品型号分表）两个模型类；
+  - `DisplayConfig` 新增 `WindowPointMaps`（`List<ModelWindowPointMap>`，按型号分表持久化）与
+    统一静态方法：`DefaultWindowPointMap(cameras, model)`（前上相机后下相机默认铺排）、
+    `ResolveWindowPointMap(cameras, model, maps)`（型号有表且长度一致→用该表，否则回退默认）；
+  - `WindowCountFor/ResolveLayout/AutoFitCameraStarts` 保持为各层统一窗口数/行列计算的唯一入口。
+- **`Utils/ConfigStore.cs`**：新增 `EnsureWindowPointMaps`，在 `ApplyDefaults`（加载）与 `Save`
+  两处调用——为每个候选型号（ProductModels ∪ 当前 ProductModel）补表：缺型号表建默认铺排表、
+  已有表长度 ≠ 窗口总数（点位表增删后没跟上）重置默认、长度恰好匹配则保留用户编辑过的映射。
+- **`Services/ProductionCoordinator.cs`**：
+  - 构造新增 `List<ModelWindowPointMap> windowPointMaps` 参数，经 `ResolveWindowPointMap`
+    解析当前型号映射存 `_windowPointMap`；
+  - `TryResolveActiveWindow` 改为**优先从 `_windowPointMap` 反查**（遍历找 CameraIndex==camIdx 且
+    StationNo==stationNo 的唯一窗口，同一"相机+点位"只对应一个窗口），查不到/窗口禁用仍回 3 跳过；
+    映射为 null 的极端情况回退旧"相机点位表条目位置"定位（语义与默认铺排等价）。
+- **`Views/MainForm.cs`**：两处 `new ProductionCoordinator(...)`（BuildServices 与 SwitchModel）
+  补传 `_config.Display.WindowPointMaps`；新增 `_windowPointMaps` 字段并在 ExtractRuntimeConfig 赋值。
+- **`Views/WindowPointForm.cs`（核心）**：
+  - 构造新增 `List<ModelWindowPointMap> windowPointMaps` 参数，`_windowPointEdits`（按型号分表的
+    编辑副本）随当前铺排型号 seed（目标里有同长度映射则载入继续编辑）；
+  - 恢复三按钮：**编辑点位**（选中窗口 → 弹候选下拉，候选 = 当前型号各相机点位表已有点位 −
+    已分配给其他窗口的组合，保证"相机+点位"唯一）、**交换位置**（交换模式点两个窗口，仅同相机内
+    允许，跨相机提示改用编辑点位）、**恢复默认**（重置该型号默认铺排 + 全部窗口重新启用）；
+  - `ResolveWindowSource` 改从编辑副本查"相机名·点位N"标注；`OnCellClick` 支持交换模式两次点击；
+  - `OnOk` 把 `_windowPointEdits` 按型号合并写回 `WindowPointMaps` 目标（同实例引用，设置页保存落盘）；
+  - 切型号（ApplyMatrixForModel）为新型号 seed 编辑副本；类头 ASCII 图与注释同步 V2.13 语义；
+  - **窗体加宽（640→760）**：`lblHint/pnlMatrix/tblMatrix/grpProgram` 内容宽 600→720，矩阵格子
+    变宽后"归属相机·点位号"第二行（7 列时格子约 94px）能一行显示完；`dgvPrograms`/`lblProgNote`
+    同步加宽，确定/取消贴右缘，`lblProgHint` 文案修正（去掉已移除的"默认"项说法）。
+- **`Views/SettingsForm.cs` / `SettingsForm.Designer.cs`**：`WindowPointForm` 构造调用补传
+  `_cfg.Display.WindowPointMaps`；`UpdateAutoFitUi` 与三处 ToolTip/提示文案更新——
+  "自适应只影响行列形状、不影响点位编辑"，去掉"编辑点位/交换/恢复已锁定"的过时说明。
+- **文档**：`docs/CommandCenter.md`（§1 点位配置操作说明、§8 版本 V2.13 条目）、`AGENTS.md`
+  （窗口矩阵统一模型段更新 V2.13 恢复编辑）、`CHANGELOG.md`。
+
+### 为什么这么改
+- V2.12.1 把点位编辑整个锁掉，现场换线/换机型时窗口与点位对应关系无法微调，只能手改 json。
+  恢复编辑后，编辑结果要能被"主界面矩阵 / 运行时反查 / 存图点位"一致使用，故单独落成按型号分表
+  的 WindowPointMaps，而不是继续复用已退役的 WindowStationMap（语义不同：WindowStationMap 是
+  "窗口→整数点位"，无法表达"哪台相机的哪个点位"）。
+- 默认（用户不编辑）映射 = DefaultWindowPointMap = 旧逻辑铺排，保证零配置行为不回归；
+  长度校验兜底保证点位表增删后映射自动回退默认、不会越界或反查出两个窗口。
+
+### 优化点
+- 编辑点位候选限定"相机点位表已有点位"且自动排除已被其他窗口占用的组合，杜绝重复映射；
+- 交换仅同相机内允许，规避"上下相机同号点位"跨相机交换导致的反查语义混乱；
+- 恢复默认顺带全部启用窗口，避免"恢复铺排后还灰着"的困惑；每次编辑/交换/恢复均有日志。
+
 ## V2.12.6（2026-08-13）PLC 相机通道多相机化：每台相机一路请求/结果、地址可配
 
 > 现场规划相机数量会超过 2 台，原握手协议把相机通道**写死为"上/下相机 = 40002/40003 请求 +
