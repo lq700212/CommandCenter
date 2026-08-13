@@ -23,11 +23,13 @@ namespace CommandCenter.Services
     ///   所有"上位机→PLC"的数据都靠 PLC 主站轮询来读上位机寄存器区。
     ///
     /// 【V2.7 协议（docs/CommandCenter.md §5.5）：请求-结果-复位三拍式】
-    ///   PLC 只写（上位机读）：40001 扫码请求(0/1)、40002 上相机拍照请求(1~255=点位)、40003 下相机拍照请求；
-    ///   PLC 只读（上位机写）：40004 扫码结果、40005 上相机结果、40006 下相机结果、
+    ///   PLC 只写（上位机读）：40001 扫码请求(0/1)；相机通道【每台相机一路，V2.12.6】：
+    ///   第 1 台相机 40002(1~255=点位)、第 2 台 40003、第 3 台起 40008…（每台相机的
+    ///   请求/结果地址配在相机表 CameraConfig.PlcRequestAddress/PlcResultAddress，见 5.2）；
+    ///   PLC 只读（上位机写）：40004 扫码结果；相机结果：第 1 台 40005、第 2 台 40006、第 3 台起 40012…；
     ///                         40007~40011 产品型号(10 字符 ASCII，每寄存器 2 字符，高字节在前)。
     ///   一次完整握手：PLC 写请求≠0 → 上位机处理完写结果≠0 → PLC 读结果(相机还读型号)并复位请求=0
-    ///   → 上位机看到请求回 0 再复位结果=0，进入下一请求。扫描/上相机/下相机三个通道互斥串行处理。
+    ///   → 上位机看到请求回 0 再复位结果=0，进入下一请求。扫码通道与各相机通道互斥串行处理。
     ///   【替代的旧协议（V1.12.11~V1.12.16，已全部删除）】D99 扫码到位/D100 相机到位/D101 开始/
     ///   D102 完成/D103~D108 配方/D110~112 计数——均不再使用；计数改为纯本地功能，
     ///   配方概念已删除（V2.9，配方由 PLC 侧按产品型号切换，上位机只传型号）。
@@ -43,8 +45,8 @@ namespace CommandCenter.Services
     ///   Cancel 退出）；DataStore 读写用 _lock 串行化（避免业务轮询与 PLC 写入并发竞态）；
     ///   业务层(ProductionCoordinator)仍用 PositionTimer 每 200ms 轮询请求寄存器，等价于原主动读 PLC。
     ///
-    /// 【对外接口】ReadScanRequest/ReadCamUpRequest/ReadCamDownRequest（读 PLC 请求）、
-    ///   WriteScanResult/WriteCamUpResult/WriteCamDownResult/WriteProductModel（写结果/型号）、
+    /// 【对外接口】ReadScanRequest/ReadCameraRequest（读 PLC 请求）、
+    ///   WriteScanResult/WriteCameraResult/WriteProductModel（写结果/型号）、
     ///   ReadRegister/WriteRegister（功能测试通用读写）。语义：IsConnected/EnsureConnected 表示
     ///   "从站监听是否已就绪"，HasMasterConnected 表示"汇川主站是否已 TCP 连入"。
     /// </summary>
@@ -271,38 +273,58 @@ namespace CommandCenter.Services
             }
         }
 
-        /// <summary>读取上相机拍照请求（V2.7，PLC 写协议 40002 = 索引 2）：返回点位编号（1~255），0=无请求。</summary>
-        public bool ReadCamUpRequest(out int stationNo)
-        {
-            stationNo = 0;
-            lock (_lock)
-            {
-                if (_dataStore?.HoldingRegisters == null) return false;
-                stationNo = ReadLocal(_cfg.CamUpRequestAddress);
-                return true;
-            }
-        }
-
-        /// <summary>读取下相机拍照请求（V2.7，PLC 写协议 40003 = 索引 3）：返回点位编号（1~255），0=无请求。</summary>
-        public bool ReadCamDownRequest(out int stationNo)
-        {
-            stationNo = 0;
-            lock (_lock)
-            {
-                if (_dataStore?.HoldingRegisters == null) return false;
-                stationNo = ReadLocal(_cfg.CamDownRequestAddress);
-                return true;
-            }
-        }
-
         /// <summary>写扫码结果（V2.7，上位机写索引 4 = 协议 40004，PLC 来读）：0=默认/复位，1=扫码OK，2=扫码NG。</summary>
         public void WriteScanResult(int code) => WriteLocalSafe(_cfg.ScanResultAddress, (ushort)code);
 
-        /// <summary>写上相机拍照结果（V2.7，上位机写索引 5 = 协议 40005，PLC 来读）：0=默认/复位，1=OK，2=NG，3=点位禁用跳过。</summary>
-        public void WriteCamUpResult(int code) => WriteLocalSafe(_cfg.CamUpResultAddress, (ushort)code);
+        /// <summary>读某台相机的拍照请求（V2.12.6 起每台相机一路通道）：返回点位编号（1~255），0=无请求。
+        /// 请求地址 = 相机配置 PlcRequestAddress；0（未配置）→ 按相机序号默认（第1台=2=协议40002、
+        /// 第2台=3=协议40003），第 3 台起 0 表示"该相机通道未配置"——按"无请求"返回、不误判。
+        /// 处理完成并写结果后由 ProductionCoordinator 等 PLC 复位请求回 0。</summary>
+        /// <param name="cam">相机配置（携带 PLC 请求地址；null 安全）</param>
+        /// <param name="camIdx">相机列表下标（0 起，用于未配置时的默认地址分配）</param>
+        public bool ReadCameraRequest(CameraConfig cam, int camIdx, out int stationNo)
+        {
+            stationNo = 0;
+            ushort addr = CamRequestAddress(cam, camIdx);
+            if (addr == 0) return true;   // 第 3 台起未配置通道：视为无请求，不占资源不误报
+            lock (_lock)
+            {
+                if (_dataStore?.HoldingRegisters == null) return false;
+                stationNo = ReadLocal(addr);
+                return true;
+            }
+        }
 
-        /// <summary>写下相机拍照结果（V2.7，上位机写索引 6 = 协议 40006，PLC 来读）：取值同上相机结果。</summary>
-        public void WriteCamDownResult(int code) => WriteLocalSafe(_cfg.CamDownResultAddress, (ushort)code);
+        /// <summary>写某台相机的拍照结果（V2.12.6 起每台相机一路通道）：0=默认/复位，1=OK，2=NG，
+        /// 3=点位禁用跳过。结果地址 = 相机配置 PlcResultAddress；0 → 按相机序号默认（第1台=5=协议40005、
+        /// 第2台=6=协议40006）；第 3 台起未配置则跳过（不写、也不报错）。</summary>
+        public void WriteCameraResult(CameraConfig cam, int camIdx, int code)
+        {
+            ushort addr = CamResultAddress(cam, camIdx);
+            if (addr > 0) WriteLocalSafe(addr, (ushort)code);
+        }
+
+        /// <summary>解析"某台相机的拍照请求" DataStore 索引（V2.12.6）：
+        /// 相机配置显式地址优先；0=未配置 → 按相机序号默认（第1台=2、第2台=3）；第 3 台起返回 0
+        /// （未配置该相机通道，轮询视为无请求，见 ReadCameraRequest 调用方）。
+        /// null 相机配置按"未配置"处理（返回默认，不崩）。</summary>
+        private static ushort CamRequestAddress(CameraConfig cam, int camIdx)
+        {
+            if (cam != null && cam.PlcRequestAddress > 0) return (ushort)cam.PlcRequestAddress;
+            if (camIdx == 0) return 2;   // 协议 40002：第 1 台相机（现场"上相机"）
+            if (camIdx == 1) return 3;   // 协议 40003：第 2 台相机（现场"下相机"）
+            return 0;                    // 第 3 台起必须显式配置，否则本相机通道不参与轮询
+        }
+
+        /// <summary>解析"某台相机的拍照结果" DataStore 索引：显式地址优先；0=未配置 → 第1台=5、第2台=6；
+        /// 第 3 台起返回 0（未配置结果通道，WriteCameraResult 跳过不写）。</summary>
+        private static ushort CamResultAddress(CameraConfig cam, int camIdx)
+        {
+            if (cam != null && cam.PlcResultAddress > 0) return (ushort)cam.PlcResultAddress;
+            if (camIdx == 0) return 5;   // 协议 40005
+            if (camIdx == 1) return 6;   // 协议 40006
+            return 0;
+        }
 
         /// <summary>
         /// 写产品型号字符串（V2.7，上位机写索引 7~11 = 协议 40007~40011，PLC 来读）。

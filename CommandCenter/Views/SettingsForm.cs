@@ -201,6 +201,11 @@ namespace CommandCenter.Views
                 };
                 srcCol.Items.Add("Ftp");
                 gridCameras.Columns.Add(srcCol);
+                // V2.12.6 每台相机一路 PLC 通道：请求/结果 DataStore 索引（PLC 协议号=索引+40000）。
+                // 0=按相机序号自动（第1台=2/5 协议40002/40005、第2台=3/6 协议40003/40006）；
+                // 第 3 台起 0 表示"该相机通道未配置、不参与轮询"，新增相机必须填上现场分配的地址。
+                gridCameras.Columns.Add("PlcRequestAddress", "PLC请求索引(0=自动/第3台起必填)");
+                gridCameras.Columns.Add("PlcResultAddress", "PLC结果索引(0=自动/第3台起必填)");
             }
         }
 
@@ -220,14 +225,16 @@ namespace CommandCenter.Views
                 seq++;
                 // ImageSource 为空（旧配置）时按 Ftp 兜底显示
                 string src = string.IsNullOrWhiteSpace(c.ImageSource) ? "Ftp" : c.ImageSource;
-                var row = gridCameras.Rows[gridCameras.Rows.Add(seq, c.Name, c.IpAddress, c.CommandPort, c.FtpUploadDir, src)];
+                var row = gridCameras.Rows[gridCameras.Rows.Add(seq, c.Name, c.IpAddress, c.CommandPort, c.FtpUploadDir, src,
+                    c.PlcRequestAddress, c.PlcResultAddress)];
                 row.Tag = c;   // 记下来源配置，保存时保留它配好的 StationPrograms 映射表
             }
             // 至少留一行可见，别让表格空着无从下手
             if (gridCameras.Rows.Count == 0)
                 foreach (var c in CameraConfig.DefaultCameras())
                 {
-                    var row = gridCameras.Rows[gridCameras.Rows.Add(++seq, c.Name, c.IpAddress, c.CommandPort, c.FtpUploadDir, "Ftp")];
+                    var row = gridCameras.Rows[gridCameras.Rows.Add(++seq, c.Name, c.IpAddress, c.CommandPort,
+                        c.FtpUploadDir, "Ftp", c.PlcRequestAddress, c.PlcResultAddress)];
                     row.Tag = c;
                 }
         }
@@ -284,6 +291,14 @@ namespace CommandCenter.Views
                 cam.CommandPort = Math.Max(1, port);
                 cam.FtpUploadDir = r.Cells["FtpUploadDir"].Value == null ? "" : r.Cells["FtpUploadDir"].Value.ToString().Trim();
                 cam.ImageSource = string.IsNullOrWhiteSpace(imgSrc) ? "Ftp" : imgSrc.Trim();
+                // V2.12.6 每台相机一路 PLC 通道：请求/结果 DataStore 索引（0~65535，非法按 0=自动）。
+                int reqAddr = 0, resAddr = 0;
+                string reqTxt = r.Cells["PlcRequestAddress"].Value == null ? "" : r.Cells["PlcRequestAddress"].Value.ToString();
+                string resTxt = r.Cells["PlcResultAddress"].Value == null ? "" : r.Cells["PlcResultAddress"].Value.ToString();
+                if (!int.TryParse(reqTxt, out reqAddr) || reqAddr < 0 || reqAddr > 65535) reqAddr = 0;
+                if (!int.TryParse(resTxt, out resAddr) || resAddr < 0 || resAddr > 65535) resAddr = 0;
+                cam.PlcRequestAddress = reqAddr;
+                cam.PlcResultAddress = resAddr;
                 // 注意：不再写回废弃的 ProgramNo（V1.12.25 起点位→程序号由 StationPrograms 表驱动，
                 // 在"窗口/点位配置…"里配；此处不赋值则按默认 -1，保证旧值不残留误导现场）
                 cams.Add(cam);

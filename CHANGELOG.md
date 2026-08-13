@@ -1,5 +1,84 @@
 # 版本改动记录
 
+## V2.12.6（2026-08-13）PLC 相机通道多相机化：每台相机一路请求/结果、地址可配
+
+> 现场规划相机数量会超过 2 台，原握手协议把相机通道**写死为"上/下相机 = 40002/40003 请求 +
+> 40005/40006 结果"**，地址不可配、只支持两台。本次把相机通道全部收进相机表：
+> 每台相机各占**一路"请求+结果"**，地址可在设置窗体相机表单独指定，默认按相机序号自动分配，
+> 上位机按相机表顺序轮询各台请求、结果写回活跃的那台相机通道。
+
+### 改动范围
+- **`Models/AppConfig.cs`**：
+  - `PlcConfig` 删除 `CamUpRequestAddress/CamDownRequestAddress/CamUpResultAddress/
+    CamDownResultAddress` 四个相机地址字段（新结构优先，旧配置余字段在 `ApplyDefaults` 忽略）；
+  - `CameraConfig`（`Models/CameraConfig.cs`，首个多相机扩展字段）新增 `PlcRequestAddress`/
+    `PlcResultAddress`（int，DataStore 索引，**0=按相机序号自动**，注释附"自动分配=协议号
+    40001+n 请求 / 40004+n 结果"）；类头注释与 JSON 序列化含两新字段。
+- **`Services/PlcService.cs`**：
+  - 新增 `ReadCameraRequest(CameraConfig, int camIdx, out int point)`（读某台相机请求，地址
+    0=按相机序自动、事务异常返回 false）与 `WriteCameraResult(CameraConfig, int camIdx, int code)`
+    （写回活跃相机通道结果 0/1/2/3）；
+  - 删除写死的 `ReadCamUpRequest/WriteCamUpResult` 等方法族（`ReadLocal` 精简）；
+  - `ReadCameraRequest` 自动地址按 40001+n（n 从 1 起第1台=40002）；显式地址 0~65535 合法。
+- **`Services/ProductionCoordinator.cs`**：
+  - `PollNewRequest`/`BeginCameraChannel`/`StepCameraChannel` 全部改为**按相机表循环**：
+    `_activeCh = camIdx + 1`（取代 V2.12.5 的 `channel == ChCamUp ? 0 : 1` 换算，**统一
+    "通道号 = 相机序号+1"**）；当前相机固定取相机列表第 `camIdx` 台，无相机/该相机通道
+    未配置地址时直接回结果 3（跳过）；删除通道常量 `ChCamUp/ChCamDown`；
+  - 相机触发 `TriggerOneCamera` 去掉 `channel` 参数、直接按 `camIdx` 的相机配置取
+    `programNo` 与点位表；`FinishAll` 等 SN 超时写扫码结果不变。
+- **`Views/DevTestForm.cs`**：相机结果按钮改为**一次写全部相机通道**（`WriteCamRes` 遍历相机表
+  `WriteCameraResult`），文本改"相机OK1/相机NG2/相机复位0"；`btnReadCamReq` 读全部相机请求；
+  默认地址注释、类头 ASCII 图同步多相机语义；通用读写 `txtReadAddr` 默认值 2 改为 2（第1台请求）。
+- **`Views/SettingsForm.cs`**：相机表新增"PLC请求索引/PLC结果索引"两列（0=自动/第3台起必填），
+  `LoadCameraRows` 填值、`CollectCamerasFromGrid` 读回并校验 0~65535。
+- **文档**：`docs/CommandCenter.md`（§5.1/§5.2/§5.3/§5.4/§5.5 全部相机通道描述、§1 功能测试
+  说明、§7 相机配置示例、第八部分 V2.12.6 条目；**修正 §5.5 相机结果取值范围补 3=跳过**）、
+  `AGENTS.md`（PLC 握手协议地址约定段更新）、`CHANGELOG.md`。
+
+### 为什么这么改
+- V2.12.5 的 `channel == ChCamUp ? 0 : 1` 只修好了两台的错位，但通道语义仍是"写死的第1/第2台"。
+  现场相机扩到 3 台、4 台时没有位置放；把通道地址与相机一一配对收进相机表后，加相机=加一行
+  配置即多一条通道，业务层按相机序循环零特判。
+- 相机结果写回"活跃的那台相机"由 `_activeCh = camIdx + 1` 统一：请求从哪台相机通道读到、
+  结果就写回哪台，杜绝跨通道串号（再出现"触发这台上那台"的错位）。
+
+### 优化点
+- 支持任意台相机（第3台起在相机表指定地址即可）；相机结果值补 3=点位禁用跳过（与 5.2 一致）；
+- 功能测试一次写全部相机通道，多相机联调不用逐台点；设置窗体配 PLC 地址可视化、不用手改 json。
+
+## V2.12.5（2026-08-13）相机触发全回 3 根因修复（通道号↔相机下标错位）+ 三拍复位设计思想成文
+
+> 现场实测：PLC 触发上相机、下相机，上位机都回 **3（点位禁用跳过）**、后续触发全部失效、不再拍照，
+> 但点位确认是有效点位。排查 `ProductionCoordinator` 后定位根因：`BeginCameraChannel` 写的是
+> `int camIdx = channel;`，直接把三通道状态机的**协议通道号（上相机=1、下相机=2）当相机列表下标
+> （0/1）** 用——上相机触发被当成下标 1（下相机）去解析点位，上相机点位在下相机点位表里大多找不到
+> → 回 3；下相机触发下标 2 越界 → 恒回 3。现场"怎么都是 3、不拍照"，正是这个错位 + PLC 未复位请求
+> 叠加的表现。
+
+### 改动范围
+- **`Services/ProductionCoordinator.cs`**：
+  - `BeginCameraChannel` 相机下标改为由通道显式换算：`int camIdx = channel == ChCamUp ? 0 : 1;`
+    （上相机通道(1)→下标 0、下相机通道(2)→下标 1），并加"曾踩坑"注释说明两套编号；
+  - 通道常量 `ChCamUp/ChCamDown` 注释修正为"通道号 ≠ 相机下标"的两套编号说明（原注释写
+    "（相机下标 0）"与常量值 1 自相矛盾，正是误导来源）。
+- **`docs/CommandCenter.md`**：
+  - §5.3 末尾新增技术总结"为什么必须是 PLC 复位请求→上位机才复位结果 / 不复位会怎样 / PLC 梯形图
+    应对任一结果值（含 3）读到≠0 即复位请求"（三拍复位设计思想成文，供现场与 PLC 工程师对照）；
+  - 第八部分版本演进新增 V2.12.5 条目说明根因与修复。
+- **`CHANGELOG.md`**：本小节。
+
+### 为什么这么改
+- 通道号 1/2 是"协议第几个通道"，相机下标 0/1 是"相机列表第几个"，二者历史上曾假设相等，实际差 1，
+  导致所有相机触发都错位/越界。显式三目换算一刀切清，杜绝再混。
+- "PLC 读到结果 3 也必须复位请求"是三拍握手对任一结果值的要求（结果寄存器单值共享，必须等 PLC
+  "已读走"回执才能清零）；现场梯形图若只对 1/2 复位、遇 3 不动，上位机会永久停在等请求清零，
+  后续触发不被受理——这也是本次实测"继续触发触发不了"的叠加剧因，特成文记录。
+
+### 优化点
+- 修复后：PLC 触发上相机走相机 0、触发下相机走相机 1，点位按各自型号表解析、正常返回 1/2；
+  结果 3 只在"点位确实不归该相机/窗口禁用"时出现，排查口径清晰。
+
 ## V2.12.4（2026-08-13）WindowPointForm 型号下拉只列真实型号 + 默认选中与主界面一致
 
 > 用户要求：① 打开"窗口/点位配置…"时，下半区"相机程序映射"的型号下拉**默认选中与主界面

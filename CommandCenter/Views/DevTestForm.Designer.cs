@@ -674,7 +674,7 @@ namespace CommandCenter.Views
             this.btnResCamUp.Name = "btnResCamUp";
             this.btnResCamUp.Size = new System.Drawing.Size(115, 34);
             this.btnResCamUp.TabIndex = 20;
-            this.btnResCamUp.Text = "上相机OK = 1";
+            this.btnResCamUp.Text = "相机OK = 1";
             this.btnResCamUp.UseVisualStyleBackColor = false;
             this.btnResCamUp.Click += new System.EventHandler(this.BtnResCamUp_Click);
             // 
@@ -690,7 +690,7 @@ namespace CommandCenter.Views
             this.btnResCamDown.Name = "btnResCamDown";
             this.btnResCamDown.Size = new System.Drawing.Size(115, 34);
             this.btnResCamDown.TabIndex = 21;
-            this.btnResCamDown.Text = "下相机OK = 1";
+            this.btnResCamDown.Text = "相机NG = 2";
             this.btnResCamDown.UseVisualStyleBackColor = false;
             this.btnResCamDown.Click += new System.EventHandler(this.BtnResCamDown_Click);
             // 

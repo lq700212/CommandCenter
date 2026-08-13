@@ -124,6 +124,23 @@ namespace CommandCenter.Models
         /// <summary>控制指令发送端口（基恩士无协议通信常用 8500，按现场实际改）</summary>
         public int CommandPort { get; set; } = 8500;
 
+        /// <summary>
+        /// 本相机在 PLC 从站的"拍照请求" DataStore 索引（V2.12.6 起每台相机一路 PLC 通道）。
+        /// PLC 触发本相机拍照时写该地址=点位编号（1~255）、读走结果后复位写 0。
+        /// 配置=DataStore 索引（PLC 协议号 = 索引 + 40000，填 2 就是协议 40002）。
+        /// 【0=自动按相机序号默认】第 1 台相机=2（协议 40002）、第 2 台=3（协议 40003，即现场既有
+        ///   上/下相机布局）；第 3 台起 0 表示"未配置该相机通道"——运行时不轮询此相机（请求恒视为
+        ///   无），需新增相机时由现场/PLC 协商新寄存器（建议请求 40008 起，避开扫码 1/型号 7~11、
+        ///   扫码结果 4、前两台 2/3）后在设置页相机表显式填写，并同步 PLC 梯形图。
+        /// </summary>
+        public int PlcRequestAddress { get; set; }
+
+        /// <summary>
+        /// 本相机在 PLC 从站的"拍照结果" DataStore 索引（上位机写：0=复位、1=OK、2=NG、3=点位禁用跳过）。
+        /// 【0=自动按相机序号默认】第 1 台=5（协议 40005）、第 2 台=6（协议 40006）；第 3 台起须显式配置。
+        /// </summary>
+        public int PlcResultAddress { get; set; }
+
         // ─── IV4 无协议通信指令表（《IV4 通信、连接指南》）───
         // 指令均以 CR(0x0D) 终止；T 系列指令含义见 docs/CommandCenter.md 第四部分
 
@@ -408,20 +425,8 @@ namespace CommandCenter.Models
         /// <summary>PLC→上位机：扫码请求（V2.7）。PLC 写 1=请求扫码、0=无请求；上位机读到 1 触发扫码枪。配置=DataStore 索引 1（协议 40001）。</summary>
         public ushort ScanRequestAddress { get; set; } = 1;
 
-        /// <summary>PLC→上位机：上相机拍照请求（V2.7，对应相机列表第 1 台/上相机）。PLC 写 1~255=点位编号、0=无请求。配置=索引 2（协议 40002）。</summary>
-        public ushort CamUpRequestAddress { get; set; } = 2;
-
-        /// <summary>PLC→上位机：下相机拍照请求（V2.7，对应相机列表第 2 台/下相机）。PLC 写 1~255=点位编号、0=无请求。配置=索引 3（协议 40003）。</summary>
-        public ushort CamDownRequestAddress { get; set; } = 3;
-
         /// <summary>上位机→PLC：扫码结果（V2.7）。0=默认/复位，1=扫码OK，2=扫码NG（超时）。配置=索引 4（协议 40004）。</summary>
         public ushort ScanResultAddress { get; set; } = 4;
-
-        /// <summary>上位机→PLC：上相机拍照结果（V2.7）。0=默认/复位，1=OK，2=NG（判定NG/触发失败/取图失败）。配置=索引 5（协议 40005）。</summary>
-        public ushort CamUpResultAddress { get; set; } = 5;
-
-        /// <summary>上位机→PLC：下相机拍照结果（V2.7）。取值同上相机结果。配置=索引 6（协议 40006）。</summary>
-        public ushort CamDownResultAddress { get; set; } = 6;
 
         /// <summary>上位机→PLC：产品型号起始地址（V2.7，连续写 ProductModelLen 个寄存器，最多 10 字符）。配置=索引 7（协议 40007）。</summary>
         public ushort ProductModelAddress { get; set; } = 7;

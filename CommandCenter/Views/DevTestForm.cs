@@ -39,14 +39,14 @@ namespace CommandCenter.Views
     /// │  偏移:[txtOffset]提示:实际D地址=输入地址+偏移量(默认0按D地址)   │
     /// │  读地址测试:[txtReadAddr] [btnReadReg 读] →读到的值[txtReadVal] │
     /// │  写地址测试:[txtWriteAddr] [txtWriteVal] [btnWriteReg 写]       │
-    /// │  （V2.12.3 默认地址=DataStore 索引：读=2 上相机/3 下相机请求，      │
-    /// │   写=5 上相机结果；PLC 协议号=索引+40000，填 2 就是 D2，零换算）   │
+    /// │  （V2.12.3 默认地址=DataStore 索引：读=2 第1台相机/3 第2台相机请求、写=5/6 结果；      │
+    /// │   PLC 协议号=索引+40000，填 2 就是 D2，零换算；第3台起每台相机地址在相机表填）  │
     /// │  请求:[btnReadScanReq 读扫码请求] [btnReadCamReq 读相机请求]    │
     /// │        值:[lblMoveVal]                                          │
     /// │  型号:[btnWriteModel 写产品型号] [txtModel] (→PLC 40007~40011) │
     /// │  结果:[btnResScan0 复位0] [btnResScan1 OK1] [btnResScan2 NG2]   │
-    /// │  相机:[btnResCamUp 上相机OK1] [btnResCamDown 下相机OK1]        │
-    /// │       [btnResCamReset 相机复位0]                                │
+    /// │  相机:[btnResCamUp 相机OK1] [btnResCamDown 相机NG2]            │
+    /// │       [btnResCamReset 相机复位0]（写全部相机通道）               │
     /// ├────────────────────────────────────────────────────────────────┤
     /// │【日志】 [txtLog 多行只读滚动]                                    │
     /// └────────────────────────────────────────────────────────────────┘
@@ -622,29 +622,48 @@ namespace CommandCenter.Views
             });
         }
 
-        /// <summary>读相机请求（V2.7，读 40002/40003）：显示 PLC 主站请求哪台相机拍照（点位编号，0=无请求）。</summary>
+        /// <summary>读相机请求（V2.12.6 起每台相机一路通道）：遍历相机表读各相机请求寄存器，显示各自点位（0=无请求）。</summary>
         private void BtnReadCamReq_Click(object sender, EventArgs e)
         {
             if (!EnsurePlc()) return;
+            if (_cameraConfigs.Count == 0)
+            {
+                MessageBox.Show("当前没有相机配置，无法读取相机请求。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
             SetBusy(true);
-            AppendLog("→ 读相机请求（40002/40003）…");
+            int n = _cameraConfigs.Count;
+            AppendLog($"→ 读相机请求（{n} 台相机）…");
             Task.Run(() =>
             {
-                bool okUp = _plc.ReadCamUpRequest(out int up);
-                bool okDown = _plc.ReadCamDownRequest(out int down);
+                var labels = new List<string>();
+                bool anyOk = false;
+                bool allOk = true;
+                for (int i = 0; i < n; i++)
+                {
+                    bool ok = _plc.ReadCameraRequest(_cameraConfigs[i], i, out int station);
+                    if (ok) anyOk = true; else allOk = false;
+                    string name = string.IsNullOrWhiteSpace(_cameraConfigs[i]?.Name)
+                        ? $"相机{i + 1}" : _cameraConfigs[i].Name.Trim();
+                    labels.Add($"{name}={station}");
+                }
+                string joined = string.Join("  ", labels);
+                bool anyActive = false;
+                foreach (var s in labels)
+                    if (!s.EndsWith("=0")) { anyActive = true; break; }
                 SafeInvoke(() =>
                 {
-                    if (okUp && okDown)
+                    if (allOk)
                     {
-                        lblMoveVal.Text = $"上={up} 下={down}";
-                        lblMoveVal.ForeColor = (up > 0 || down > 0) ? Color.Green : Color.Gray;
+                        lblMoveVal.Text = joined;
+                        lblMoveVal.ForeColor = anyActive ? Color.Green : Color.Gray;
                     }
                     else
                     {
                         lblMoveVal.Text = "读取失败";
                         lblMoveVal.ForeColor = Color.Red;
                     }
-                    AppendLog(okUp && okDown ? $"← 相机请求：上相机={up} 下相机={down}" : "← 读相机请求失败");
+                    AppendLog(allOk && anyOk ? $"← 相机请求：{joined}" : "← 读相机请求失败");
                     FinishOp();
                 });
             });
@@ -690,40 +709,36 @@ namespace CommandCenter.Views
             });
         }
 
-        /// <summary>写上相机结果 = 1（V2.7，写 40005）。</summary>
-        private void BtnResCamUp_Click(object sender, EventArgs e) => WriteCamRes(0, 1);
+        /// <summary>写相机结果 = 1（OK，V2.12.6 起写所有相机通道的结果寄存器）。</summary>
+        private void BtnResCamUp_Click(object sender, EventArgs e) => WriteCamRes(1);
 
-        /// <summary>写下相机结果 = 1（V2.7，写 40006）。</summary>
-        private void BtnResCamDown_Click(object sender, EventArgs e) => WriteCamRes(1, 1);
+        /// <summary>写相机结果 = 2（NG）。</summary>
+        private void BtnResCamDown_Click(object sender, EventArgs e) => WriteCamRes(2);
 
-        /// <summary>相机结果复位 = 0（V2.7，40005/40006 同时写 0）。</summary>
-        private void BtnResCamReset_Click(object sender, EventArgs e) => WriteCamRes(0, 0, resetBoth: true);
+        /// <summary>相机结果复位 = 0（所有相机通道）。</summary>
+        private void BtnResCamReset_Click(object sender, EventArgs e) => WriteCamRes(0);
 
-        /// <summary>写相机结果公共流程：channel 0=上相机、1=下相机；code 1=OK / 0=复位。</summary>
-        private void WriteCamRes(int channel, int code, bool resetBoth = false)
+        /// <summary>写相机结果公共流程（V2.12.6 起多相机）：遍历相机表，每台相机写各自结果通道。
+        /// code：0=复位 / 1=OK / 2=NG。地址来自相机配置 PlcResultAddress（0=按相机序默认 40005/40006，
+        /// 第3台起未配置则跳过该台）。</summary>
+        private void WriteCamRes(int code)
         {
             if (!EnsurePlc()) return;
+            if (_cameraConfigs.Count == 0)
+            {
+                MessageBox.Show("当前没有相机配置，无法写相机结果。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
             SetBusy(true);
-            string target = resetBoth ? "40005/40006" : (channel == 0 ? "40005" : "40006");
-            AppendLog($"→ 写{(resetBoth ? "上下相机" : channel == 0 ? "上相机" : "下相机")}结果 = {code}（{target}）…");
+            int n = _cameraConfigs.Count;
+            AppendLog($"→ 写相机结果 = {code}（{n} 台相机）…");
             Task.Run(() =>
             {
-                if (resetBoth)
-                {
-                    _plc.WriteCamUpResult(code);
-                    _plc.WriteCamDownResult(code);
-                }
-                else if (channel == 0)
-                {
-                    _plc.WriteCamUpResult(code);
-                }
-                else
-                {
-                    _plc.WriteCamDownResult(code);
-                }
+                for (int i = 0; i < n; i++)
+                    _plc.WriteCameraResult(_cameraConfigs[i], i, code);
                 SafeInvoke(() =>
                 {
-                    AppendLog("← 相机结果已写入");
+                    AppendLog($"← 已写相机结果 {code}（{(code == 0 ? "复位" : code == 1 ? "OK" : "NG")}，全部 {n} 台）");
                     FinishOp();
                 });
             });

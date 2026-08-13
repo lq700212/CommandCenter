@@ -13,28 +13,30 @@ namespace CommandCenter.Services
     /// <summary>
     /// 生产流程协调器：把 PLC 请求（扫码/上相机/下相机）、扫码得 SN、相机触发取图、结果上报串成循环。
     ///
-    /// 【V2.7 协议（docs/CommandCenter.md §5.5）：请求-结果-复位三拍式握手】
+///     【V2.7 协议（docs/CommandCenter.md §5.5）：请求-结果-复位三拍式握手】
     /// 现场 PLC(汇川)做 Modbus TCP 主站、上位机做从站。PLC 分阶段发请求，上位机逐通道处理：
     ///   ┌─ 通道① 扫码（40001 请求 → 40004 结果 + 40007~40011 型号）─────────────┐
     ///   │ PLC 写 40001=1 → 上位机触发扫码枪/等手动 SN → 写型号 + 写结果(1=OK/2=NG) │
     ///   │ → PLC 读到结果后写 40001=0 → 上位机看到 40001 归 0 → 写 40004=0 复位     │
     ///   └───────────────────────────────────────────────────────────────────────┘
-    ///   ┌─ 通道② 上相机拍照（40002 请求 → 40005 结果）──────────────────────────┐
-    ///   │ PLC 写 40002=点位 → 上位机触发相机0 拍该点位→归档→显示→写结果(1/2/3)  │
-    ///   │ → PLC 读到结果写 40002=0 → 上位机看到归 0 → 写 40005=0 复位            │
+    ///   ┌─ 相机通道（V2.12.6 起【每台相机一路】，见相机表 PlcRequestAddress/PlcResultAddress）─┐
+    ///   │ 第1台 40002 请求→40005 结果；第2台 40003→40006；第3台起 40008…/40012…（显式配置后）│
+    ///   │ PLC 写请求=点位 → 上位机触发该相机拍点位→归档→显示→写结果(1/2/3)      │
+    ///   │ → PLC 读到结果写请求=0 → 上位机看到归 0 → 写结果=0 复位（三拍同扫码）  │
     ///   └───────────────────────────────────────────────────────────────────────┘
-    ///   ┌─ 通道③ 下相机拍照（40003 请求 → 40006 结果），逻辑同上相机 ────────────┐
     ///   结果值：0=默认/复位，1=OK，2=NG，3=点位禁用跳过（V1.12.28：禁用点位不拍照、
     ///   不显示、不计数，直接回 3 让 PLC 走下一工位）。
-    ///   三个通道互斥串行（一次只处理一个，_activeCh），符合 PLC 串行时序；
+    ///   所有通道互斥串行（一次只处理一个，_activeCh），符合 PLC 串行时序；
     ///   请求只有被"认领"的通道处理，其余通道的请求在活动通道完成前不抢占。
     ///
-    /// 【相机映射】相机按下标对应通道：相机0=上相机(40002/40005)、相机1=下相机(40003/40006)。
-    ///   第三台及以上相机暂无 PLC 驱动通道（文档预留 40012+ 扩展），不参与请求驱动，
-    ///   仍可手动（功能测试窗体）触发验证。
+    /// 【相机通道 ↔ 相机下标（重要，V2.12.6 定稿）】：相机通道号 = 相机下标 + 1
+    ///   （_activeCh=1 即相机 0、=2 即相机 1、=3 即相机 2…），换算 `camIdx = _activeCh - 1`。
+    ///   曾把"协议通道号 1/2"当相机下标用导致错位/越界（V2.12.5 已修、V2.12.6 根治）。
+    ///   每台相机的 PLC 请求/结果地址配在该相机自己的配置里（0=按相机序号默认前两台 40002/03、
+    ///   40005/06；第 3 台起必须现场分配并填写，否则该相机通道不参与轮询）。
     ///
-    /// 【点位与窗口】PLC 请求里带点位编号（40002/40003 的值），该点位是【相机局部点位号】
-    ///   （上下相机各自从 1 起、会重复），上位机按"相机通道 + 该相机点位表"定位窗口
+    /// 【点位与窗口】PLC 请求里带点位编号，该点位是【相机局部点位号】
+    ///   （相机各自从 1 起、会重复），上位机按"该相机通道 + 这台相机的点位表"定位窗口
     ///   （见 TryResolveActiveWindow，窗口=相机点位表条目，前上相机后下相机分组）；
     ///   该窗口被禁用（WindowEnabled=false）时视为"该点位跳过"，直接写结果 3。
     ///   存图点位 = 相机点位号（文件名 {点位}），按相机的 {相机} 目录层隔离（见 ImageStore）。
@@ -61,10 +63,12 @@ namespace CommandCenter.Services
         // 所有状态字段只在"轮询线程"修改；相机拍照 Task 只写 _chanResult（volatile），
         // 轮询线程读取后落 PLC 结果寄存器，因此 _chStep/_activeCh 无需加锁。
         private const int ChNone = -1;    // 无活动通道（空闲，等新请求）
-        private const int ChScan = 0;     // 通道① 扫码
-        private const int ChCamUp = 1;    // 通道② 上相机（相机下标 0）
-        private const int ChCamDown = 2;  // 通道③ 下相机（相机下标 1）
-        private volatile int _activeCh = ChNone; // 当前活动通道
+        private const int ChScan = 0;     // 通道① 扫码（40001/40004）
+        // ★ 相机通道（V2.12.6，多相机）：【每台相机一路 PLC 通道】= 相机下标 + 1。
+        //   忙时 _activeCh = 1+相机下标（1=相机0、2=相机1、3=相机2…），换算唯一：
+        //   camIdx = _activeCh - 1。曾把"协议通道号 1/2"直接当相机下标（0/1）用导致
+        //   错位/越界（V2.12.5 修复后 V2.12.6 根治为"通道号=下标+1"统一模型）。
+        private volatile int _activeCh = ChNone; // 当前活动通道（ChScan=扫码、≥1=相机通道）
         private volatile int _chStep;     // 通道内步骤：见各通道推进逻辑
         private volatile int _chanResult = -1;   // 相机拍照结果：-1=未出，1=OK，2=NG，3=跳过
         private int _pendStation;         // 相机通道当前点位（轮询线程读写）
@@ -224,7 +228,7 @@ namespace CommandCenter.Services
             }
         }
 
-        /// <summary>空闲轮询：按 扫码 → 上相机 → 下相机 优先级认领一个非 0 请求。</summary>
+        /// <summary>空闲轮询：先看扫码请求，再按相机列表顺序轮询每台相机自己的通道请求（V2.12.6 每相机一路）。</summary>
         private void PollNewRequest()
         {
             bool ok;
@@ -235,19 +239,17 @@ namespace CommandCenter.Services
                 BeginScanChannel();
                 return;
             }
-            // 通道② 上相机请求（40002）
-            ok = _plc.ReadCamUpRequest(out int upStation);
-            if (ok && upStation > 0)
+            // 各相机通道（V2.12.6）：按相机列表顺序轮询每台相机的 PLC 请求寄存器（地址配在
+            // 相机表，第3台起未配置则恒无请求）。只认领第一张被触发的相机（互斥串行）。
+            for (int i = 0; i < _cameraCfgs.Count; i++)
             {
-                BeginCameraChannel(ChCamUp, upStation);
-                return;
-            }
-            // 通道③ 下相机请求（40003）
-            ok = _plc.ReadCamDownRequest(out int downStation);
-            if (ok && downStation > 0)
-            {
-                BeginCameraChannel(ChCamDown, downStation);
-                return;
+                if (_cameraCfgs[i] == null) continue;   // 空安全：配置被手改成 null 元素时跳过
+                ok = _plc.ReadCameraRequest(_cameraCfgs[i], i, out int stationNo);
+                if (ok && stationNo > 0)
+                {
+                    BeginCameraChannel(i, stationNo);
+                    return;
+                }
             }
         }
 
@@ -315,59 +317,70 @@ namespace CommandCenter.Services
             }
         }
 
-        // ════════════════ 通道②③ 相机拍照 ════════════════
+        // ════════════════ 相机通道 拍照（V2.12.6 起每台相机一路通道）════════════════
 
         /// <summary>
-        /// 受理相机拍照请求：解析点位→窗口，判断是否跳过（无相机/点位禁用）；
+        /// 受理某台相机的拍照请求：解析点位→窗口，判断是否跳过（无相机/点位禁用）；
         /// 正常则启动后台 Task 触发拍照，轮询线程在 Task 出结果后写 PLC。
         /// </summary>
-        /// <param name="channel">ChCamUp / ChCamDown</param>
+        /// <param name="camIdx">相机列表下标（0 起；通道号 = camIdx + 1，见 _activeCh 注释）</param>
         /// <param name="stationNo">PLC 请求里的点位编号（1~255）</param>
-        private void BeginCameraChannel(int channel, int stationNo)
+        private void BeginCameraChannel(int camIdx, int stationNo)
         {
-            int camIdx = channel; // 通道号==相机下标：上=0、下=1（V2.7 固定映射）
-
-            // 跳过判定：请求点位无对应启用窗口（禁用/未配）或该通道没有相机
+            // 跳过判定：请求点位无对应启用窗口（禁用/未配）或该相机不存在
             bool skip = !TryResolveActiveWindow(camIdx, stationNo, out int windowIndex);
             if (!skip && (camIdx >= _cameras.Count || camIdx >= _cameraCfgs.Count))
                 skip = true;
 
-            _activeCh = channel;
+            _activeCh = camIdx + 1;   // 相机通道号 = 相机下标 + 1（通道换算唯一定义，见类头注释）
             _pendStation = stationNo;
 
+            string camLabel = CameraLabel(camIdx);
             if (skip)
             {
                 // 点位禁用/无相机：不拍照、不显示、不计数，直接写结果 3（跳过）告诉 PLC 走下一工位
                 _chanResult = 3;
                 _chStep = 1;
-                LogHelper.Info($"点位{stationNo} 已禁用或无相机，上报跳过(3)（相机通道 {(channel == ChCamUp ? "上" : "下")}）");
+                LogHelper.Info($"点位{stationNo} 已禁用或无相机，上报跳过(3)（相机{camIdx + 1}/{camLabel}）");
                 SetState($"点位{stationNo} 已禁用，跳过拍照");
                 return;
             }
 
             _chanResult = -1;
             _chStep = 1;    // 步骤1：拍照进行中（Task 出结果后写 PLC）
-            SetState($"点位{stationNo} 触发 {(camIdx == 0 ? "上相机" : "下相机")} 拍照");
-            LogHelper.Info($"收到 PLC 拍照请求：通道{(channel == ChCamUp ? "上" : "下")}，点位{stationNo}（窗口{windowIndex}）");
+            SetState($"点位{stationNo} 触发 {camLabel} 拍照");
+            LogHelper.Info($"收到 PLC 拍照请求：相机{camIdx + 1}({camLabel})，点位{stationNo}（窗口{windowIndex}）");
 
             // 触发+取图+归档+显示 全部在后台线程，完成后只回传 _chanResult 给轮询线程
-            System.Threading.Tasks.Task.Run(() => DoCameraShot(channel, camIdx, stationNo, windowIndex));
+            System.Threading.Tasks.Task.Run(() => DoCameraShot(camIdx, stationNo, windowIndex));
         }
 
-        /// <summary>相机通道推进：拍照完成出结果 → 写 PLC 结果 → 等 PLC 复位请求 → 复位结果。</summary>
+        /// <summary>相机显示名（日志/状态用）：有名称显名称、无名称显"相机N"；index 越界兜底"相机N"。</summary>
+        private string CameraLabel(int camIdx)
+        {
+            if (camIdx >= 0 && camIdx < _cameraCfgs.Count && _cameraCfgs[camIdx] != null)
+            {
+                string name = _cameraCfgs[camIdx].Name;
+                if (!string.IsNullOrWhiteSpace(name)) return name.Trim();
+            }
+            return $"相机{camIdx + 1}";
+        }
+
+        /// <summary>相机通道推进：拍照完成出结果 → 写 PLC 结果 → 等 PLC 复位请求 → 复位结果。
+        /// 三拍对结果 1/2/3 一视同仁（PLC 读到 3 也必须复位请求，否则通道永不释放，见 §5.3）。</summary>
         private void StepCameraChannel()
         {
+            int camIdx = _activeCh - 1;   // 相机通道号 → 相机下标（_activeCh≥1）
+            var cfg = (camIdx >= 0 && camIdx < _cameraCfgs.Count) ? _cameraCfgs[camIdx] : null;
+
             if (_chStep == 1)
             {
-                // 拍照 Task 已出结果（1=OK / 2=NG / 3=跳过）→ 写对应通道结果寄存器
+                // 拍照 Task 已出结果（1=OK / 2=NG / 3=跳过）→ 写本相机通道的结果寄存器
                 if (_chanResult >= 0)
                 {
                     int code = _chanResult;
                     _chanResult = -1;
-                    if (_activeCh == ChCamUp)
-                        _plc.WriteCamUpResult(code);
-                    else
-                        _plc.WriteCamDownResult(code);
+                    _plc.WriteCameraResult(cfg, camIdx, code);
                     _chStep = 2;
                     SetState($"点位{_pendStation} 已上报结果({code})，等待 PLC 复位请求");
                 }
@@ -375,15 +388,10 @@ namespace CommandCenter.Services
             }
 
             // 步骤2：等 PLC 把请求寄存器复位为 0 → 复位结果寄存器，通道完成
-            bool ok = _activeCh == ChCamUp
-                ? _plc.ReadCamUpRequest(out int up) && up == 0
-                : _plc.ReadCamDownRequest(out int down) && down == 0;
+            bool ok = _plc.ReadCameraRequest(cfg, camIdx, out int still) && still == 0;
             if (ok)
             {
-                if (_activeCh == ChCamUp)
-                    _plc.WriteCamUpResult(0);
-                else
-                    _plc.WriteCamDownResult(0);
+                _plc.WriteCameraResult(cfg, camIdx, 0);
                 _activeCh = ChNone;
                 SetState("等待 PLC 请求");
             }
@@ -394,7 +402,7 @@ namespace CommandCenter.Services
         /// 切程序(如配置) → 触发+读判定 → 取图(轮询 FTP 扫目录 / TCP BR) → 归档 → 显示 → 回结果。
         /// 任何失败都收敛为结果 2（NG），绝不抛异常（防止 _chanResult 永远不落）。
         /// </summary>
-        private void DoCameraShot(int channel, int camIdx, int stationNo, int windowIndex)
+        private void DoCameraShot(int camIdx, int stationNo, int windowIndex)
         {
             var cfg = _cameraCfgs[camIdx];
             var cam = _cameras[camIdx];
