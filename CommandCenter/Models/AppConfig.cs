@@ -497,6 +497,13 @@ namespace CommandCenter.Models
         /// </summary>
         public bool WindowOkNgVisible { get; set; } = false;
 
+        /// <summary>
+        /// 主界面各显示窗口【左上角窗口编号】是否显示（V2.10.4）。
+        /// 默认 true（现状：每格左上角悬浮半透明白底 + 深蓝灰字的编号，辅助现场定位第几路）。
+        /// 现场嫌编号碍眼时可在系统设置"窗口点位"行勾掉"显示窗口编号"，保存后即时生效。
+        /// </summary>
+        public bool WindowIndexVisible { get; set; } = true;
+
         /// <summary>按配置反解出 OK/NG 实际画刷色，配置非法时回退默认</summary>
         public Color OkColor => ColorFromName(OkColorName, Color.Green);
         public Color NgColor => ColorFromName(NgColorName, Color.Red);

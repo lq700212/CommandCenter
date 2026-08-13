@@ -1,5 +1,36 @@
 # 版本改动记录
 
+## V2.10.6（2026-08-13）主界面窗口左上角窗口编号显隐可配置
+
+> 现场反馈：每格窗口左上角悬浮的窗口编号（辅助定位第几路）在画面较满时略显碍眼，
+> 之前没有开关、只能改代码。本次在"系统设置 → 窗口点位"行的 `btnEditPoints` 右侧
+> 新增 **"显示窗口编号"** 复选框（垂直居中与按钮对齐），默认勾选（与历史画面完全一致），
+> 取消勾选保存后主界面每格的窗口编号立即隐藏，画面更干净。
+
+### 改动范围
+- **`Models/AppConfig.cs`**：`DisplayConfig` 新增 **`WindowIndexVisible`**（JSON
+  `windowIndexVisible`，默认 `true`），字段注释写明默认显示、取消勾选隐藏。
+- **`Controls/CameraDisplayControl.cs`**：新增 `SetWindowIndexVisible(bool)`——单独控制
+  左上角 `_windowIndexLabel` 显隐，与既有 `SetWindowIndex`（设编号内容）解耦；编号始终
+  由主窗体设置，本方法只决定"显不显示"。
+- **`Views/MainForm.cs`**：`BuildWindowGrid` 创建窗口后调用
+  `win.SetWindowIndexVisible(_config.Display.WindowIndexVisible)`——构造与热更共用此入口，
+  改配置保存后即时生效，无需重启。
+- **`Views/SettingsForm.Designer.cs` / `SettingsForm.cs`**：新增 `chkWindowIndex`
+  （"显示窗口编号"），置于"窗口/点位配置..."按钮右侧（x=290、y=219，与按钮垂直居中对齐）；
+  `LoadFromConfig` 读入、`OnSave` 回写；两处 ASCII 布局图与 ToolTip 同步更新。
+- **文档**：`README.md`（可配置项-显示）、`docs/CommandCenter.md`（第一部分"显示"段 +
+  第八部分版本）补充 `windowIndexVisible` 字段名/默认值/用途；`CHANGELOG.md` 记录。
+
+### 为什么这么改
+- 窗口编号是"辅助现场定位第几路"的参考信息，不是业务数据，显隐不该写死；
+  做成配置项后，现场演示/截图/画面拥挤时可临时关掉，不用改 json 或改代码。
+- 接口沿用 V2.10.3 窗口徽标的"配置 → 构建窗口时应用"模式，风格一致、热更即时生效。
+
+### 优化点
+- 默认 `true` 等价旧行为：老配置 json 里没有该字段时按默认显示，行为不回归；
+- 复选框占用"窗口点位"行的空闲右侧空间，设置页不增高度、不出滚动条，布局无需重排。
+
 ## V2.10.5（2026-08-13）相机 / PLC 主站静默断连检测（KeepAlive 补齐 + 工具复用）
 
 > 承接 V2.10.4（扫码枪 keepalive）：审查相机与 PLC 的连接逻辑发现同源缺口——

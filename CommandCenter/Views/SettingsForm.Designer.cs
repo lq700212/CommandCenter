@@ -17,7 +17,7 @@ namespace CommandCenter.Views
     ///   │ 目录结构: [btnEditDirs 配置目录结构…]                     │
     ///   │    （上下各留 12px 空隙，避免与文件名模板行挤在一起）     │
     ///   │ 文件名模板:     [txtFileNameTpl]                          │
-    ///   │ 窗口点位: [btnEditPoints 窗口/点位配置…]                  │
+    ///   │ 窗口点位: [btnEditPoints 窗口/点位配置…] [√chkWindowIndex 窗口编号] │
     ///   │ OK/NG显示: [√标题栏高亮] [√窗口徽标]                        │
     ///   │ 相机列表:                                                │
     ///   │   ┌──────────────────────────────────────────────────┐   │
@@ -90,6 +90,7 @@ namespace CommandCenter.Views
             this.lblOkNg = new System.Windows.Forms.Label();
             this.chkTitleOkNg = new System.Windows.Forms.CheckBox();
             this.chkWindowOkNg = new System.Windows.Forms.CheckBox();
+            this.chkWindowIndex = new System.Windows.Forms.CheckBox();
             this.lblCams = new System.Windows.Forms.Label();
             this.gridCameras = new System.Windows.Forms.DataGridView();
             this.btnAddCam = new System.Windows.Forms.Button();
@@ -322,6 +323,19 @@ namespace CommandCenter.Views
             this.chkWindowOkNg.Text = "窗口徽标";
             this.chkWindowOkNg.UseVisualStyleBackColor = true;
             //
+            // chkWindowIndex
+            // 主界面窗口左上角"窗口编号"显示开关（V2.10.4）：每格相机画面左上角悬浮半透明白底
+            // + 深蓝灰字的编号（辅助现场定位第几路）。默认开（与历史行为一致）；勾掉后隐藏，
+            // 画面更干净。与"窗口/点位配置..."按钮同处一行、垂直居中对齐。
+            //
+            this.chkWindowIndex.AutoSize = true;
+            this.chkWindowIndex.Location = new System.Drawing.Point(290, 219);
+            this.chkWindowIndex.Name = "chkWindowIndex";
+            this.chkWindowIndex.Size = new System.Drawing.Size(102, 23);
+            this.chkWindowIndex.TabIndex = 17;
+            this.chkWindowIndex.Text = "显示窗口编号";
+            this.chkWindowIndex.UseVisualStyleBackColor = true;
+            //
             // lblCams
             // 相机列表标题，加粗醒目
             //
@@ -491,6 +505,7 @@ namespace CommandCenter.Views
             this.pnlScroll.Controls.Add(this.btnAddCam);
             this.pnlScroll.Controls.Add(this.gridCameras);
             this.pnlScroll.Controls.Add(this.lblCams);
+            this.pnlScroll.Controls.Add(this.chkWindowIndex);
             this.pnlScroll.Controls.Add(this.chkWindowOkNg);
             this.pnlScroll.Controls.Add(this.chkTitleOkNg);
             this.pnlScroll.Controls.Add(this.lblOkNg);
@@ -602,6 +617,8 @@ namespace CommandCenter.Views
                 "标题栏的 OK / NG 计数用\"实心彩色色块 + 白字\"高亮（绿底=OK、红底=NG），\r\n比普通彩色文字醒目得多。取消则回退彩色文字样式。保存后即时生效。");
             this.tip.SetToolTip(this.chkWindowOkNg,
                 "主界面每个显示窗口右下角叠加一个【矩形框 OK/NG 徽标】（样子同标题栏色块，\r\n颜色随 \"OK颜色/NG颜色\" 配置）。默认关闭（保持画面干净），需要实时看每格结果时可勾选。\r\n保存后即时生效。");
+            this.tip.SetToolTip(this.chkWindowIndex,
+                "主界面每个显示窗口左上角是否显示【窗口编号】（半透明白底 + 深蓝灰字，辅助现场定位第几路）。\r\n默认勾选（与历史画面一致）；现场嫌编号碍眼可取消勾选，保存后即时生效。");
             this.tip.SetToolTip(this.btnDelCam,
                 "删除选中的相机行；未选中时先点选要删的行。");
             this.tip.SetToolTip(this.lblScannersTcp,
@@ -655,6 +672,7 @@ namespace CommandCenter.Views
         private Label lblOkNg;
         private CheckBox chkTitleOkNg;
         private CheckBox chkWindowOkNg;
+        private CheckBox chkWindowIndex;
         private Label lblCams;
         private DataGridView gridCameras;
         private Button btnAddCam;

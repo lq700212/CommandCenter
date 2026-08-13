@@ -742,6 +742,8 @@ namespace CommandCenter.Views
                     Dock = DockStyle.Fill
                 };
                 win.SetWindowIndex(w); // 显示"原窗口编号"（点位归属仍按 WindowStationMap[w-1]）
+                // V2.10.4：按配置控制左上角窗口编号显隐（默认显示；关掉画面更干净）
+                win.SetWindowIndexVisible(_config.Display.WindowIndexVisible);
                 // V2.10.3：按配置控制右下角 OK/NG 徽标显隐与颜色（默认关；BuildWindowGrid 在
                 // 构造与热更都会调用，改配置保存后即时生效）
                 win.SetOkNgVisible(_config.Display.WindowOkNgVisible);

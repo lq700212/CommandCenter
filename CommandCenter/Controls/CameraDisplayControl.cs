@@ -124,6 +124,16 @@ namespace CommandCenter.Controls
         }
 
         /// <summary>
+        /// 设置左上角窗口编号标签是否显示（V2.10.4，由主窗体按配置调用）。
+        /// 默认显示（true）；配置关掉后隐藏，画面更干净。
+        /// </summary>
+        /// <param name="visible">true=显示窗口编号，false=隐藏</param>
+        public void SetWindowIndexVisible(bool visible)
+        {
+            _windowIndexLabel.Visible = visible;
+        }
+
+        /// <summary>
         /// 设置或清除要显示的照片。
         /// </summary>
         /// <param name="image">照片；传 null 表示清空回到深灰空态</param>

@@ -16,7 +16,7 @@ namespace CommandCenter.Views
     /// │ 目录结构: [配置目录结构...] {年月日}/{SN}/{OKNG}             │
     /// │           ↑ 下方与文件名模板行留 12px 空隙（上下一致）      │
     /// │ 文件名模板:   [{点位}]   （占位符提示见界面）              │
-    /// │ 窗口点位: [窗口/点位配置...] 点格改存图点位/可交换窗口位置   │
+    /// │ 窗口点位: [窗口/点位配置...] [√显示窗口编号] 点格改存图点位/可交换窗口位置 │
     /// │ OK/NG显示: [√标题栏高亮] [√窗口徽标]                        │
     /// │ 相机列表: ┌────┬────────┬────┬──────────┬────────────────────────┐ │
     /// │            │序号│ 相机IP │端口│ 取图方式  │ FTP上传目录            │ │
@@ -100,6 +100,8 @@ namespace CommandCenter.Views
             // V2.10.3：主界面窗口右下角 OK/NG 徽标显隐开关）
             chkTitleOkNg.Checked = _cfg.Display.TitleOkNgHighlight;
             chkWindowOkNg.Checked = _cfg.Display.WindowOkNgVisible;
+            // V2.10.4：主界面窗口左上角窗口编号显示开关（默认开，与历史画面一致）
+            chkWindowIndex.Checked = _cfg.Display.WindowIndexVisible;
             // 图片保存根目录、目录结构与文件名模板（目录结构用只读预览，实际编辑进可视化对话框）
             txtSaveDir.Text = _cfg.Image.SaveRootDir;
             RefreshDirPreview();
@@ -462,6 +464,7 @@ namespace CommandCenter.Views
             _cfg.Display.Columns = (int)nudCols.Value;
             _cfg.Display.TitleOkNgHighlight = chkTitleOkNg.Checked;
             _cfg.Display.WindowOkNgVisible = chkWindowOkNg.Checked; // V2.10.3：窗口右下角 OK/NG 徽标开关
+            _cfg.Display.WindowIndexVisible = chkWindowIndex.Checked; // V2.10.4：窗口左上角窗口编号开关
             _cfg.Image.SaveRootDir = txtSaveDir.Text.Trim();
             _cfg.Image.FileNameTemplate = txtFileNameTpl.Text.Trim();
             // 目录结构由 DirTreeEditForm 直接写入 _cfg.Image.SubDirs，这里不用回写；
