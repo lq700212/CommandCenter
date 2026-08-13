@@ -208,6 +208,85 @@ namespace CommandCenter.Services
             }
         }
 
+        /// <summary>
+        /// 从相机 FTP 取图目录里找"修改时间最新"的一对文件（V1.12.24 放错机制）。
+        ///
+        /// 【背景】基恩士相机推图文件名不保证恒为 0000.jpeg / 0000.iv4p，
+        ///   现场实测可能是 0084.jpeg、0084.iv4p 等任意编号。旧实现依赖 FileSystemWatcher
+        ///   事件记路径（事件本身兼容任意文件名），但若事件漏报/错过、或归档用的路径写死
+        ///   文件名，就会取不到图。本方法【不写死任何文件名】，按扩展名分组后分别取
+        ///   LastWriteTimeUtc 最新的一张——不管相机命名成什么样，都能拿到"最近这一张"。
+        ///   调用时机在协调器收尾归档前（ProductionCoordinator.FinishAll）与功能测试窗体
+        ///   取图（DevTestForm），事件路径仅作为目录扫描失败时的兜底。
+        /// </summary>
+        /// <param name="dir">该相机的 FTP 取图目录（相机配置 FtpUploadDir，空缺用全局 FtpRootDir）</param>
+        /// <returns>最新一对结果：JpegPath / IvpPath（找不到对应文件则为 null；目录不存在返回空结果）</returns>
+        public LatestPairResult FindLatestPair(string dir)
+        {
+            var result = new LatestPairResult();
+            // 目录不存在（相机还没建/网盘未挂载）：直接返回空结果，由调用方走事件路径兜底或报错
+            if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir)) return result;
+            try
+            {
+                // 遍历目录顶层文件（不递归），按扩展名分组，各组取修改时间最新的那一个。
+                // jpeg 组收 .jpeg/.jpg（都算显示主体）；iv4p 组收 .iv4p（基恩士复盘私有格式）。
+                string jpeg = null, iv4p = null;
+                DateTime jpegTime = DateTime.MinValue, iv4pTime = DateTime.MinValue;
+                foreach (var f in Directory.EnumerateFiles(dir))
+                {
+                    string ext = Path.GetExtension(f);
+                    DateTime lastWrite;
+                    try { lastWrite = File.GetLastWriteTimeUtc(f); }
+                    catch { continue; } // 个别文件读时间失败（被占用/瞬间删除）跳过，不影响整体
+                    if (ext.Equals(".iv4p", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (lastWrite > iv4pTime) { iv4pTime = lastWrite; iv4p = f; }
+                    }
+                    else if (ext.Equals(".jpeg", StringComparison.OrdinalIgnoreCase)
+                          || ext.Equals(".jpg", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (lastWrite > jpegTime) { jpegTime = lastWrite; jpeg = f; }
+                    }
+                }
+                result.JpegPath = jpeg;
+                result.IvpPath = iv4p;
+                if (jpeg != null)
+                    LogHelper.Info($"从 FTP 取图目录取到最近图片：{jpeg}" + (iv4p != null ? " | " + iv4p : "（无 iv4p）"));
+                return result;
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Error($"扫描 FTP 取图目录取最新文件失败：{dir}", ex);
+                return result;
+            }
+        }
+
+        /// <summary>
+        /// 删除 FTP 取图目录里的单个源文件（V1.12.24 起供功能测试窗体复用，与协调器"处理即删"一致）。
+        /// 文件不存在/删除失败一律静默记日志、不抛异常：
+        ///   - 不存在：本来就已删（重复删除场景），正常；
+        ///   - 被占用删除失败：多留一个文件无害（取图按"修改时间最新"仍能拿到下一张），但记日志供现场排查。
+        /// 【调用时机】必须在归档复制成功之后调用（调用方保证），否则复制失败会把图弄丢。
+        /// </summary>
+        /// <param name="path">要删除的源文件完整路径（可为 null/空/不存在，均安全）</param>
+        /// <param name="tag">日志归属标签（如"点位1"/"功能测试 相机1"），仅用于日志定位</param>
+        public static void DeleteSourceFile(string path, string tag)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                    LogHelper.Info($"{tag} 已删除 FTP 取图源文件：{path}");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Warn($"{tag} 删除 FTP 源文件失败（不影响结果）：{path} → {ex.Message}");
+            }
+        }
+
         /// <summary>复制文件并带重试（FTP 源文件可能正在被相机写/事件早于写完到达）。
         /// 复用 V1.8.3 的 FileShare.ReadWrite 思路：源文件正在写也能复制；失败短延迟重试最多 3 次。</summary>
         private static void CopyWithRetry(string src, string dst, string tag)
@@ -302,6 +381,20 @@ namespace CommandCenter.Services
                 try { w.Dispose(); } catch { }
             }
             _watchers.Clear();
+        }
+
+        /// <summary>
+        /// FTP 取图目录里"修改时间最新"的一对文件（V1.12.24，FindLatestPair 的返回值）。
+        /// JpegPath 为最新 .jpeg/.jpg（显示/归档主体）；IvpPath 为最新 .iv4p
+        /// （基恩士复盘私有格式，可能为 null=目录里没有 iv4p）。文件名不固定（非 0000）。
+        /// </summary>
+        public class LatestPairResult
+        {
+            /// <summary>最新 jpeg 源文件完整路径（可能为 null=目录里没有 jpeg）</summary>
+            public string JpegPath;
+
+            /// <summary>最新 iv4p 源文件完整路径（可能为 null=目录里没有 iv4p）</summary>
+            public string IvpPath;
         }
     }
 }

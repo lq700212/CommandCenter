@@ -101,15 +101,30 @@ namespace CommandCenter.Models
         public string ReadResultCommand { get; set; } = "RT";
 
         /// <summary>
-        /// 切换相机程序编号（PW 指令，V1.12.18，0~127，负值=不切换）。
-        /// 触发拍摄前上位机先发 "PW,nnn[CR]" 把相机切到指定程序（每个程序对应一组视觉工具），
-        /// 再发 T2 触发+读判定。nnn 补足 3 位（如程序 9 → "PW,009"）。
-        /// 默认 -1 表示"不切换，用相机当前程序"，旧配置无需迁移、行为不变。
-        /// ⚠️ TODO（待与 PLC 沟通）：现场一个相机可能拍多个点位、每个点位用不同程序。
-        ///   等 PLC 到位信号带上点位信息后，这里应升级为"点位→程序号"映射，触发时按当前点位切换；
-        ///   当前实现按"每相机一个固定程序号"落地，点位级映射留待点位信息定稿。
+        /// 切换相机程序编号（PW 指令，0~127，负值=不切换）。
+        /// ⚠️ **V1.12.25 起废弃（点位级映射接管）**：触发切程序不再读本字段，改由
+        ///    StationPrograms（点位→程序号映射表）决定——每台相机在表里配了哪些点位、
+        ///    就切到对应的程序号；没配的点位一律不切换（保持相机当前程序）。
+        ///    本字段仅保留给旧配置兼容（防止老 json 里的 programNo 被反序列化时丢失，无害）。
         /// </summary>
         public int ProgramNo { get; set; } = -1;
+
+        /// <summary>
+        /// 本相机的"点位→相机程序号"映射表（V1.12.25，设置页 WindowPointForm 同页编辑）。
+        ///
+        /// 【为什么用"每相机一张表"】现场是"28 个窗口（点位）对应两台相机"：上相机拍一部分点位、
+        /// 下相机拍另一部分（比如上相机管前 14 个点、下相机管后 14 个），不是每台相机都拍全部点位。
+        /// 所以点位→程序号必须按相机分表：某相机表里配了哪些点位 == 这台相机负责拍哪些点位；
+        /// 且不同相机的同名程序（P000/P001…）是各相机自己的程序库，互相独立，必须各自配置。
+        ///
+        /// 【触发逻辑】ProductionCoordinator.TriggerOneCamera 在触发前查出"本轮该相机要填的窗口"对应
+        /// 的点位号，在本表里查该点位对应的程序号：命中→发 PW 切换后再触发；未命中→不切换
+        /// （该点位不归本相机拍，或还没配映射，保持相机当前程序）。不会像旧固定 ProgramNo 那样误切。
+        ///
+        /// 【JSON 形态】stationPrograms: [ { "stationNo":1, "programNo":0 }, ... ]，小驼峰。
+        /// 点位号对应存图点位（DisplayConfig.WindowStationMap 的取值，1~9999）；程序号 0~127 合法（0 也是程序）。
+        /// </summary>
+        public List<StationProgramItem> StationPrograms { get; set; } = new List<StationProgramItem>();
 
         /// <summary>
         /// 判定结果输出格式（OF 指令，V1.12.18）：留空/非法则不发送（相机用默认标准格式）。
@@ -191,6 +206,22 @@ namespace CommandCenter.Models
             new CameraConfig { Name = "上相机", IpAddress = "19.87.6.213", FtpUploadDir = @"D:\IV存图\1" },
             new CameraConfig { Name = "下相机", IpAddress = "19.87.6.212", FtpUploadDir = @"D:\IV存图\2" }
         };
+    }
+
+    /// <summary>
+    /// 单个"点位→相机程序号"映射条目（V1.12.25，装在 CameraConfig.StationPrograms 列表里）。
+    /// 每个条目含义：本相机在 Photograph/拍摄"点位 StationNo"前，先发 PW 把相机切到"程序 ProgramNo"。
+    /// - StationNo：存图点位号（1~9999，与 DisplayConfig.WindowStationMap 的取值一致；对应上位机"检测点位"）；
+    /// - ProgramNo：相机程序号（0~127 合法，0 也是真实程序——默认配置注意别把 0 当"未设置"）。
+    /// 触发时按当前点位查本表，命中→切换，未命中→不切换（该点位不归本相机/还没配映射）。
+    /// </summary>
+    public class StationProgramItem
+    {
+        /// <summary>拍照点位号（对应存图点位，1~9999）</summary>
+        public int StationNo { get; set; }
+
+        /// <summary>该点位在本相机上对应的相机程序号（0~127，0 合法）</summary>
+        public int ProgramNo { get; set; } = -1;
     }
 
     /// <summary>

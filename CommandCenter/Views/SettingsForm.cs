@@ -103,7 +103,8 @@ namespace CommandCenter.Views
         /// 注意：旧版的"点位号"列已移除——存图点位统一由"窗口/点位配置…"（WindowStationMap）驱动；
         /// "取图方式"列（V1.7.0）原是 Ftp/Tcp 下拉，V1.12.18 起现场只保留 FTP 取图
         /// （相机 FTP 推图 0000.jpeg+0000.iv4p），故下拉只留 Ftp、不再提供 Tcp 直读选项；
-        /// "程序号"列（V1.12.18）对应触发前 PW 切换的相机程序（0~127，-1=不切换）。</summary>
+        /// "程序号"列 V1.12.25 起已移除——点位→相机程序号改由"窗口/点位配置…"下半区按相机分表
+        /// （CameraConfig.StationPrograms）配置，废弃字段 ProgramNo 仅保留做旧配置兼容读入、不再写回。</summary>
         private void SetupCameraGridColumns()
         {
             // 仅在还没有"相机IP"列时初始化，保证重复调用不会越建越多
@@ -127,8 +128,6 @@ namespace CommandCenter.Views
                 };
                 srcCol.Items.Add("Ftp");
                 gridCameras.Columns.Add(srcCol);
-                // 程序号（V1.12.18）：触发前 PW 切换的相机程序，0~127，-1=不切换
-                gridCameras.Columns.Add("ProgramNo", "程序号(-1=不切换)");
             }
         }
 
@@ -136,7 +135,10 @@ namespace CommandCenter.Views
         /// 序号列=ID（V1.12.23）：显示列表位置 1 起的编号（相机1=1、相机2=2…），
         /// 主界面按"有名称显名称、无名称显相机N"对应。
         /// 空表格时按现场默认两台相机（V1.12.22，相机1=上=19.87.6.213→D:\IV存图\1、
-        /// 相机2=下=19.87.6.212→D:\IV存图\2）填两行模板行。</summary>
+        /// 相机2=下=19.87.6.212→D:\IV存图\2）填两行模板行。
+        /// 【行 Tag=原 CameraConfig 引用（V1.12.26）】每一行把来源配置对象挂到 Tag 上，
+        /// 保存时优先复用该对象（保留 WindowPointForm 配好的 StationPrograms 映射表），
+        /// 新增行 Tag=null→保存时按新相机建空表。防止"配好映射→点保存→映射全丢"。</summary>
         private void LoadCameraRows()
         {
             int seq = 0; // 相机ID：从 1 开始编号，等于列表位置（数组 index+1）
@@ -145,12 +147,16 @@ namespace CommandCenter.Views
                 seq++;
                 // ImageSource 为空（旧配置）时按 Ftp 兜底显示
                 string src = string.IsNullOrWhiteSpace(c.ImageSource) ? "Ftp" : c.ImageSource;
-                gridCameras.Rows.Add(seq, c.Name, c.IpAddress, c.CommandPort, c.FtpUploadDir, src, c.ProgramNo);
+                var row = gridCameras.Rows[gridCameras.Rows.Add(seq, c.Name, c.IpAddress, c.CommandPort, c.FtpUploadDir, src)];
+                row.Tag = c;   // 记下来源配置，保存时保留它配好的 StationPrograms 映射表
             }
             // 至少留一行可见，别让表格空着无从下手
             if (gridCameras.Rows.Count == 0)
                 foreach (var c in CameraConfig.DefaultCameras())
-                    gridCameras.Rows.Add(++seq, c.Name, c.IpAddress, c.CommandPort, c.FtpUploadDir, "Ftp", c.ProgramNo);
+                {
+                    var row = gridCameras.Rows[gridCameras.Rows.Add(++seq, c.Name, c.IpAddress, c.CommandPort, c.FtpUploadDir, "Ftp")];
+                    row.Tag = c;
+                }
         }
 
         /// <summary>
@@ -166,6 +172,50 @@ namespace CommandCenter.Views
                 if (r.Cells["SeqNo"].Value == null) continue; // 末尾"新行"占位行跳过
                 r.Cells["SeqNo"].Value = ++seq;
             }
+        }
+
+        /// <summary>
+        /// 从相机表格当前所有行收集相机配置列表（V1.12.26）。
+        /// 【为什么要有它】① 映射页打开与保存时必须用"同一批相机对象"——表格行 Tag 上绑着来源
+        /// CameraConfig（LoadCameraRows 时绑定，新增行 Tag=null），优先复用该对象并直接改字段，
+        /// 从而完整保留 WindowPointForm 写回的 StationPrograms（点位→程序号映射表）不丢失；
+        /// ② 打开映射页时也要传"含未保存新增相机"的列表，让新相机立刻能配它自己的映射表。
+        /// 【约束】IP 空的行视为未填写自动剔除；复用对象时注意"废弃的 ProgramNo 不写回"。
+        /// </summary>
+        /// <returns>相机列表（与表格行一一对应，顺序=行序）</returns>
+        private List<CameraConfig> CollectCamerasFromGrid()
+        {
+            var cams = new List<CameraConfig>();
+            foreach (DataGridViewRow r in gridCameras.Rows)
+            {
+                string ip = r.Cells["IpAddress"].Value != null ? r.Cells["IpAddress"].Value.ToString().Trim() : "";
+                if (string.IsNullOrEmpty(ip)) continue; // 空行/未填IP行忽略
+
+                int port = 8500;
+                string portTxt = r.Cells["CommandPort"].Value == null ? "" : r.Cells["CommandPort"].Value.ToString();
+                if (!int.TryParse(portTxt, out port)) port = 8500;   // TryParse 失败会写 0，手动回默认
+                // 取图方式：Ftp/Tcp（空值按 Ftp 兜底，与 ProductionCoordinator.IsTcpImage 判断一致）
+                string imgSrc = r.Cells["ImageSource"].Value == null ? "Ftp" : r.Cells["ImageSource"].Value.ToString();
+
+                // 复用行 Tag 上的原配置对象（保留它身上配好的 StationPrograms 映射表）；
+                // 新增行（Tag=null）才新建对象（默认空映射表，正好符合"新相机有自己的表"）。
+                var cam = r.Tag as CameraConfig;
+                if (cam == null)
+                {
+                    cam = new CameraConfig();
+                    r.Tag = cam;   // 关键：回绑到行 Tag，之后映射页配好的映射写回此对象，
+                                   // 保存时再走本方法复用同一对象，映射才不丢
+                }
+                cam.Name = r.Cells["Name"].Value == null ? "" : r.Cells["Name"].Value.ToString().Trim();
+                cam.IpAddress = ip;
+                cam.CommandPort = Math.Max(1, port);
+                cam.FtpUploadDir = r.Cells["FtpUploadDir"].Value == null ? "" : r.Cells["FtpUploadDir"].Value.ToString().Trim();
+                cam.ImageSource = string.IsNullOrWhiteSpace(imgSrc) ? "Ftp" : imgSrc.Trim();
+                // 注意：不再写回废弃的 ProgramNo（V1.12.25 起点位→程序号由 StationPrograms 表驱动，
+                // 在"窗口/点位配置…"里配；此处不赋值则按默认 -1，保证旧值不残留误导现场）
+                cams.Add(cam);
+            }
+            return cams;
         }
 
         /// <summary>给两个扫码枪表格建好列结构（V1.12.8 起拆分为 TCP 表 + 串口表）。
@@ -251,7 +301,7 @@ namespace CommandCenter.Views
             btnAddCam.Click += (s, e) =>
             {
                 var def = CameraConfig.DefaultCameras()[0];
-                gridCameras.Rows.Add(0, def.Name, def.IpAddress, 8500, def.FtpUploadDir, "Ftp", def.ProgramNo);
+                gridCameras.Rows.Add(0, def.Name, def.IpAddress, 8500, def.FtpUploadDir, "Ftp");
                 RenumberCameraSeq(); // 追加后重排序号（ID=行序），删除/排序后同样调用
             };
 // 删除选中：把当前选中的行整行移除；没有选中行则什么都不做
@@ -291,14 +341,20 @@ namespace CommandCenter.Views
                         RefreshDirPreview();
                 }
             };
-            // 打开窗口/存图点位可视化配置对话框：改的是同一 _cfg.Display.WindowStationMap 实例。
+            // 打开"窗口/点位与相机程序配置"对话框（V1.12.25 起同页混排两个映射）：
+            // ① 窗口→存图点位（格子矩阵，可编辑点位/交换窗口位置/恢复默认）；
+            // ② 点位→相机程序号（每台相机各自一张表，触发时按点位切相机程序）。
             // 注意：行列数取【界面 nud 上的最新值】（用户可能刚改了行/列还没保存），
             // 而不是 _cfg.Display.Rows/Columns（那是上次已保存的旧值）——保证格子矩阵
             // 与"用户即将保存的新窗口总数"一致，改完行列再配置点位所见即所得。
+            // 相机区传"当前表格里所有相机行"（V1.12.26：含刚新增未保存的行，均带各自 Tag 上
+            // 的映射表），确定时各相机映射写回原位、点保存一起落盘；未保存的新增相机也能立刻
+            // 配它自己的"点位→程序号"映射表（保存时按 Tag 复用同对象，映射不丢）。
             btnEditPoints.Click += (s, e) =>
             {
                 using (var dlg = new WindowPointForm(_cfg.Display.WindowStationMap,
-                                                     (int)nudRows.Value, (int)nudCols.Value))
+                                                     (int)nudRows.Value, (int)nudCols.Value,
+                                                     CollectCamerasFromGrid()))
                 {
                     dlg.ShowDialog(this);
                 }
@@ -370,32 +426,9 @@ namespace CommandCenter.Views
             // 目录结构由 DirTreeEditForm 直接写入 _cfg.Image.SubDirs，这里不用回写；
             // 未打开过对话框则保持 SubDirs 原值（首次为模型默认的三层）。
 
-            // 相机：逐行回写；IP 空的行视为"未填写"自动剔除；剔除后一台都不剩则补一台默认。
-            // 注意：存图点位不再在此配置（由"窗口/点位配置…"的 WindowStationMap 驱动，见 DisplayConfig）
-            var cams = new List<CameraConfig>();
-            foreach (DataGridViewRow r in gridCameras.Rows)
-            {
-                string ip = r.Cells["IpAddress"].Value != null ? r.Cells["IpAddress"].Value.ToString().Trim() : "";
-                if (string.IsNullOrEmpty(ip)) continue; // 空行/未填IP行忽略
-                int port = 8500;
-                string portTxt = r.Cells["CommandPort"].Value == null ? "" : r.Cells["CommandPort"].Value.ToString();
-                if (!int.TryParse(portTxt, out port)) port = 8500;   // TryParse 失败会写 0，手动回默认
-                // 取图方式：Ftp/Tcp（空值按 Ftp 兜底，与 ProductionCoordinator.IsTcpImage 判断一致）
-                string imgSrc = r.Cells["ImageSource"].Value == null ? "Ftp" : r.Cells["ImageSource"].Value.ToString();
-                // 程序号（V1.12.18）：触发前 PW 切换的相机程序，-1=不切换；空/非法按 -1（不切换）兜底
-                int programNo = -1;
-                string programTxt = r.Cells["ProgramNo"].Value == null ? "" : r.Cells["ProgramNo"].Value.ToString().Trim();
-                if (!int.TryParse(programTxt, out programNo)) programNo = -1;
-                cams.Add(new CameraConfig
-                {
-                    Name = r.Cells["Name"].Value == null ? "" : r.Cells["Name"].Value.ToString().Trim(),
-                    IpAddress = ip,
-                    CommandPort = Math.Max(1, port),
-                    FtpUploadDir = r.Cells["FtpUploadDir"].Value == null ? "" : r.Cells["FtpUploadDir"].Value.ToString().Trim(),
-                    ImageSource = string.IsNullOrWhiteSpace(imgSrc) ? "Ftp" : imgSrc.Trim(),
-                    ProgramNo = programNo
-                });
-            }
+// 相机：从表格行收集（含未保存新增行），复用行 Tag 上的原对象保留映射表。
+            // 注意：存图点位不在此配置（由"窗口/点位配置…"的 WindowStationMap 驱动，见 DisplayConfig）
+            var cams = CollectCamerasFromGrid();
             if (cams.Count == 0) cams.AddRange(CameraConfig.DefaultCameras()); // 兜底：至少现场两台默认相机
             _cfg.Cameras = cams;
 

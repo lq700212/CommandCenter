@@ -1169,8 +1169,10 @@ namespace CommandCenter.Views
                     // 开发者账号 → 功能测试窗体（V1.12.0）：复用主窗体已有连接，不新建
                     if (login.Role == LoginRole.Developer)
                     {
-                        // 传入 PLC/相机/扫码枪服务实例与相机扫码配置：测试窗体直接复用、不建新连接
-                        using (var test = new DevTestForm(_plc, _cameras, _scanners, _config.Scanners))
+                        // 传入 PLC/相机/扫码枪服务实例与相机扫码配置：测试窗体直接复用、不建新连接；
+                        // V1.12.24 追加 ImageStore + 相机配置 + 当前 SN 快照，供"T2 取图→闪图→存图"测试
+                        using (var test = new DevTestForm(_plc, _cameras, _scanners, _config.Scanners,
+                            _imageStore, _config.Cameras, _coordinator?.LatestSerialNumber ?? ""))
                             test.ShowDialog(this);
                         return; // 测试窗体关闭后不触发保存/热更（测试不产生配置改动）
                     }

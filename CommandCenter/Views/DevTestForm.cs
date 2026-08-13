@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using CommandCenter.Models;
@@ -20,11 +21,12 @@ namespace CommandCenter.Views
     /// ┌────────────────────────────────────────────────────────────────┐
     /// │ ▓ 功能测试（开发者）                                            │
     /// ├────────────────────────────────────────────────────────────────┤
-    /// │【相机】 相机:[cmbCamera▾] 状态:[lblCamState]                    │
-    /// │   [btnTrigger 仅触发T1] [btnTriggerRead 触发+判定T2]            │
-    /// │   结果:[lblCamResult]（OK=绿 / NG=红 / 失败=灰）                │
-    /// │   [btnReadProgramNo 读当前程序号][lblCurrentProgram 当前程序:Pxxx]│
-    /// │   [btnSwProg1 切换程序→P001] [btnSwProg2 切换程序→P002]         │
+    ///     │【相机】 相机:[cmbCamera▾] 状态:[lblCamState]  [picTestShot 预览]│
+    ///     │   [btnTrigger 仅触发T1] [btnTriggerRead 触发+判定T2(取图存图)] │
+    ///     │   结果:[lblCamResult]（OK=绿 / NG=红 / 失败=灰）              │
+    ///     │   [btnReadProgramNo 读当前程序号][lblCurrentProgram]          │
+    ///     │   [btnSwProg1 切换程序→P001] [btnSwProg2 切换程序→P002]       │
+    ///     │   右侧:[lblTestImagePath 最近存图路径]（T2 后自动取图闪图存图）│
     /// ├────────────────────────────────────────────────────────────────┤
     /// │【扫码枪】扫码枪:[cmbScanner▾] 状态:[lblScannerState]            │
     /// │   [btnScannerTrigger 发送触发指令]                               │
@@ -64,15 +66,22 @@ namespace CommandCenter.Views
         private readonly List<KeyenceIV4Camera> _cameras;    // 主窗体传入的相机服务列表（复用其连接）
         private readonly List<IScanner> _scanners;           // 主窗体传入的扫码枪服务列表（复用其连接）
         private readonly List<ScanConfig> _scannerConfigs;   // 扫码枪配置列表（表头标签用，与 _scanners 下标对应）
+        private readonly ImageStore _imageStore;             // 主窗体传入的图像存储服务（V1.12.24 取图存图测试复用，不新建）
+        private readonly List<CameraConfig> _cameraConfigs;  // 相机配置列表（取每台 FTP 取图目录用，与 _cameras 下标对应）
+        private readonly string _serialSnapshot;             // 打开测试窗体时的当前产品序列号快照（存图 {SN} 目录用）
         private volatile bool _busy;                         // 防止连点/并发触发（跨线程读）
 
         public DevTestForm(PlcService plc, List<KeyenceIV4Camera> cameras,
-            List<IScanner> scanners, List<ScanConfig> scannerConfigs)
+            List<IScanner> scanners, List<ScanConfig> scannerConfigs,
+            ImageStore imageStore, List<CameraConfig> cameraConfigs, string serialSnapshot)
         {
             _plc = plc;
             _cameras = cameras ?? new List<KeyenceIV4Camera>();
             _scanners = scanners ?? new List<IScanner>();
             _scannerConfigs = scannerConfigs ?? new List<ScanConfig>();
+            _imageStore = imageStore;
+            _cameraConfigs = cameraConfigs ?? new List<CameraConfig>();
+            _serialSnapshot = serialSnapshot ?? "";
             InitializeComponent();
 
             // 填充相机下拉框：每台一行"相机N IP:端口"（V1.12.22 起带名称：上相机/下相机）
@@ -314,17 +323,50 @@ namespace CommandCenter.Views
             });
         }
 
-        /// <summary>触发＋读判定（T2）：相机拍照并回传判定结果，一次完成。</summary>
+        /// <summary>
+        /// 触发＋读判定（T2）+ 取图存图（V1.12.24）：相机拍照并回传判定结果后，
+        /// 上位机再去该相机的 FTP 取图目录拿【修改时间最新】的 jpeg（+iv4p 如有），
+        /// 在界面右侧 picTestShot 闪图，并按主窗体相同的归档规则保存到
+        /// ImageConfig.SaveRootDir 下（点位固定用 1——测试场景未指定点位）。
+        /// 复用主窗体传入的 _imageStore 实例与相机连接，不新建任何连接、不改配置。
+        /// 所有网络/文件 IO 在后台线程执行，完成后 SafeInvoke 回 UI 更新。
+        /// </summary>
         private void BtnTriggerRead_Click(object sender, EventArgs e)
         {
             var cam = SelectedCamera();
             if (cam == null) { MessageBox.Show("请先在相机列表选择一台相机。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            int camIndex = cmbCamera.SelectedIndex; // 取图目录按相机下标对应配置
 
             SetBusy(true);
             AppendLog($"→ 相机 {cam.IpLabel} 触发+读判定（T2）…");
             Task.Run(() =>
             {
                 var r = cam.TriggerAndRead();
+                // 触发成功 → 去该相机 FTP 取图目录拿最新图并归档（点位固定 1，测试用）
+                string jpeg = null, iv4p = null, archived = null;
+                string fetchError = null;
+                if (r.Succeeded)
+                {
+                    var pair = ResolveLatestFtpPair(camIndex);
+                    jpeg = pair.JpegPath;
+                    iv4p = pair.IvpPath;
+                    if (string.IsNullOrEmpty(jpeg))
+                        fetchError = "FTP 取图目录里没有 jpeg 图片（检查相机是否已推图）";
+                    else if (_imageStore != null)
+                    {
+                        archived = _imageStore.SaveImageFilePair(jpeg, iv4p, 1, r.IsOk, _serialSnapshot);
+                        if (archived != null)
+                        {
+                            // V1.12.25：归档成功后才删 FTP 源图（删早了会把图弄丢），与主流程"处理即删"一致。
+                            // 删除在后台线程执行（UI 禁 IO），方法内部吞异常，删除失败不影响本次测试。
+                            string tag = $"功能测试 相机{camIndex + 1}";
+                            ImageStore.DeleteSourceFile(jpeg, tag);
+                            ImageStore.DeleteSourceFile(iv4p, tag);
+                        }
+                    }
+                    else
+                        fetchError = "未提供主窗体 ImageStore（无法存图）";
+                }
                 SafeInvoke(() =>
                 {
                     if (r.Succeeded)
@@ -335,6 +377,22 @@ namespace CommandCenter.Views
                         lblCamResult.ForeColor = r.IsOk ? Color.Green : Color.Red;
                         AppendLog($"← T2 判定 {(r.IsOk ? "OK" : "NG")}：{r.ResultText}"
                             + (string.IsNullOrEmpty(r.Detail) ? "" : "　" + r.Detail));
+                        if (archived != null)
+                        {
+                            // 闪图 + 显示存档路径（主窗体保存目录下，点位 1）
+                            ShowTestImage(archived);
+                            lblTestImagePath.Text = "最近存图：" + archived;
+                            lblTestImagePath.ForeColor = Color.FromArgb(46, 158, 107);
+                            AppendLog($"→ 已取图并存档（点位1）：{archived}"
+                                + (string.IsNullOrEmpty(iv4p) ? "（无 iv4p）" : "")
+                                + "，已删除 FTP 源图");
+                        }
+                        else
+                        {
+                            lblTestImagePath.Text = "取图失败：" + (fetchError ?? "未知原因");
+                            lblTestImagePath.ForeColor = Color.Red;
+                            AppendLog("← 取图失败：" + (fetchError ?? "（无图可存）"));
+                        }
                     }
                     else
                     {
@@ -345,6 +403,31 @@ namespace CommandCenter.Views
                     FinishOp();
                 });
             });
+        }
+
+        /// <summary>
+        /// 取该相机 FTP 取图目录里"修改时间最新"的一对文件（V1.12.24）。
+        /// 目录优先用相机配置 FtpUploadDir，为空回退全局 Image.FtpRootDir；
+        /// 找不到则返回空结果（调用方自行提示）。
+        /// </summary>
+        private ImageStore.LatestPairResult ResolveLatestFtpPair(int cameraIndex)
+        {
+            if (_imageStore == null) return new ImageStore.LatestPairResult();
+            if (_cameraConfigs == null || cameraIndex < 0 || cameraIndex >= _cameraConfigs.Count)
+                return new ImageStore.LatestPairResult();
+            string dir = _cameraConfigs[cameraIndex].FtpUploadDir;
+            if (string.IsNullOrWhiteSpace(dir)) dir = _imageStore.DefaultFtpDir;
+            return _imageStore.FindLatestPair(dir);
+        }
+
+        /// <summary>在右侧预览框显示一张图片（闪图）。替换前释放旧图防 GDI 句柄泄漏。</summary>
+        private void ShowTestImage(string path)
+        {
+            var img = ProductionCoordinator.LoadImageSafe(path);
+            var old = picTestShot.Image;
+            picTestShot.Image = null;
+            old?.Dispose();
+            picTestShot.Image = img;
         }
 
         // ────────────── 相机程序切换（V1.12.19，基恩士侧仍在调试，供前期验证）──────────────

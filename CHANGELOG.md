@@ -1,5 +1,116 @@
 # 版本改动记录
 
+## V1.12.26（2026-08-13）点位→相机程序号映射增强：支持任意台相机 + 下拉选择
+
+> 现场反馈/澄清：V1.12.25 的"点位→相机程序号"映射表要**每台相机都有自己的表**，新增相机也要能配；
+> 且配置时希望**用下拉选择点位和程序**，而不是手输数字。同时澄清了候选语义：**点位数量=窗口数量**
+> （点位默认=窗口编号，滚换/个别调整后集合仍与窗口一致）；**相机程序的数量与编号是相机程序库定的、
+> 与窗口数无关**，要在全集里动态选。本次补齐：
+> ① 修复"配好映射→在设置页点保存→映射全丢"的隐患（保存时不再 `new` 重建相机对象）；
+> ② 新增/未保存的相机也能立刻配它自己的映射表（表格行 Tag 绑定原配置对象）；
+> ③ 映射表点位、程序号两列改成**下拉选择**（点位列=窗口点位、程序号列="不切换"+0~127）。
+
+### 改动范围
+- **`Views/SettingsForm.cs`**：
+  - `LoadCameraRows`：每行把来源 `CameraConfig` 挂到 `Tag` 上（新增行 Tag=null）。
+  - 新增 `CollectCamerasFromGrid()`：从表格行收集相机（复用行 Tag 对象→保留 `StationPrograms`，
+    新增行新建对象并**回绑 Tag**），`OnSave` 与打开映射页**共用**同一批相机对象，映射不丢。
+  - 打开 WindowPointForm 时改传 `CollectCamerasFromGrid()`（含未保存新增行），新相机立即能配表。
+- **`Views/WindowPointForm.cs` + Designer**：`colStation`/`colProgram` 由文本列改为 **下拉列**
+  （`DataGridViewComboBoxColumn`）。**点位候选以窗口映射点位为准**（数量=窗口数，仅兜底追加
+  "已配但窗口里没有"的存量点）；**程序号候选＝"不切换"+0~127**（0 合法，程序数和编号跟相机
+  程序库走、与窗口数无关，现场动态选）；`FlushProgramGrid` 读回："不切换"/空/非法→-1（不切换），
+  int→原值；`ReloadProgramGrid`：程序号 -1 显示"不切换"。
+
+### 为什么这么改
+- 映射表必须**跟相机走**：新增相机是一台新相机、它自己的程序库是空的，理所当然要有自己的空映射表。
+- 保存丢映射是 V1.12.25 的隐性缺陷：`OnSave` 用 `new CameraConfig{...}` 重建对象，配好的
+  `StationPrograms` 全丢——现场第一反应"配了没用"。Tag 复用对象后修掉。
+- 下拉选择避免手输错号（点位敲错、程序号敲成 10 却想发 P10 这种歧义），选项天然限制在合法范围。
+
+### 验证
+- Debug 构建通过；冒烟启动进程存活。
+- harness 验证（22/22 通过）：保存往返保留每台相机映射（引用同一）；新增行 Tag 绑定、有自己的空表、
+  配好映射后再次保存仍在；下拉候选覆盖全部点位/0~127/"不切换"；Reload -1 显示"不切换"、
+  Flush 读回"不切换"→-1、int→原值、空点位行跳过、程序未选→-1。
+
+## V1.12.25（2026-08-13）点位→相机程序号映射（设置页同页混排）；功能测试 T2 取图存图后删除 FTP 源图
+
+> 现场"28 个窗口点位对应两台相机"：上相机拍一部分点位、下相机拍另一部分，**不是**每台相机都拍全部
+> 点位；而每台相机的程序库各自独立（上相机的 P000 是上相机自己的程序），所以点位→程序号映射必须
+> **按相机分表**。本次把固定 `CameraConfig.ProgramNo` 升级为 `StationPrograms`（点位→程序号映射表），
+> 并把设置入口与"窗口↔存图点位"矩阵放进**同一个对话框同页编辑**（`WindowPointForm`）：
+> 每台相机在表里配了哪些点位 == 这台相机负责拍哪些点位，触发时按本轮点位查表切程序，**未命中不切换**
+> （避开不归本相机拍的点位）。同时功能测试页 T2 取图存图成功后，**同步删除对应 FTP 源图**，与主流程
+> "中转暂存区处理即删"保持行为一致，避免测试把相机目录越堆越多。
+
+### 改动范围
+- **`Models/AppConfig.cs`**：新增 `StationProgramItem`（点位→程序号单条，`StationNo`/`ProgramNo`），
+  `CameraConfig.StationPrograms`（每台相机一张映射表，JSON：`stationPrograms:[{stationNo,programNo},…]`）；
+  `ProgramNo` 注释改为"V1.12.25 起废弃，由 StationPrograms 接管，仅保留旧配置兼容"。
+- **`Services/ProductionCoordinator.cs`**：`TriggerOneCamera` 触发前改查映射表——按"本轮本相机要填的窗口"
+  （`_nextWindowIndex + idx`，与 FinishAll 窗口环形分配一致）解析点位号 → `ResolveProgramForStation` 查
+  本相机表 → 命中先 `PW` 切程序再触发、**未命中不切**（不再读固定 `ProgramNo`）；
+  新增 `ResolveProgramForStation`（表空/为空点位返回 -1；校验 `ProgramNo >= 0` 故 0 是合法程序号）。
+- **`Views/WindowPointForm.cs` + Designer**：窗体调大（640×664），下部同页混排新增"相机程序映射"区：
+  相机下拉 `cmbCamera` + 点位/程序号可编辑表格 `dgvPrograms` + 新增映射/删除选中行按钮；
+  编辑逻辑：切相机先 `FlushProgramGrid` 再 `ReloadProgramGrid`，点位留空=不拍、程序号留空/非法=-1（不切）；
+  确定时窗口映射写到 `WindowStationMap`、各相机映射写到各自 `CameraConfig.StationPrograms`。
+- **`Views/SettingsForm.cs`**：打开 WindowPointForm 时传入 `_cfg.Cameras`（同引用，点确定写回、点保存落盘）；
+  相机表**移除废弃的"程序号"列**（`ProgramNo` 不再读/写，避免现场在旧入口填了却不生效——点位程序号
+  必须去"窗口/点位配置…"下区配）。
+- **`Views/DevTestForm.cs`**：T2 取图存图（V1.12.24）成功归档后再调 `ImageStore.DeleteSourceFile` 删除
+  该相机的 jpeg+iv4p FTP 源图（后台线程执行、方法内吞异常，失败不影响测试结果）。
+
+### 为什么这么改
+- 旧固定 ProgramNo 是"一刀切"：一台相机只认一个程序，无法表达"同一台相机在不同点位用不同程序"，
+  更无法表达"某点位不归本相机拍"；映射表按相机分组后两个问题一起解决。
+- 映射与窗口点位同页编辑：一次到位信号、拍哪个点、切哪个相机程序是强关联配置，放同一个对话框
+  一起改最直观，也避免设置页入口越堆越多。
+- 测试页删图：功能测试会频繁重复拍照，不删源图会导致相机 FTP 目录越堆越多、且干扰下次"取最新"。
+
+### 验证
+- Debug 构建通过；冒烟启动进程存活。
+- harness 验证（22/22 通过）：StationPrograms JSON 序列化/反序列化（程序号 0 保留）；
+  `ResolveProgramForStation` 命中/未命中/-1/空表/null 各分支；WindowPointForm 同页写回窗口映射与
+  两台相机映射（含点位留空跳过、程序号 -1 保留占位且查询不命中、切相机后各自写回）；
+  `ImageStore.DeleteSourceFile` 删 jpeg/iv4p、幂等与 null 安全。
+
+> 基恩士相机推图文件名不一定恒为 `0000.jpeg`/`0000.iv4p`（现场实测可能是 `0084.jpeg`/`0084.iv4p`
+> 等任意编号）。旧实现虽用 FileSystemWatcher 事件记路径（兼容任意文件名），但收尾归档仍依赖事件
+> 路径，**事件漏报/错过就会取不到图**。本次做"放错机制"：收尾时统一**扫相机 FTP 取图目录取修改时间
+> 最新的一对 jpeg+iv4p**（`ImageStore.FindLatestPair`），不写死任何文件名；事件路径仅作目录扫描
+> 失败时的兜底。同时把"图到齐才算 IsSnapped"的判定从归档必需改为信号加速——**超时兜底时只要
+> 目录里有图照样能归档**（此前超时兜底有图也不存）。另在功能测试页把 T2 按钮升级为"触发+判定+
+> 取图闪图存图"闭环（点位固定 1，存进主窗体配置的存图目录）。
+
+### 改动范围
+- **`Services/ImageStore.cs`**：新增 `FindLatestPair(string dir)`（扫目录按扩展名分组，各取
+  `LastWriteTimeUtc` 最新的一对，支持 `.jpeg`/`.jpg` 与 `.iv4p`；目录不存在/无文件返回空结果不抛异常）；
+  新增配套结果类 `LatestPairResult`。
+- **`Services/ProductionCoordinator.cs`**：
+  - `FinishAll` FTP 归档分支重写：优先 `TryResolveFtpSources`（扫目录取最新对），扫描失败回退事件路径；
+    `hasImage` 判定不再绑定 `IsSnapped`/事件路径，目录里有图即归档；删除源文件改为删除"实际归档的那对"；
+  - 新增 `TryResolveFtpSources` / `FtpDirFor`（目录解析逻辑与 Start 注册监听一致）；
+  - `OnFtpFileArrived` / `PendingCamera` 注释同步为"事件只作信号加速，归档重扫目录"。
+- **`Views/DevTestForm.cs` + Designer**：T2 按钮（`btnTriggerRead`）升级为"触发+判定T2（取图存图）"——
+  触发成功即从该相机 FTP 目录取最新图 → `picTestShot` 闪图 → `SaveImageFilePair`（点位固定 1、判定 OK/NG、
+  打开窗体时 SN 快照）存到主窗体配置的存图目录，结果/路径进日志；新增右侧图片预览框 + 存图路径标签；
+  构造参数追加 `imageStore`/`cameraConfigs`/`serialSnapshot`（复用主窗体实例，不新建连接）。
+- **`Views/MainForm.cs`**：`OpenSettings` 里 DevTestForm 构造传新参数。
+
+### 为什么这么改
+- 现场相机命名不可控 + FileSystemWatcher 事件偶发不可靠，双保险（事件加速 + 目录扫描兜底）才能真正
+  保证"拍了就有图归档"；删源文件后下一轮取"最新"天然避重。
+- 功能测试页此前只验证触发链路，无法验证"取图→闪图→存图"；升级 T2 后用一口气验证完相机→取图→归档，
+  现场联调少一个来回。
+
+### 验证
+- Debug 构建通过；冒烟启动进程存活。
+- harness 验证（8/8 通过）：`0084.jpeg`/`0084.iv4p` 混在 `0003.jpeg` 等旧文件中取到最新对；
+  `.jpg` 兼容；目录不存在不抛异常；`SaveImageFilePair` 双格式归档到 `{年月日}/{SN}/{OKNG}/1_*.jpeg|iv4p`、
+  不删源文件；仅 jpeg 无 iv4p 也可归档。
+
 ## V1.12.23（2026-08-13）相机列表加"序号"列=相机ID；主界面相机显示"有名称显名称、无名称为相机N"
 
 > 为解决主界面"相机1/相机2"与设置表、现场名字（上相机/下相机）对应不直观：设置窗体相机表最前

@@ -65,8 +65,9 @@
 {
   "plc": { "ipAddress": "19.87.6.1", "port": 502 },        // 汇川 PLC（主站）
   "cameras": [                                             // 基恩士相机，两台（V1.12.22 定稿）
-    { "name": "上相机", "ipAddress": "19.87.6.213", "commandPort": 8500, "ftpUploadDir": "D:\\IV存图\\1", "programNo": 0 },   // 相机1=上相机（FTP 取图目录 D:\IV存图\1）
-    { "name": "下相机", "ipAddress": "19.87.6.212", "commandPort": 8500, "ftpUploadDir": "D:\\IV存图\\2", "programNo": -1 }   // 相机2=下相机（FTP 取图目录 D:\IV存图\2）
+    { "name": "上相机", "ipAddress": "19.87.6.213", "commandPort": 8500, "ftpUploadDir": "D:\\IV存图\\1" },  // 相机1=上相机（FTP 取图目录 D:\IV存图\1）
+    { "name": "下相机", "ipAddress": "19.87.6.212", "commandPort": 8500, "ftpUploadDir": "D:\\IV存图\\2" }   // 相机2=下相机（FTP 取图目录 D:\IV存图\2）
+    // ↑ V1.12.25：点位→相机程序号不再写 cameras[i].programNo，改在"窗口/点位配置…"下区按相机配 stationPrograms
   ],
   "scanners": [                                            // 基恩士扫码枪
     {

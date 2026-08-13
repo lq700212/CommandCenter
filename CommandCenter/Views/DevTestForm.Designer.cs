@@ -76,6 +76,9 @@ namespace CommandCenter.Views
             this.lblPlcState = new System.Windows.Forms.Label();
             this.grpLog = new System.Windows.Forms.GroupBox();
             this.txtLog = new System.Windows.Forms.TextBox();
+            this.picTestShot = new System.Windows.Forms.PictureBox();
+            this.lblTestImagePath = new System.Windows.Forms.Label();
+            ((System.ComponentModel.ISupportInitialize)(this.picTestShot)).BeginInit();
             this.grpCamera.SuspendLayout();
             this.grpScanner.SuspendLayout();
             this.grpPlc.SuspendLayout();
@@ -94,6 +97,8 @@ namespace CommandCenter.Views
             this.grpCamera.Controls.Add(this.btnSwProg1);
             this.grpCamera.Controls.Add(this.lblCurrentProgram);
             this.grpCamera.Controls.Add(this.btnReadProgramNo);
+            this.grpCamera.Controls.Add(this.picTestShot);
+            this.grpCamera.Controls.Add(this.lblTestImagePath);
             this.grpCamera.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
             this.grpCamera.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
             this.grpCamera.Location = new System.Drawing.Point(16, 12);
@@ -153,9 +158,9 @@ namespace CommandCenter.Views
             this.btnTriggerRead.ForeColor = System.Drawing.Color.White;
             this.btnTriggerRead.Location = new System.Drawing.Point(186, 84);
             this.btnTriggerRead.Name = "btnTriggerRead";
-            this.btnTriggerRead.Size = new System.Drawing.Size(160, 36);
+            this.btnTriggerRead.Size = new System.Drawing.Size(176, 36);
             this.btnTriggerRead.TabIndex = 3;
-            this.btnTriggerRead.Text = "触发+读判定 T2";
+            this.btnTriggerRead.Text = "触发+判定T2（取图存图）";
             this.btnTriggerRead.UseVisualStyleBackColor = false;
             this.btnTriggerRead.Click += new System.EventHandler(this.BtnTriggerRead_Click);
             // 
@@ -207,7 +212,7 @@ namespace CommandCenter.Views
             this.btnSwProg1.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnSwProg1.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
             this.btnSwProg1.ForeColor = System.Drawing.Color.White;
-            this.btnSwProg1.Location = new System.Drawing.Point(300, 178);
+            this.btnSwProg1.Location = new System.Drawing.Point(284, 178);
             this.btnSwProg1.Name = "btnSwProg1";
             this.btnSwProg1.Size = new System.Drawing.Size(150, 34);
             this.btnSwProg1.TabIndex = 7;
@@ -223,13 +228,39 @@ namespace CommandCenter.Views
             this.btnSwProg2.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnSwProg2.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
             this.btnSwProg2.ForeColor = System.Drawing.Color.White;
-            this.btnSwProg2.Location = new System.Drawing.Point(460, 178);
+            this.btnSwProg2.Location = new System.Drawing.Point(438, 178);
             this.btnSwProg2.Name = "btnSwProg2";
             this.btnSwProg2.Size = new System.Drawing.Size(150, 34);
             this.btnSwProg2.TabIndex = 8;
             this.btnSwProg2.Text = "切换程序 → P002";
             this.btnSwProg2.UseVisualStyleBackColor = false;
             this.btnSwProg2.Click += new System.EventHandler(this.BtnSwProg2_Click);
+            // 
+            // picTestShot
+            // 最近一次 T2 拍照取回的图片预览（V1.12.24）：触发拍照后从 FTP 取图目录拿最新 jpeg 闪图。
+            // 黑底 + Zoom 居中缩放，避免未加载状态显示空白刺眼。
+            // 
+            this.picTestShot.BackColor = System.Drawing.Color.Black;
+            this.picTestShot.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.picTestShot.Location = new System.Drawing.Point(592, 36);
+            this.picTestShot.Name = "picTestShot";
+            this.picTestShot.Size = new System.Drawing.Size(160, 140);
+            this.picTestShot.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
+            this.picTestShot.TabIndex = 9;
+            this.picTestShot.TabStop = false;
+            // 
+            // lblTestImagePath
+            // 最近一次取图存档路径（V1.12.24）：T2 触发拍照成功后显示"已存图：完整路径"；
+            // 取图/存图失败则红字提示。路径可能很长，超出宽度自动加省略号（完整路径看操作日志）。
+            // 
+            this.lblTestImagePath.AutoEllipsis = true;
+            this.lblTestImagePath.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
+            this.lblTestImagePath.ForeColor = System.Drawing.Color.Gray;
+            this.lblTestImagePath.Location = new System.Drawing.Point(592, 180);
+            this.lblTestImagePath.Name = "lblTestImagePath";
+            this.lblTestImagePath.Size = new System.Drawing.Size(160, 19);
+            this.lblTestImagePath.TabIndex = 10;
+            this.lblTestImagePath.Text = "（最近未测试存图）";
             // 
             // grpScanner
             // 扫码枪测试区：多台扫码枪选择 + 连接状态 + 最近读到条码大字展示
@@ -707,6 +738,7 @@ namespace CommandCenter.Views
             this.grpPlc.PerformLayout();
             this.grpLog.ResumeLayout(false);
             this.grpLog.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.picTestShot)).EndInit();
             this.ResumeLayout(false);
         }
 
@@ -755,5 +787,7 @@ namespace CommandCenter.Views
         private Button btnWriteRecipe;
         private GroupBox grpLog;
         private TextBox txtLog;
+        private PictureBox picTestShot;
+        private Label lblTestImagePath;
     }
 }
