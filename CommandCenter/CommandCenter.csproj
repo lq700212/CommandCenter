@@ -122,6 +122,7 @@
     <Compile Include="Utils\ConfigStore.cs" />
     <Compile Include="Utils\LogHelper.cs" />
     <Compile Include="Utils\SecurityUtil.cs" />
+    <Compile Include="Utils\TcpKeepAlive.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

@@ -1,5 +1,68 @@
 # 版本改动记录
 
+## V2.10.5（2026-08-13）相机 / PLC 主站静默断连检测（KeepAlive 补齐 + 工具复用）
+
+> 承接 V2.10.4（扫码枪 keepalive）：审查相机与 PLC 的连接逻辑发现同源缺口——
+> 相机的 2s 心跳 `CheckConnection` 只能测"对端主动关连接/FIN"，**拔网线/相机断电这类
+> 静默断连靠 Poll 测不出**（空闲不拍照时 UI 灯保持绿，下次触发遇读写异常才暴露）；
+> PLC 从站轮询的 `Masters` 列表由 NModbus 内部维护，**从站不设 keepalive、读循环阻塞
+> 等请求**，汇川主站拔网线/断电后死会话不会自动清理，三态灯恒绿，与扫码枪同根问题。
+> 本次统一抽出 `TcpKeepAlive.Configure`，给相机连接与 PLC 每个主站会话也补上，
+> 与扫码枪共用同一套 5s 探活参数。
+
+### 改动范围
+- **`Utils/TcpKeepAlive.cs`（新文件）**：静态工具 `TcpKeepAlive.Configure(TcpClient)`，
+  空闲 5s 启动探测、间隔 5s；IOControl 失败静默降级系统默认。原文注释解释"为什么需
+  要 keepalive / 为什么不会误判空闲无数据 / 失败处理"。
+- **`Services/KeyenceIV4Camera.cs`**：`EnsureConnected` 连接成功后调用
+  `TcpKeepAlive.Configure(_tcp)`——空闲期拔网线也能在 ~数十秒内被心跳
+  `CheckConnection` 探到并走 `MarkDisconnected` → 3s 自动重连。
+- **`Services/PlcService.cs`**：`MasterPollTick` 遍历 `nw.Masters` 给每个已连入的
+  主站会话 `TcpKeepAlive.Configure`（幂等）——主站静默掉线后 TCP 栈判死、NModbus
+  自动踢掉死会话，下一轮轮询 Masters Count 归零 → 三态灯转红，主站恢复再转绿。
+- **`Services/ScannerTcpService.cs`**：V2.10.4 的私有 `ConfigureKeepAlive` 实现
+  收敛为调用 `TcpKeepAlive`，行为不变、去掉重复代码。
+- **`CommandCenter.csproj`**：新增 `Utils\TcpKeepAlive.cs` 编译项。
+
+### 为什么这么改
+- 三处 TCP 设备（扫码枪/相机/PLC 主站会话）是同一类"静默断连检测不到"的坑，一条
+  keepalive 路径解决三处，工具类集中维护参数与说明，避免三份重复实现漂移不一致。
+- PLC 侧不改 NModbus 库本身（第三方 dll 不动），在业务轮询里对会话设置 socket 选项，
+  零侵入、纯增量。
+
+### 优化点
+- KeepAlive 只探活、不干扰业务数据流：相机/扫码枪长时间不动作、PLC 主站没有请求时
+  都不会误判断连；判死约数十秒，比系统默认 2 小时实时得多，又不因局域网抖动误重连。
+- UI（`RefreshScannerStatus` / 相机灯 / PLC 三态灯）依赖既有 `IsConnected` 与
+  `ConnectionChanged` 事件，无需任何改动即自动获得"断连转红 / 重连转绿"。
+
+## V2.10.4（2026-08-13）扫码枪静默断连检测（TCP KeepAlive 探活）
+
+> 现场风险点：扫码枪走"拔网线/扫码枪断电/交换机断电"这类**静默断连**（网络层不发
+> FIN/RST）时，`ScannerTcpService` 的读循环无限阻塞在 `NetworkStream.Read`（设读超时会
+> 周期性误判断线，故当初没设），导致断连永远不被察觉——状态灯一直停在"已连接"绿、
+> 也不触发自动重连（要等 Windows 默认 2 小时 keepalive 才暴露）。本次给 TCP 连接启用
+> **系统级 KeepAlive 短探活**，由 TCP 栈周期探测对端，判死约数十秒，随后阻塞读抛出异常，
+> 自然走既有 `MarkDown → 状态变红 → 3s 自动重连 → 重发 LON → 状态回绿`链路。
+
+### 改动范围
+- **`Services/ScannerTcpService.cs`**：新增私有静态方法 `ConfigureKeepAlive(TcpClient)`，
+  在 `TryConnect` 连接成功后调用——`SetSocketOption(Socket, KeepAlive, true)` +
+  `IOControl(IOControlCode.KeepAliveValues, …)` 设置"空闲 5s 开始探测、探测间隔 5s"；
+  IOControl 失败时静默降级系统默认（不影响功能）。类头注释与调用处同步说明。
+
+### 为什么这么改
+- 断连检测的合理机制就是 KeepAlive：探测只发生在 TCP 栈层面，**不干扰业务数据流**，
+  现场长时间不扫码也不会误判；而"无数据即认为断线"等方案会把空闲误判成断连。
+- 改动集中在连接建立处一个方法，不触碰读循环/重连线程模型，风险最小。
+
+### 优化点
+- 判死活条件沿用系统默认重试次数（约数十秒），比系统默认 2 小时实时得多，又不会因
+  局域网轻微抖动误重连。
+- UI（`RefreshScannerStatus`/DevTestForm）依赖 `IsOpen` 与 `ConnectionChanged` 事件，
+  无需任何改动即自动获得"断连转红/重连回绿"的效果。
+- 串口扫码枪（无连接概念、硬件本质无法探活）保持既有行为，属已知设计局限。
+
 ## V2.10.3（2026-08-13）主界面窗口右下角 OK/NG 徽标改为可配置显隐
 
 > OK/NG 徽标控件（OkNgBadge）自 V1.9.5 因"现场嫌占画面"从窗口画面上移除了（控件未删、

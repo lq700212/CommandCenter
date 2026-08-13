@@ -27,6 +27,8 @@ namespace CommandCenter.Services
     /// 【为什么阻塞读 + Close 打断】读线程阻塞在 NetworkStream.Read 上等条码，不设 ReadTimeout
     ///   （设了会导致每 500ms 周期性误判断线）；Dispose/断流时 Close socket 会让 Read 立即返回
     ///   0 或抛异常，线程自然退出或进入重连分支。
+    ///   V2.10.4：启用 TCP KeepAlive（空闲 5s 探测），把"拔网线/对端断电"这类静默断连也纳入
+    ///   自动检测——栈判死后 Read 报错走重连，UI 灯同步变红，不再等 2 小时系统默认。
     /// </summary>
     public class ScannerTcpService : IScanner
     {
@@ -174,6 +176,10 @@ namespace CommandCenter.Services
                 }
                 tcp.EndConnect(ar);
                 tcp.NoDelay = true;
+                // V2.10.4：启用 TCP KeepAlive——否则"拔网线/对端断电"这类静默断连（无 FIN/RST）
+                // 会让下面阻塞的 ReadLoop 永远等下去，UI 灯一直停"已连接"绿、也不自动重连。
+                // 配置成功与否都不影响本次连接（失败走系统默认 keepalive，约 2 小时后才会察觉）。
+                TcpKeepAlive.Configure(tcp);
                 var stream = tcp.GetStream();
                 _tcp = tcp;
                 _stream = stream;

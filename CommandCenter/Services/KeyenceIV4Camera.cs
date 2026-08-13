@@ -473,6 +473,11 @@ namespace CommandCenter.Services
                     string err;
                     if (!TryConnect(_tcp, _cfg.IpAddress, _cfg.CommandPort, _cfg.TimeoutMs, out err))
                         throw new Exception(err);
+                    // V2.10.5：启用 TCP KeepAlive——补上"拔网线/相机断电"这类静默断连的探测：
+                    // 否则相机空闲不拍照时 CheckConnection 的 Poll 测不出（其注释已自认局限），
+                    // UI 灯会一直保持"已连接"绿，直到下次触发动作遇读写异常才暴露。
+                    // 启用后 TCP 栈判死，心跳 Poll / 下次动作都能立即感知并走 MarkDisconnected→重连。
+                    TcpKeepAlive.Configure(_tcp);
                     _stream = _tcp.GetStream();
                     _lastFailed = false;
                     SetConnected(true);

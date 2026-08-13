@@ -205,6 +205,11 @@ namespace CommandCenter.Services
         /// 边沿变化时触发 MasterConnectionChanged 事件并记日志，UI 据此点亮三态灯。
         /// 【为什么需要它】从站模式下 IsConnected 只表示"监听已就绪"，主站连没连进来是另一回事；
         ///   没有这个检测，界面永远无法知道"PLC 主站是否真的在通讯"（无法主动 ping/连 PLC）。
+        /// 【V2.10.5 KeepAlive】NModbus 从站对主站会话不设 keepalive、读循环阻塞等待请求——
+        ///   汇川主站拔网线/断电（静默断连，无 FIN/RST）时死会话不会自动从 Masters 清理，
+        ///   三态灯会一直停在"主站已连"绿。这里遍历 Masters 给每个主站会话启用 TCP KeepAlive
+        ///   （幂等），TCP 栈判死后会话读写异常、NModbus 会自动踢掉该会话 → 下一次轮询 Masters
+        ///   Count 归零 → 三态灯转红，主站恢复连入后再转绿。
         /// </summary>
         private void MasterPollTick(object state)
         {
@@ -213,7 +218,13 @@ namespace CommandCenter.Services
             try
             {
                 var nw = _network;
-                if (nw != null && nw.Masters != null && nw.Masters.Count > 0) has = true;
+                if (nw != null && nw.Masters != null && nw.Masters.Count > 0)
+                {
+                    has = true;
+                    // V2.10.5：给每个已连入的主站会话启用 KeepAlive（幂等，重复调用无害）
+                    foreach (var master in nw.Masters)
+                        TcpKeepAlive.Configure(master);
+                }
             }
             catch { /* 网络对象可能正被重建，下个周期再读 */ }
 
