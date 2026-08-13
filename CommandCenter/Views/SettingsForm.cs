@@ -54,10 +54,16 @@ namespace CommandCenter.Views
     public partial class SettingsForm : Form
     {
         private readonly AppConfig _cfg;
+        // V2.10.1：主窗体标题栏型号下拉的"当前选中值"快照（打开时由 MainForm.OpenSettings 传入）。
+        // 目的：保证设置页"产品型号"下拉与主窗体所见一致。背景：主窗体下拉在配置 ProductModel 为空时
+        // 会默认选中第一个候选（U171），但此时 _cfg.ProductModel 仍是空串，若设置页直接用它就会显示空白，
+        // 与标题栏所见型号不一致。故本字段优先级最高：MainForm 当前选中值 > 配置 ProductModel > 首个候选。
+        private readonly string _titleBarModel;
 
-        public SettingsForm(AppConfig cfg)
+        public SettingsForm(AppConfig cfg, string titleBarModel = null)
         {
             _cfg = cfg;
+            _titleBarModel = titleBarModel;
             InitializeComponent();          // 先解析设计器里的控件
 
             LoadFromConfig();               // 把当前配置值填进各输入框
@@ -81,7 +87,12 @@ namespace CommandCenter.Views
             foreach (var m in _cfg.ProductModels ?? new List<string>())
                 if (!string.IsNullOrWhiteSpace(m) && !modelCandidates.Contains(m)) modelCandidates.Add(m);
             foreach (var m in modelCandidates) cmbModel.Items.Add(m);
-            cmbModel.Text = _cfg.ProductModel ?? "";
+            // 默认显示当前型号，优先级：主窗体标题栏选中值 > 配置 ProductModel > 首个候选（V2.10.1，
+            // 前两者都为空时兜底第一候选，避免设置页出现空白下拉与标题栏所见不一致）。
+            string curModel = (string.IsNullOrWhiteSpace(_titleBarModel) ? _cfg.ProductModel : _titleBarModel) ?? "";
+            if (string.IsNullOrWhiteSpace(curModel) && cmbModel.Items.Count > 0)
+                curModel = cmbModel.Items[0].ToString();
+            cmbModel.Text = curModel;
             // 显示窗口行列
             nudRows.Value = _cfg.Display.Rows;
             nudCols.Value = _cfg.Display.Columns;

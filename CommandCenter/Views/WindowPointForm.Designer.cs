@@ -166,12 +166,14 @@ namespace CommandCenter.Views
             this.colStation.HeaderText = "点位（选择）";
             this.colStation.Name = "colStation";
             this.colStation.SortMode = System.Windows.Forms.DataGridViewColumnSortMode.NotSortable;
+            this.colStation.Width = 100;
             // 
             // colProgram
             // 
             this.colProgram.HeaderText = "相机程序号（选择）";
             this.colProgram.Name = "colProgram";
             this.colProgram.SortMode = System.Windows.Forms.DataGridViewColumnSortMode.NotSortable;
+            this.colProgram.Width = 150;
             // 
             // btnAddProg
             // 
