@@ -38,7 +38,9 @@
   - 切型号（ApplyMatrixForModel）为新型号 seed 编辑副本；类头 ASCII 图与注释同步 V2.13 语义；
   - **窗体加宽（640→760）**：`lblHint/pnlMatrix/tblMatrix/grpProgram` 内容宽 600→720，矩阵格子
     变宽后"归属相机·点位号"第二行（7 列时格子约 94px）能一行显示完；`dgvPrograms`/`lblProgNote`
-    同步加宽，确定/取消贴右缘，`lblProgHint` 文案修正（去掉已移除的"默认"项说法）。
+    同步加宽，确定/取消贴右缘，`lblProgHint` 文案修正（去掉已移除的"默认"项说法）；
+    相机下拉 `cmbCamera` 加宽 140→190（+`DropDownWidth=230`，IP 完整显示），`lblModel/cmbModel/
+    lblProgHint` 依次右移避让。
 - **`Views/SettingsForm.cs` / `SettingsForm.Designer.cs`**：`WindowPointForm` 构造调用补传
   `_cfg.Display.WindowPointMaps`；`UpdateAutoFitUi` 与三处 ToolTip/提示文案更新——
   "自适应只影响行列形状、不影响点位编辑"，去掉"编辑点位/交换/恢复已锁定"的过时说明。

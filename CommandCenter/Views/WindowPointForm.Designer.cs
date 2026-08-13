@@ -114,12 +114,13 @@ namespace CommandCenter.Views
             this.cmbCamera.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbCamera.Location = new System.Drawing.Point(78, 32);
             this.cmbCamera.Name = "cmbCamera";
-            this.cmbCamera.Size = new System.Drawing.Size(140, 27);
+            this.cmbCamera.Size = new System.Drawing.Size(190, 27);
             this.cmbCamera.TabIndex = 9;
+            this.cmbCamera.DropDownWidth = 230;
             // 
             // lblModel
             // 
-            this.lblModel.Location = new System.Drawing.Point(224, 34);
+            this.lblModel.Location = new System.Drawing.Point(280, 34);
             this.lblModel.Name = "lblModel";
             this.lblModel.Size = new System.Drawing.Size(54, 26);
             this.lblModel.TabIndex = 15;
@@ -129,7 +130,7 @@ namespace CommandCenter.Views
             // cmbModel
             // 
             this.cmbModel.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.cmbModel.Location = new System.Drawing.Point(280, 32);
+            this.cmbModel.Location = new System.Drawing.Point(340, 32);
             this.cmbModel.Name = "cmbModel";
             this.cmbModel.Size = new System.Drawing.Size(122, 27);
             this.cmbModel.TabIndex = 16;
@@ -138,9 +139,9 @@ namespace CommandCenter.Views
             // 
             this.lblProgHint.AutoSize = false;
             this.lblProgHint.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(100)))), ((int)(((byte)(100)))), ((int)(((byte)(100)))));
-            this.lblProgHint.Location = new System.Drawing.Point(410, 26);
+            this.lblProgHint.Location = new System.Drawing.Point(470, 26);
             this.lblProgHint.Name = "lblProgHint";
-            this.lblProgHint.Size = new System.Drawing.Size(294, 40);
+            this.lblProgHint.Size = new System.Drawing.Size(220, 40);
             this.lblProgHint.TabIndex = 10;
             this.lblProgHint.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             this.lblProgHint.Text = "按“相机+型号”查表切程序；\r\n型号没配表时回退该相机的旧映射表。";
