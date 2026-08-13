@@ -49,27 +49,35 @@ namespace CommandCenter.Utils
         //   - 不需要自己管理密钥，系统托管，实现零复杂度。
         //   这是"自动回填"需求下最稳妥的落盘方式，仍不违反"配置里不存明文密码"的红线。
         //
-        // 【存储位置】%LOCALAPPDATA%\CommandCenter\remembered_login.dat
+        // 【存储位置】%LOCALAPPDATA%\CommandCenter\下，按角色分文件：
+        //   remembered_login.dat      → 管理员账号（保持旧文件名，兼容已记住的管理员记录）
+        //   remembered_login_dev.dat  → 开发者账号（V1.12.21 起开发者也可记住密码）
         //   放系统用户目录而非程序目录：程序重装/换目录不丢记忆，且天然不进 git 仓库。
+        //
+        // 【双账号互斥（V1.12.21）】管理员与开发者的记住记录彼此独立、且互斥：
+        //   - 记住谁，谁的文件写入；登录另一方成功时，把对方文件删掉——
+        //     防止"上次记住了 dev，结果界面上还是 admin 自动登录"这类跨角色残留；
+        //     也保证这台机器一次只"记得"最近一次登录的那个角色的账号。
+        //   - 具体互斥清除逻辑在 LoginForm 登录/改密码处实现（调用方职责），
+        //     本类只提供"按角色命名的文件读写"，不关心业务互斥。
 
-        /// <summary>记住密码文件的完整路径（%LOCALAPPDATA%\CommandCenter\remembered_login.dat）。</summary>
-        private static string RememberedFilePath
+        /// <summary>记住密码文件的完整路径（按角色区分，管理员/开发者分文件，避免跨角色回填）。</summary>
+        /// <param name="isDev">true=开发者账号文件；false=管理员账号文件</param>
+        private static string RememberedFilePath(bool isDev)
         {
-            get
-            {
-                string dir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "CommandCenter");
-                return Path.Combine(dir, "remembered_login.dat");
-            }
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "CommandCenter");
+            return Path.Combine(dir, isDev ? "remembered_login_dev.dat" : "remembered_login.dat");
         }
 
         /// <summary>
-        /// 保存"记住的用户名+密码"到本地（DPAPI 加密，绑定当前 Windows 用户）。
+        /// 保存"记住的用户名+密码"到本地（DPAPI 加密，绑定当前 Windows 用户，按角色分文件）。
         /// 文件内容为 "用户名\n密码" 的 UTF-8 密文，离开本机/本用户不可解密。
         /// 调用方在登录成功后勾选"记住密码"时调用；写失败静默忽略（不阻塞登录）。
         /// </summary>
-        public static void SaveRememberedLogin(string userName, string password)
+        /// <param name="isDev">true=存到开发者账号文件；false=存到管理员账号文件</param>
+        public static void SaveRememberedLogin(bool isDev, string userName, string password)
         {
             try
             {
@@ -78,7 +86,7 @@ namespace CommandCenter.Utils
                 byte[] plainBytes = Encoding.UTF8.GetBytes(plain);
                 // DataProtectionScope.CurrentUser：用当前 Windows 用户凭据加密，仅本机本用户可解
                 byte[] encrypted = ProtectedData.Protect(plainBytes, null, DataProtectionScope.CurrentUser);
-                string path = RememberedFilePath;
+                string path = RememberedFilePath(isDev);
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
                 File.WriteAllBytes(path, encrypted);
             }
@@ -89,16 +97,17 @@ namespace CommandCenter.Utils
         }
 
         /// <summary>
-        /// 读取"记住的用户名+密码"。有记录且能解密返回 true 并填充 out 参数；
+        /// 读取指定角色"记住的用户名+密码"。有记录且能解密返回 true 并填充 out 参数；
         /// 无文件/解密失败（非本用户或文件损坏）返回 false。登录框构造时调用自动回填。
         /// </summary>
-        public static bool LoadRememberedLogin(out string userName, out string password)
+        /// <param name="isDev">true=读开发者账号文件；false=读管理员账号文件</param>
+        public static bool LoadRememberedLogin(bool isDev, out string userName, out string password)
         {
             userName = null;
             password = null;
             try
             {
-                string path = RememberedFilePath;
+                string path = RememberedFilePath(isDev);
                 if (!File.Exists(path)) return false;
                 byte[] encrypted = File.ReadAllBytes(path);
                 byte[] plainBytes = ProtectedData.Unprotect(encrypted, null, DataProtectionScope.CurrentUser);
@@ -116,14 +125,15 @@ namespace CommandCenter.Utils
         }
 
         /// <summary>
-        /// 删除记住的密码记录。调用方在登录成功后用户"未勾选记住密码"时调用，
+        /// 删除指定角色的记住密码记录。调用方在登录成功后用户"未勾选记住密码"时调用，
         /// 保证取消勾选后旧记录被清掉，不会继续自动回填。
         /// </summary>
-        public static void ClearRememberedLogin()
+        /// <param name="isDev">true=删开发者账号文件；false=删管理员账号文件</param>
+        public static void ClearRememberedLogin(bool isDev)
         {
             try
             {
-                string path = RememberedFilePath;
+                string path = RememberedFilePath(isDev);
                 if (File.Exists(path)) File.Delete(path);
             }
             catch

@@ -138,6 +138,98 @@ namespace CommandCenter.Services
         }
 
         /// <summary>
+        /// 把"相机 FTP 取图目录（中转暂存区）里的一对源文件"原样复制归档（V1.12.18）。
+        /// 现场约定（与基恩士工程师确认）：相机拍照后往自己的 FTP 取图目录推两个文件——
+        ///   `0000.jpeg`：上位机显示/归档用（显示取 jpeg 格式即可）；
+        ///   `0000.iv4p`：基恩士复盘问题用的私有格式，上位机不解析、原样复制保存；
+        /// 目录按 ImageConfig.SubDirs 逐级渲染建目录，文件名 = FileNameTemplate 渲染结果
+        /// + 时间戳后缀（FileTimestampSuffix=true 时，防同点位重复拍照重名覆盖）。
+        /// 注意：本方法只做"复制"，【不删除】FTP 取图目录源文件——删除动作由协调器在
+        /// 复制成功且确认归档完成后执行（见 ProductionCoordinator.FinishAll），避免复制失败丢图。
+        /// </summary>
+        /// <param name="jpegPath">FTP 取图目录里的 jpeg 源文件完整路径</param>
+        /// <param name="iv4pPath">FTP 取图目录里的 iv4p 源文件完整路径（可为空/不存在则跳过）</param>
+        /// <param name="stationNo">拍照点位号（进文件名 {点位}）</param>
+        /// <param name="isOk">本次结果（OK/NG 进目录 {OKNG}）</param>
+        /// <param name="serial">产品序列号（进 {SN} 目录）</param>
+        /// <returns>归档后的 jpeg 完整路径（供显示/上报）；失败返回 null</returns>
+        public string SaveImageFilePair(string jpegPath, string iv4pPath, int stationNo, bool isOk, string serial)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(jpegPath) || !File.Exists(jpegPath))
+                {
+                    LogHelper.Error($"双格式归档失败：jpeg 源文件不存在 → {jpegPath}");
+                    return null;
+                }
+                DateTime now = DateTime.Now;
+                // 文件名主体 = 模板渲染结果；模板为空时兜底用 "IMG_{时间戳}"
+                string stem = RenderTemplate(_cfg.FileNameTemplate, now, serial, isOk, stationNo);
+                if (string.IsNullOrWhiteSpace(stem))
+                    stem = "IMG_" + now.ToString("yyyyMMdd_HHmmss_fff");
+                // 时间戳后缀：默认追加（现场约定，防同点位重复拍照覆盖旧图）
+                if (_cfg.FileTimestampSuffix)
+                    stem = stem + "_" + now.ToString("yyyyMMdd_HHmmss_fff");
+
+                // 目录：按 SubDirs 逐级渲染（与 SaveImage 完全同一套规则，保证两种入口归档位置一致）
+                var levels = _cfg.SubDirs ?? new List<string>();
+                if (levels.Count == 0) levels.Add("{年月日}");
+                var segs = new List<string>();
+                foreach (var lvl in levels)
+                {
+                    string rendered = RenderTemplate(lvl, now, serial, isOk, stationNo);
+                    if (!string.IsNullOrWhiteSpace(rendered))
+                        segs.Add(SanitizeForPath(rendered));
+                }
+                string dir = Path.Combine(_cfg.SaveRootDir, Path.Combine(segs.ToArray()));
+                Directory.CreateDirectory(dir);
+
+                // 复制 jpeg（保持原格式，不再重编码——现场要求显示/归档都走相机原图）
+                string jpegName = SanitizeForPath(stem) + ".jpeg";
+                string jpegTarget = Path.Combine(dir, jpegName);
+                CopyWithRetry(jpegPath, jpegTarget, "jpeg");
+
+                // 复制 iv4p（原样，同名同序，供基恩士复盘问题）
+                string iv4pResult = null;
+                if (!string.IsNullOrWhiteSpace(iv4pPath) && File.Exists(iv4pPath))
+                {
+                    string iv4pName = SanitizeForPath(stem) + ".iv4p";
+                    string iv4pTarget = Path.Combine(dir, iv4pName);
+                    CopyWithRetry(iv4pPath, iv4pTarget, "iv4p");
+                    iv4pResult = iv4pTarget;
+                }
+                LogHelper.Info($"图片双格式归档完成：{jpegTarget}" + (iv4pResult != null ? " | " + iv4pResult : "（无 iv4p）"));
+                return jpegTarget;
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Error("双格式归档异常", ex);
+                return null;
+            }
+        }
+
+        /// <summary>复制文件并带重试（FTP 源文件可能正在被相机写/事件早于写完到达）。
+        /// 复用 V1.8.3 的 FileShare.ReadWrite 思路：源文件正在写也能复制；失败短延迟重试最多 3 次。</summary>
+        private static void CopyWithRetry(string src, string dst, string tag)
+        {
+            Exception last = null;
+            for (int i = 0; i < 3; i++)
+            {
+                try
+                {
+                    File.Copy(src, dst, true);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    last = ex;
+                    System.Threading.Thread.Sleep(400);
+                }
+            }
+            throw last ?? new InvalidOperationException($"复制 {tag} 失败：{src}");
+        }
+
+        /// <summary>
         /// 把"TCP/BR 指令读回的图像字节"解码成 Bitmap 后按模板归档（V1.7.0，SaveImage 的字节入口）。
         /// 期望字节是完整 24bit BMP 文件（以 'BM' 开头，Image.FromStream 可直接解码）；
         /// 解码失败返回 null（不落盘坏文件），由调用方记日志——若现场实测确认是"裸像素"

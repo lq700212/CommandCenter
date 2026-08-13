@@ -1,5 +1,192 @@
 # 版本改动记录
 
+## V1.12.21（2026-08-13）开发者账号也支持记住密码，双角色记录互斥
+
+> 此前"记住密码"只对管理员生效（开发者登录不回填、也不写文件）。现场反馈：开发者也常在
+> 功能测试页往返，每次都要敲密码麻烦。本次让**开发者同样可勾选记住密码**；同时为避免
+> "这台机器同时记得 admin 和 dev 两个免密账号、登录框随机回填一个"的跨角色残留，
+> 规定**管理员与开发者记住记录互斥**：登录任一角色成功，都会把另一角色的记住文件清掉，
+> 机器上只保留"最近一次登录的那个角色"的记忆。
+
+### 改动范围
+- **`Utils/SecurityUtil.cs`**：记住密码方法全部加 `bool isDev` 角色参数，按角色分文件：
+  - `Save/Load/ClearRememberedLogin(bool isDev, …)`；`isDev=false` → `remembered_login.dat`
+    （保留旧文件名，兼容升级前已记住的管理员记录）；`isDev=true` → `remembered_login_dev.dat`。
+  - 类注释补充双账号互斥说明（互斥清除由调用方 LoginForm 实现）。
+- **`Views/LoginForm.cs`**：
+  - 构造回填：先看管理员记住记录（匹配 AdminUser），否则看开发者记录（DevEnabled 且匹配
+    DevUser），两侧都不匹配才保留默认 admin —— 开发者记住后打开登录框会回填 dev 账号密码；
+  - `BtnLogin_Click`：admin 登录成功 → 勾选存/未勾选清**管理员**文件，并**顺带清开发者文件**；
+    dev 登录成功 → 勾选存/未勾选清**开发者**文件，并**顺带清管理员文件**（两处都是先处理
+    本角色记录、再删对方记录，保证"本角色记忆"与"对方清除"在同一登录动作内完成）；
+  - `BtnSavePwd_Click`（改密码，管理员操作）：同步管理员记住文件的同时也清开发者文件。
+  - 类注释与代码注释同步双账号记住逻辑。
+- **`Views/LoginForm.Designer.cs`**：`chkRemember` 注释同步（不再写死"仅管理员"）。
+- **文档同步**：`AGENTS.md`（记住密码约定）、`README.md`（可配置项与登录说明）、
+  `docs/使用说明.md`（§四 记住密码）、`CHANGELOG.md`。
+
+### 为什么这么改
+- 开发者遍历功能测试页是高频操作，记住密码可省去重复输入；但若 admin/dev 记忆文件共存，
+  登录框回填逻辑必须二选一，容易造成"明明想登 admin 却回填了 dev 密码"的困惑。
+  互斥清除让行为可预期：**最近登谁、就记住谁**，与"登录框回填的用户名"永远一致。
+- 改密码走的是管理员身份验证，视作管理员操作，同样清开发者记忆（防止改完密码后
+  残留开发者免密入口）。
+
+### 验证
+- Debug 构建通过；冒烟启动进程存活。
+- 用 csc 编译临时 harness 直测 `SecurityUtil` 三个场景：① admin 记住 → admin 文件存在、
+  dev 文件不存在；② dev 登录 → admin 文件被清、dev 文件写入且密码可解密回填；③ 取消勾选
+  dev → dev 文件被清。全部符合预期。
+
+## V1.12.20（2026-08-13）功能测试窗体新增相机程序切换/读取按钮（联调验证用）
+
+> 基恩士现场配置了多个相机程序（P000/P001/P002…正在调试），下午工程师撤离前要快速验证
+> "上位机切程序"链路是否通。在功能测试窗体（开发者）相机区新增三个按钮：
+> **读当前程序号（PR）**、**切换程序→P001（PW,001）**、**切换程序→P002（PW,002）**，
+> 直接复用 `KeyenceIV4Camera.SwitchProgram/ReadProgramNo`（已存在，V1.12.18 实现）。
+
+### 改动范围
+- **`Views/DevTestForm.Designer.cs`**：相机测试区新增一行（读程序号按钮 + 当前程序号标签 +
+  两个切程序按钮），grpCamera 加高至 212，下方 grpScanner/grpPlc/grpLog 相应下移 42、
+  窗体高度 890→932；文件头注释同步新行布局。
+- **`Views/DevTestForm.cs`**：
+  - `BtnReadProgramNo_Click`：PR 读当前程序号，显示 `P000/P001/P002…`（读回失败显示红字）；
+  - `BtnSwProg1_Click` / `BtnSwProg2_Click` → 统一走 `SwitchCameraProgram(no, display)`：
+    后台线程发 PW 切换，成功后**顺带 PR 读回确认**（读回超时不影响主结果，日志提示可再
+    手动读）；失败（未连接/相机回 ER）显示红字；
+  - `SetBusy` 纳入新按钮禁用（防连点并发）。
+- **文档同步**：`docs/使用说明.md`（§六 功能测试相机条目补切程序说明）、`CHANGELOG.md`。
+
+### 为什么这么改
+- 前期只需验证"切程序指令发过去相机有响应、程序号真变"，先不触发拍照（要连拍验证就
+  先切程序再点 T2）。读回确认比只看 PW 回显更可信（相机侧程序号/主控模式切换可能异步生效）。
+
+### 验证
+- Debug 构建通过；冒烟启动进程存活、无崩溃。
+- 事件接线与既有 T1/T2 按钮同构（SelectedCamera 取下拉选中相机、Task.Run 后台 + SafeInvoke），
+  复用已验证的通讯层方法（SwitchProgram/ReadProgramNo）。
+
+## V1.12.19（2026-08-13）序列号点击直录，不再弹窗
+
+> 上版（V1.12.17）手动输入序列号要"双击标题栏序列号框 → 弹录入对话框"，现场反馈多一步
+> 弹窗点击累赘。本次把序列号显示框从只读 Label 升级为**可点击即编辑的 TextBox**（外观不变：
+> 白底 + 单线边框 + 同字号），鼠标点击直接出现输入光标，输入后回车/失焦提交、Esc 还原，
+> 删掉不再使用的 `SerialInputForm` 弹窗。与扫码枪收码等效（`SetManualSerial` 可推进"等 SN"阶段）。
+
+### 改动范围
+- **`Views/MainForm.Designer.cs`**：`lblSerial`（Label）→ `txtSerial`（TextBox）；保留原视觉
+  （固定宽度 `AutoSize=false`、`FixedSingle` 单线边框、微软雅黑 11 Bold、深蓝灰字、白底）；
+  头部布局图同步换文案。
+- **`Views/MainForm.cs`**：
+  - 删除 `PromptManualSerial` / `SerialInputForm` 弹窗路径，改为 `SetupSerialEditor` 一次性接线：
+    `KeyUp`（Enter 提交 / Esc 还原）+ `Leave`（失焦非空提交）；
+  - 新增 `CommitSerialEdit`（trim 非空才 `SetManualSerial`，空输入还原显示防误清空）与
+    `RestoreSerialDisplay`（还原为协调器当前 SN）；
+  - `RelayoutTitleBar` 排布数组/宽度计算改用 `txtSerial`（TextBox 走"固定宽度"分支，不 cast Label）；
+  - `InitTitleBarFields`/`ApplyConfigVisibility`/`OnSerialScanned` 的显示与显隐同步改 `txtSerial`。
+- **`Views/SerialInputForm.cs`（删除）**：弹窗不再使用，源码与 csproj `<Compile>` 登记一并移除。
+- **文档同步**：`docs/使用说明.md`（§3.2 手动输入改"点击直录 + Enter/失焦/Esc 交互"、主界面速览图），
+  `CHANGELOG.md`。
+
+### 为什么这么改
+- 现场是流水线节拍环境，弹窗"弹出→输入→点确定→关窗"四步操作在手动补录频繁时非常拖节奏；
+  框内直录点一下就能打字，回车即生效，操作员心智负担最低。
+- 保留"空输入不提交 / Esc 还原"的兜底：扫码收到的 SN 不应被一次误编辑或空串清掉。
+
+### 验证
+- Debug 构建通过（无 error）；冒烟启动进程存活、无崩溃。
+- 交互逻辑走查：Enter 非空→`SetManualSerial`；Esc→还原；失焦非空→提交、空→还原；扫码
+  `OnSerialScanned` 直接覆盖 `txtSerial.Text`（扫码优先级最高）；`SetupSerialEditor` 仅构造时
+  订阅一次（热更不重建该控件，无重复订阅）。
+
+## V1.12.18（2026-08-13）相机单 FTP 目录混图方案 + 点位程序号切换（PW）+ 双文件归档
+
+> 现场新方案：**一台相机 = 一个 FTP 服务器，所有点位拍的图混放在同一目录**（文件名为固定
+> `0000.jpeg`+`0000.iv4p`，由基恩士工程师在相机软件里配置推图、上位机零配置）。上位机不再按
+> "相机→目录"区分点位，改为：**FTP 目录只当中转暂存区**——监听新图 → 按扩展名配对双文件 →
+> 复制归档到正式存图目录 → **删除 FTP 源文件**（处理即删，防同点位重复触发新旧图混淆）。
+> 同时**每个点位对应相机的一个程序**：触发前先 `PW` 切程序再 `T2` 触发，多点位靠程序号区分。
+
+### 改动范围
+- **`Models/AppConfig.cs`**：
+  - `CameraConfig` 新增 **`ProgramNo`**（触发前 PW 切换的相机程序号，默认 `-1`=不切换）与
+    **`OutputFormat`**（判定输出格式 `OF` 指令，默认 `"00"` 标准）；
+  - `ImageConfig` 新增 **`FileTimestampSuffix`**（存图文件名追加时间戳后缀防同点位重复触发覆盖，
+    默认 `true`）；
+  - `PlcConfig` 新增 **`PointInfoAddress`**（PLC 到位时携带的点位号寄存器，占位 D113，
+    **TODO 待现场 PLC 程序定稿**，定稿后据点位号切程序）。
+- **`Services/KeyenceIV4Camera.cs`**：新增 **`SwitchProgram(int)`**（`PW,nnn[CR]`，nnn=程序号
+  3 位补零，响应 `PW[CR]` 成功 / `ER,PW,03|22` 失败）、**`ReadProgramNo()`**（`PR[CR]` →
+  `PR,nnn[CR]`）、**`SetOutputFormat(string)`**（`OF,nn[CR]`）；类注释指令表同步更新。
+- **`Services/ImageStore.cs`**：新增 **`SaveImageFilePair(jpegPath, iv4pPath, stationNo, isOk,
+  serial)`**——双格式原样复制归档（jpeg 为显示/归档主体、iv4p 为基恩士私有复盘格式原样保留），
+  复用模板渲染/目录层级，按 `FileTimestampSuffix` 追加 `_yyyyMMdd_HHmmss_fff` 时间戳；
+  配套 **`CopyWithRetry`**（`FileShare.ReadWrite` + 失败短重试，容忍 FTP 事件先于写完到达）。
+- **`Services/ProductionCoordinator.cs`**（核心）：
+  - `PendingCamera` 改为双文件快照 `FtpJpegPath`/`FtpIvpPath`（替代原 `FtpPath`）；
+  - `OnFtpFileArrived` 按扩展名分派配对，**两个文件都到齐才算 `IsSnapped`**；
+  - `FinishAll` 归档改走 `SaveImageFilePair`，成功后 `DeleteFtpSource` 删除 FTP 源目录里的
+    `0000.jpeg`+`0000.iv4p` 源文件；
+  - `TriggerOneCamera` 触发前先 `SetOutputFormat` + `SwitchProgram`（`ProgramNo>0` 时），
+    切失败即中止该相机并记取像失败（防止用错程序拍无意义图）；
+  - 删除已无引用的旧 `ArchiveImage` 方法（FtpPath 已不存在，双文件归档由 `SaveImageFilePair` 承担）。
+- **`Views/SettingsForm.cs`**：相机表格新增**"程序号"列**（读/写 `ProgramNo`）；
+  取图方式下拉**移除 `Tcp` 选项**（现场只保留 Ftp，Tcp/BR 代码留作旧配置兼容）。
+- **文档同步**：`docs/通讯接入.md`（§2.2 新增 PW/PR/OF 指令条目、§2.2 FTP 双文件约定与处理即删、
+  §2.2b 速查表加 `programNo`/`outputFormat`、§3.2 寄存表加 D113 点位信息占位、§3.3 时序、
+  §3.4 点位→程序号联动 TODO、版本表 V1.12.18）、`README.md`、`CHANGELOG.md`。
+
+### 为什么这么改
+- 现场方案从"一台相机拍固定点位"升级为"一台相机负责多个点位、图全部混放"：文件名恒定且会
+  被相机覆盖，因此**必须"处理即删"**（先归档到正式目录再删源），否则同点位第二次触发的新图
+  会被误当旧图重复归档；iv4p 是基恩士复盘格式，现场要留底，故双文件一并原样归档。
+- 点位区分靠"程序号"：不同点位在相机里是不同程序（不同视觉工具/参数），触发前 `PW` 切到
+  对应程序，保证判定与图像属于正确点位；`OF` 输出格式与 T2 判定解析解耦，现场调试用详细格式、
+  程序解析只认标准格式。
+
+### 验证
+- Debug 构建通过（无 error）；harness 验证 `SaveImageFilePair`：双格式落盘、iv4p 内容原样、
+  时间戳防重名、iv4p 缺失不崩、jpeg 源缺失返回 null（7 项断言全过）；
+  冒烟启动进程存活、无崩溃。
+- **代码-文档核对（已固化到 docs/通讯接入.md §2.1a，排障必读）**：触发顺序 OF→PW→T2 固定、
+  `ProgramNo>=0` 都切换（0 合法、-1 才不切）、`OutputFormat` 必须恰好 2 位数字否则触发直接失败、
+  `SwitchProgram` 越界自动夹 0~127、双文件到达顺序不保证但必须齐才算到位、归档成功后才删 FTP 源、
+  归档失败不删源文件回退显示、`SaveImageFilePair` 只复制不删除（删除归协调器）。
+
+## V1.12.17（2026-08-13）手动输入序列号 + FTP 取图描述更正 + 文档中心整理
+
+> ① 现场无扫码枪 / 扫码枪没读到码时，操作员此前无法手动录入产品 SN（代码里只留了注释、
+> 没有实际入口）；本次实现"双击标题栏序列号框 → 弹框手动录入"。② FTP 取图此前文档误写成
+> "上位机须部署 FTP 服务器"，**现场与基恩士工程师确认：FTP 推图由基恩士工程师在相机软件
+> （IV Navigator）里全部配置好，上位机零配置、无需安装任何 FTP 服务器（FileZilla 等不用）**。
+> ③ 调试近尾声，docs 从 4 篇收敛为 4 篇高质量文档（使用说明 / 通讯接入 / IP清单 / 技术范式）。
+
+### 改动范围
+- **`Services/ProductionCoordinator.cs`**：新增 **`SetManualSerial(string code)`**——手动输入 SN
+  与扫码枪收码等效：① 更新 `LatestSerialNumber`（标题栏 + 存图 {SN} 目录）；② 置
+  `_serialReceived=true`，若正处于"等 SN"阶段（PhaseScanPending）下一轮轮询即推进到等相机阶段；
+  其它阶段该标志会在下次扫码到位时被重置，无副作用。
+- **`Views/SerialInputForm.cs`（新增）**：手动输入序列号对话框（纯代码构造，无 Designer）。
+- **`Views/MainForm.cs`**：序列号框 `lblSerial.MouseDoubleClick` → `PromptManualSerial()` 弹框，
+  确定后调 `SetManualSerial` 并刷新标题栏；类注释补手动输入说明。
+- **`CommandCenter.csproj`**：登记新窗体 `SerialInputForm.cs`。
+- **`docs/通讯接入.md`**：① 相机 2.2b 新增"相机联调配置字段速查表"（原 `docs/联调清单.md` 精华）；
+  ② 2.2/2.3 FTP 描述更正为"上位机零配置，FTP 由基恩士工程师在相机软件里配置、无需另装 FTP 服务器"。
+- **`docs/使用说明.md`（新增）**：用户操作手册（启动/主界面/日常操作/账号/系统设置/功能测试/排查表）；
+  手动输入 SN 操作与 FTP 取图说明同步更正。
+- **`docs/联调清单.md`（删除）**：前期验证类记录，精华已并入通讯接入.md。
+- **`docs/现场设备IP清单.md` / `README.md`**：FTP 描述更正为"上位机零配置、基恩士侧全配置"。
+- **`AGENTS.md`**：关键文件导航补齐 docs 四件套；文档同步铁律新增 `docs/使用说明.md`。
+
+### 为什么这么改
+- 手动输入 SN：产线节拍下产品未贴码/扫码枪漏读时，操作员需要一条手动补录通道，否则 SN 沿旧值、
+  存图目录归档错乱；双击序列号框最直观（与窗口双击放大交互一致）。
+- FTP 描述更正：现场与基恩士工程师确认 FTP 推图由相机软件（IV Navigator）全配置、上位机零配置，
+  此前"装 FileZilla"的表述误导维护。
+
+### 验证
+- Debug 构建通过（无 error）；harness 验证：`SetManualSerial` 置 SN 且 `_serialReceived=true`、
+  `SerialInputForm` 确定取到输入值 / 取消返回 null；冒烟启动进程存活、无崩溃。
 ## V1.12.16（2026-08-12）打通"两阶段"业务流程：先扫码得 SN、再相机拍照 + 寄存地址占位
 
 > 与现场核对完整产线节奏后的流程实现：**机器人带扫码枪到位 → 上位机扫码得 SN → 机器人带相机到位

@@ -561,7 +561,7 @@ namespace CommandCenter.Views
             this.tip.SetToolTip(this.btnDelCam,
                 "删除选中的相机行；未选中时先点选要删的行。");
             this.tip.SetToolTip(this.lblScannersTcp,
-                "TCP 扫码枪列表：基恩士 SR 系列以太网扫码枪，一台一行。\r\n任何一台扫到的条码都会更新当前序列号（标题栏与存图目录同步）。\r\n\"启用\"不打勾则这台不接入（序列号走手动输入/模拟）。\r\nV1.12.8 起拆为独立的 TCP 表，不再与串口混在同一张表里。");
+                "TCP 扫码枪列表：基恩士 SR 系列以太网扫码枪，一台一行。\r\n任何一台扫到的条码都会更新当前序列号（标题栏与存图目录同步）。\r\n\"启用\"不打勾则这台不接入（序列号可双击标题栏序列号框手动输入，V1.12.17）。\r\nV1.12.8 起拆为独立的 TCP 表，不再与串口混在同一张表里。");
             this.tip.SetToolTip(this.lblScannersSerial,
                 "串口扫码枪列表：RS-232 串口扫码枪，一台一行。\r\n串口扫码枪上电即读码、无需触发指令（与 TCP 不同）。\r\n\"启用\"不打勾则这台不接入。");
             this.tip.SetToolTip(this.btnAddScannerTcp,

@@ -40,6 +40,10 @@ namespace CommandCenter.Views
             this.btnTrigger = new System.Windows.Forms.Button();
             this.lblCamState = new System.Windows.Forms.Label();
             this.cmbCamera = new System.Windows.Forms.ComboBox();
+            this.btnReadProgramNo = new System.Windows.Forms.Button();
+            this.lblCurrentProgram = new System.Windows.Forms.Label();
+            this.btnSwProg1 = new System.Windows.Forms.Button();
+            this.btnSwProg2 = new System.Windows.Forms.Button();
             this.grpScanner = new System.Windows.Forms.GroupBox();
             this.btnScannerTrigger = new System.Windows.Forms.Button();
             this.lblScannerCode = new System.Windows.Forms.Label();
@@ -86,11 +90,15 @@ namespace CommandCenter.Views
             this.grpCamera.Controls.Add(this.btnTrigger);
             this.grpCamera.Controls.Add(this.lblCamState);
             this.grpCamera.Controls.Add(this.cmbCamera);
+            this.grpCamera.Controls.Add(this.btnSwProg2);
+            this.grpCamera.Controls.Add(this.btnSwProg1);
+            this.grpCamera.Controls.Add(this.lblCurrentProgram);
+            this.grpCamera.Controls.Add(this.btnReadProgramNo);
             this.grpCamera.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
             this.grpCamera.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
             this.grpCamera.Location = new System.Drawing.Point(16, 12);
             this.grpCamera.Name = "grpCamera";
-            this.grpCamera.Size = new System.Drawing.Size(768, 170);
+            this.grpCamera.Size = new System.Drawing.Size(768, 212);
             this.grpCamera.TabIndex = 0;
             this.grpCamera.TabStop = false;
             this.grpCamera.Text = "相机测试";
@@ -163,6 +171,66 @@ namespace CommandCenter.Views
             this.lblCamResult.TabIndex = 4;
             this.lblCamResult.Text = "（尚未操作相机）";
             // 
+            // btnReadProgramNo
+            // 读当前程序号（PR 指令，V1.12.19）：联调时先读回相机当前程序号，
+            // 确认 PW 切换是否真正生效（对应 KeyenceIV4Camera.ReadProgramNo）。
+            // 
+            this.btnReadProgramNo.FlatAppearance.BorderSize = 0;
+            this.btnReadProgramNo.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnReadProgramNo.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
+            this.btnReadProgramNo.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
+            this.btnReadProgramNo.Location = new System.Drawing.Point(24, 178);
+            this.btnReadProgramNo.Name = "btnReadProgramNo";
+            this.btnReadProgramNo.Size = new System.Drawing.Size(130, 34);
+            this.btnReadProgramNo.TabIndex = 5;
+            this.btnReadProgramNo.Text = "读当前程序号";
+            this.btnReadProgramNo.UseVisualStyleBackColor = true;
+            this.btnReadProgramNo.Click += new System.EventHandler(this.BtnReadProgramNo_Click);
+            // 
+            // lblCurrentProgram
+            // 当前程序号显示（V1.12.19）：ReadProgramNo 读回后显示 P000/P001/P002…
+            // 
+            this.lblCurrentProgram.AutoSize = true;
+            this.lblCurrentProgram.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
+            this.lblCurrentProgram.ForeColor = System.Drawing.Color.Gray;
+            this.lblCurrentProgram.Location = new System.Drawing.Point(170, 185);
+            this.lblCurrentProgram.Name = "lblCurrentProgram";
+            this.lblCurrentProgram.Size = new System.Drawing.Size(112, 19);
+            this.lblCurrentProgram.TabIndex = 6;
+            this.lblCurrentProgram.Text = "当前程序：?";
+            // 
+            // btnSwProg1
+            // 切换到 P001（V1.12.19）：发 PW,001 切到相机程序 1（基恩士还在调试，仅供前期验证）
+            // 
+            this.btnSwProg1.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
+            this.btnSwProg1.FlatAppearance.BorderSize = 0;
+            this.btnSwProg1.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnSwProg1.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
+            this.btnSwProg1.ForeColor = System.Drawing.Color.White;
+            this.btnSwProg1.Location = new System.Drawing.Point(300, 178);
+            this.btnSwProg1.Name = "btnSwProg1";
+            this.btnSwProg1.Size = new System.Drawing.Size(150, 34);
+            this.btnSwProg1.TabIndex = 7;
+            this.btnSwProg1.Text = "切换程序 → P001";
+            this.btnSwProg1.UseVisualStyleBackColor = false;
+            this.btnSwProg1.Click += new System.EventHandler(this.BtnSwProg1_Click);
+            // 
+            // btnSwProg2
+            // 切换到 P002（V1.12.19）：发 PW,002 切到相机程序 2
+            // 
+            this.btnSwProg2.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
+            this.btnSwProg2.FlatAppearance.BorderSize = 0;
+            this.btnSwProg2.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnSwProg2.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
+            this.btnSwProg2.ForeColor = System.Drawing.Color.White;
+            this.btnSwProg2.Location = new System.Drawing.Point(460, 178);
+            this.btnSwProg2.Name = "btnSwProg2";
+            this.btnSwProg2.Size = new System.Drawing.Size(150, 34);
+            this.btnSwProg2.TabIndex = 8;
+            this.btnSwProg2.Text = "切换程序 → P002";
+            this.btnSwProg2.UseVisualStyleBackColor = false;
+            this.btnSwProg2.Click += new System.EventHandler(this.BtnSwProg2_Click);
+            // 
             // grpScanner
             // 扫码枪测试区：多台扫码枪选择 + 连接状态 + 最近读到条码大字展示
             // 扫码枪为"设备主动推码"模式：主窗体已 Open 并持续监听，这里订阅事件实时展示
@@ -174,7 +242,7 @@ namespace CommandCenter.Views
             this.grpScanner.Controls.Add(this.cmbScanner);
             this.grpScanner.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
             this.grpScanner.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
-            this.grpScanner.Location = new System.Drawing.Point(16, 190);
+            this.grpScanner.Location = new System.Drawing.Point(16, 232);
             this.grpScanner.Name = "grpScanner";
             this.grpScanner.Size = new System.Drawing.Size(768, 128);
             this.grpScanner.TabIndex = 2;
@@ -278,7 +346,7 @@ namespace CommandCenter.Views
             this.grpPlc.Controls.Add(this.lblPlcState);
             this.grpPlc.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
             this.grpPlc.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
-            this.grpPlc.Location = new System.Drawing.Point(16, 326);
+            this.grpPlc.Location = new System.Drawing.Point(16, 368);
             this.grpPlc.Name = "grpPlc";
             this.grpPlc.Size = new System.Drawing.Size(768, 380);
             this.grpPlc.TabIndex = 1;
@@ -593,7 +661,7 @@ namespace CommandCenter.Views
             this.grpLog.Controls.Add(this.txtLog);
             this.grpLog.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
             this.grpLog.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
-            this.grpLog.Location = new System.Drawing.Point(16, 714);
+            this.grpLog.Location = new System.Drawing.Point(16, 756);
             this.grpLog.Name = "grpLog";
             this.grpLog.Size = new System.Drawing.Size(768, 160);
             this.grpLog.TabIndex = 2;
@@ -619,7 +687,7 @@ namespace CommandCenter.Views
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 19F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(800, 890);
+            this.ClientSize = new System.Drawing.Size(800, 932);
             this.Controls.Add(this.grpLog);
             this.Controls.Add(this.grpPlc);
             this.Controls.Add(this.grpScanner);
@@ -651,6 +719,10 @@ namespace CommandCenter.Views
         private Button btnTrigger;
         private Button btnTriggerRead;
         private Label lblCamResult;
+        private Button btnReadProgramNo;
+        private Label lblCurrentProgram;
+        private Button btnSwProg1;
+        private Button btnSwProg2;
         private GroupBox grpScanner;
         private ComboBox cmbScanner;
         private Label lblScannerState;

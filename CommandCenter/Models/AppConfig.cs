@@ -92,6 +92,28 @@ namespace CommandCenter.Models
         public string ReadResultCommand { get; set; } = "RT";
 
         /// <summary>
+        /// 切换相机程序编号（PW 指令，V1.12.18，0~127，负值=不切换）。
+        /// 触发拍摄前上位机先发 "PW,nnn[CR]" 把相机切到指定程序（每个程序对应一组视觉工具），
+        /// 再发 T2 触发+读判定。nnn 补足 3 位（如程序 9 → "PW,009"）。
+        /// 默认 -1 表示"不切换，用相机当前程序"，旧配置无需迁移、行为不变。
+        /// ⚠️ TODO（待与 PLC 沟通）：现场一个相机可能拍多个点位、每个点位用不同程序。
+        ///   等 PLC 到位信号带上点位信息后，这里应升级为"点位→程序号"映射，触发时按当前点位切换；
+        ///   当前实现按"每相机一个固定程序号"落地，点位级映射留待点位信息定稿。
+        /// </summary>
+        public int ProgramNo { get; set; } = -1;
+
+        /// <summary>
+        /// 判定结果输出格式（OF 指令，V1.12.18）：留空/非法则不发送（相机用默认标准格式）。
+        /// 可选值（固定 2 字符）：
+        ///   "00" 标准（多主控无效/分类）——T2 响应 "RT,工具结果(标准)[CR]"（默认，8 位判定位）；
+        ///   "01" 详细（多主控无效/分类）——T2 响应 "RT,工具结果(详细)[CR]"；
+        ///   "02" 标准（主控编号）；
+        ///   "03" 详细（主控编号）。
+        /// 触发前若配置则先发 "OF,nn[CR]"（响应 "OF[CR]"）再切程序/触发。设置后连接断开或断电前一直保持。
+        /// </summary>
+        public string OutputFormat { get; set; } = "";
+
+        /// <summary>
         /// 是否让相机直接回传判定结果（T2）。
         /// true(默认)：判定 OK/NG 直接来自 IV4 内部判定，准确；
         /// false：退化为"FTP 图到达即记 OK"的旧逻辑（仅现场未配判定时用）。
@@ -199,6 +221,16 @@ namespace CommandCenter.Models
 
         /// <summary>PLC→上位机：相机运动到位信号（D 地址，PLC 写 1，上位机读后清 0）</summary>
         public ushort MoveDoneAddress { get; set; } = 100;
+
+        /// <summary>
+        /// PLC→上位机：当前到位点位号（D 地址，V1.12.18 占位，默认 D113，待与 PLC 沟通定稿）。
+        /// 【背景】现场一个相机可能拍多个点位、每个点位用不同相机程序（见 CameraConfig.ProgramNo）。
+        ///   为支持"按点位切程序"，PLC 在相机到位信号（MoveDoneAddress）的同时，应把当前点位号
+        ///   写入本寄存器；上位机触发前读它、查"点位→程序号"映射后再发 PW 切换。
+        /// 【TODO】当前未实现读取/映射：点位号含义与映射规则待现场 PLC 程序定稿，
+        ///   届时在 ProductionCoordinator 触发流程中补"读点位号→按映射切程序"逻辑，本字段只做占位。
+        /// </summary>
+        public ushort PointInfoAddress { get; set; } = 113;
 
         /// <summary>上位机→PLC：触发相机工作的"开始"信号（D，上位机写自己区，PLC 来读）</summary>
         public ushort StartSignalAddress { get; set; } = 101;
@@ -344,6 +376,15 @@ namespace CommandCenter.Models
         ///   例：默认 "{点位}" → 1.png
         /// </summary>
         public string FileNameTemplate { get; set; } = "{点位}";
+
+        /// <summary>
+        /// 存图文件名是否默认追加时间戳后缀（V1.12.18）。
+        /// true(默认)：最终文件名 = 模板渲染结果 + "_" + 时间戳(yyyyMMdd_HHmmss_fff)。
+        ///   防止"同点位重复拍照/重复触发"时覆盖旧图——现场同点位可能被多次触发，
+        ///   每张图都要保留（旧版仅靠 _2/_3 递增兜底，命名不清）。
+        /// false：保持模板渲染结果原名（模板带 {时间} 时基本不重名，此开关仅作保险）。
+        /// </summary>
+        public bool FileTimestampSuffix { get; set; } = true;
 
         /// <summary>保留天数，0 表示不自动清理</summary>
         public int KeepDays { get; set; } = 30;

@@ -32,10 +32,18 @@ namespace CommandCenter.Services
     ///   BR,m[CR]            读取最新图像（V1.7.0，24bit 位图）；m=压缩率(0=无压缩,1=1/2)；
     ///                       响应 BR, nnnnnnnnnn, ddddddd, 图像数据
     ///                       （nnnnnnnnnn=合计触发编号，ddddddd=图像数据的数据长度；V1.9.1 修正）
+    ///   PW,nnn[CR]          切换相机程序（V1.12.18）；nnn=程序编号(000~127，3 位补零)；
+    ///                       响应 PW[CR]（成功）或 ER,PW,03[CR]/ER,PW,22[CR]（失败）
+    ///   PR[CR]              读取当前程序编号；响应 PR,nnn[CR]
+    ///   OF,nn[CR]           切换判定结果输出格式（V1.12.18）；nn=00标准/01详细/02标准主控编号/03详细主控编号；
+    ///                       响应 OF[CR]（成功）
     ///   工具结果(标准) = 8 位字符，每位一个工具：'0'=OK、'1'=NG、'4'=未进行、'-'=该工具未启用
     ///
     /// 【本服务提供的入口】
     ///   - TriggerAndRead()：发 T2，一次完成"触发+读判定"，返回 OK/NG（主流程用）；
+    ///   - SwitchProgram(n)：发 PW,nnn，先切相机程序再触发（V1.12.18，多程序/多点位现场用）；
+    ///   - ReadProgramNo()：发 PR，读当前程序编号（V1.12.18，联调确认程序切换是否生效）；
+    ///   - SetOutputFormat()：发 OF,nn，设置判定结果输出格式（V1.12.18，按 CameraConfig.OutputFormat）；
     ///   - SendTrigger()：  发 T1，仅触发（场景：判定由其他途径/PLC 侧给）；
     ///   - ReadImage()：    发 BR,m，读最新图像字节（Tcp 取图模式用，见 CameraConfig.ImageSource）；
     ///   判定解析规则配置于 CameraConfig.OkChar，遇到 '4'/'-'/未知一律保守判 NG。
@@ -96,6 +104,105 @@ namespace CommandCenter.Services
                 MarkDisconnected();
                 LogHelper.Error("T2 触发+读判定异常", ex);
                 return TriggerReadOutcome.Fail("异常：" + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 切换相机程序（V1.12.18，指令 PW,nnn[CR]）。
+        /// 现场"一个相机拍多个点位、每个点位用不同程序（不同视觉工具组）"时，触发前必须先
+        /// 把相机切到当前点位对应的程序，否则相机仍在跑上一个程序，判定/取图都对应不上。
+        /// nnn = 程序编号（000~127，不足 3 位自动补 0，如程序 9 → "PW,009"）。
+        /// 成功响应 "PW[CR]"（相机会回显指令名）；失败响应 "ER,PW,xx[CR]"（xx=错误码）。
+        /// 本方法只校验响应前缀是否为 "PW"（大小写不敏感）；"ER,PW" 视为切换失败。
+        /// </summary>
+        /// <param name="programNo">目标程序编号（0~127，越界自动夹到 0~127）</param>
+        /// <returns>true=已切到目标程序；false=通讯失败/相机报错</returns>
+        public bool SwitchProgram(int programNo)
+        {
+            try
+            {
+                if (!EnsureConnected()) return false;
+                // 夹到合法区间：IV4 程序编号 000~127
+                programNo = Math.Max(0, Math.Min(127, programNo));
+                string cmd = "PW," + programNo.ToString("D3");
+                string raw = SendCommandAndReadLine(cmd, _cfg.ResponseTimeoutMs);
+                if (raw == null) return false;
+                if (raw.StartsWith("ER", StringComparison.OrdinalIgnoreCase))
+                {
+                    LogHelper.Warn($"相机切程序失败 {_cfg.IpAddress}:{_cfg.CommandPort}：{raw}");
+                    return false;
+                }
+                // 成功响应是回显 "PW"（或带后续）；ER 已在上面拦掉，这里按前缀 PW 判断
+                bool ok = raw.StartsWith("PW", StringComparison.OrdinalIgnoreCase);
+                if (ok)
+                    LogHelper.Info($"相机已切换程序 → {cmd}（响应：{raw}）");
+                else
+                    LogHelper.Warn($"相机切程序响应异常 {_cfg.IpAddress}:{_cfg.CommandPort}：{raw}");
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                MarkDisconnected();
+                LogHelper.Error("相机切换程序异常", ex);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 读取相机当前程序编号（V1.12.18，指令 PR[CR]，响应 "PR,nnn[CR]"）。
+        /// 用于联调时确认 PW 切换是否真正生效；主流程不依赖它（切完程序直接触发）。
+        /// </summary>
+        /// <returns>成功返回程序编号(0~127)；失败返回 -1</returns>
+        public int ReadProgramNo()
+        {
+            try
+            {
+                if (!EnsureConnected()) return -1;
+                string raw = SendCommandAndReadLine("PR", _cfg.ResponseTimeoutMs);
+                if (raw == null) return -1;
+                // 期望 "PR,009"；非法前缀返回 -1
+                if (!raw.StartsWith("PR", StringComparison.OrdinalIgnoreCase)) return -1;
+                string noStr = raw.Substring(2).TrimStart(',', ' ', '\t').Trim();
+                int no;
+                return int.TryParse(noStr, out no) ? no : -1;
+            }
+            catch (Exception ex)
+            {
+                MarkDisconnected();
+                LogHelper.Error("相机读取程序编号异常", ex);
+                return -1;
+            }
+        }
+
+        /// <summary>
+        /// 设置判定结果输出格式（V1.12.18，指令 OF,nn[CR]，响应 "OF[CR]"）。
+        /// 现场若把 T2 响应切成"详细格式"，判定解析仍兼容（ParseResult 取逗号前字段），
+        /// 但为对齐《通信指南》，程序主动按 CameraConfig.OutputFormat 发一次 OF 固化格式。
+        /// nn 固定 2 位：00标准 / 01详细 / 02标准(主控编号) / 03详细(主控编号)。
+        /// 设置后连接断开或断电前一直保持；相机断电后需要重新设置（主流程每次触发前会带发）。
+        /// </summary>
+        /// <param name="format">2 位格式编号；空/非法则不发送（相机维持当前/默认格式）</param>
+        /// <returns>true=发送成功（收到 OF 回显）；false=失败或未发送</returns>
+        public bool SetOutputFormat(string format)
+        {
+            if (string.IsNullOrWhiteSpace(format)) return false;
+            string nn = format.Trim();
+            if (nn.Length != 2 || !char.IsDigit(nn[0]) || !char.IsDigit(nn[1])) return false;
+            try
+            {
+                if (!EnsureConnected()) return false;
+                string raw = SendCommandAndReadLine("OF," + nn, _cfg.ResponseTimeoutMs);
+                if (raw == null) return false;
+                bool ok = raw.StartsWith("OF", StringComparison.OrdinalIgnoreCase);
+                if (ok) LogHelper.Info($"相机已设置判定输出格式 → OF,{nn}");
+                else LogHelper.Warn($"相机设置输出格式响应异常 {_cfg.IpAddress}:{_cfg.CommandPort}：{raw}");
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                MarkDisconnected();
+                LogHelper.Error("相机设置输出格式异常", ex);
+                return false;
             }
         }
 

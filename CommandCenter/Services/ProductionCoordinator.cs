@@ -98,6 +98,24 @@ namespace CommandCenter.Services
         /// <summary>一条产品被扫码进来的序列号透传（若扫码枪关闭则 UI 手动输入）</summary>
         public string LatestSerialNumber { get; set; } = "";
 
+        /// <summary>
+        /// 手动输入/更新当前产品序列号（V1.12.17，UI 线程调用）。
+        /// 场景：没有扫码枪、或扫码枪没读到码时，操作员双击主界面标题栏"序列号"框手动录入 SN。
+        /// 与扫码枪收码（OnScannerCode）等效推进两阶段流程：
+        ///   ① 更新 LatestSerialNumber（标题栏显示 + 存图 {SN} 目录）；
+        ///   ② 置 _serialReceived=true：若正处于"等 SN"阶段（PhaseScanPending，扫码枪有但没读到码），
+        ///      下一轮轮询即视为"已取得 SN"进入等相机阶段；若在其它阶段（空闲等扫码/等相机），
+        ///      该标志会在下次扫码到位时被 _serialReceived=false 重置，无副作用。
+        /// 线程：UI 线程写 string（引用赋值原子）+ volatile bool，后台轮询线程读到即推进，无需加锁。
+        /// </summary>
+        /// <param name="code">手动录入的序列号（调用方保证非空；这里仍做一次空兜底）</param>
+        public void SetManualSerial(string code)
+        {
+            LatestSerialNumber = code ?? "";
+            _serialReceived = true;
+            LogHelper.Info("手动输入序列号：" + LatestSerialNumber);
+        }
+
         public ProductionCoordinator(PlcService plc,
                                      List<KeyenceIV4Camera> cameras,
                                      List<CameraConfig> cameraCfgs,
@@ -359,6 +377,10 @@ namespace CommandCenter.Services
         /// 触发并取图单台相机（V1.8.3 起由并行任务调用）。
         /// 只写自己的 _pends[idx] 快照，与其它相机任务互不干扰；内部自带 try-catch，
         /// 任何异常都收敛为该相机的 FailReason，绝不把异常抛回 WaitAll。
+        /// 【V1.12.18 先切程序再触发】现场"一个相机拍多个点位、每点位不同程序"，
+        ///   触发前若配置了 ProgramNo 先发 PW 切换相机程序，再发 T2 触发+读判定；
+        ///   若配置了 OutputFormat 则先发 OF 固化判定输出格式（联调对齐用）。
+        ///   （点位级程序映射见 CameraConfig.ProgramNo 的 TODO 注释，等 PLC 点位信息定稿）
         /// </summary>
         /// <param name="idx">相机在配置里的下标（0 起）</param>
         private void TriggerOneCamera(int idx)
@@ -367,6 +389,24 @@ namespace CommandCenter.Services
             var p = _pends[idx];
             try
             {
+                // 触发前的相机程序切换 + 输出格式设置（V1.12.18）：
+                // 这些指令彼此独立，任何一步失败都收敛为 FailReason 报错、不继续触发
+                // （程序没切对就触发，判定/取图会对应到错误点位，宁可不拍）。
+                if (!string.IsNullOrWhiteSpace(cfg.OutputFormat)
+                    && !_cameras[idx].SetOutputFormat(cfg.OutputFormat))
+                {
+                    p.TriggerOk = false;
+                    p.FailReason = $"相机[{idx}]设置判定输出格式失败（OF,{cfg.OutputFormat.Trim()}）";
+                    return;
+                }
+                if (cfg.ProgramNo >= 0
+                    && !_cameras[idx].SwitchProgram(cfg.ProgramNo))
+                {
+                    p.TriggerOk = false;
+                    p.FailReason = $"相机[{idx}]切换程序失败（PW,{cfg.ProgramNo.ToString("D3")}）";
+                    return;
+                }
+
                 if (cfg.ReadResultFromCamera)
                 {
                     // 首选：T2 一次完成"触发+读判定"，OK/NG 直接来自 IV4
@@ -431,15 +471,29 @@ namespace CommandCenter.Services
         }
 
         /// <summary>
-        /// 某台相机 FTP 新图到达。参数带相机索引，定位到对应 pending 快照填图。
+        /// 某台相机 FTP 新文件到达。参数带相机索引，定位到对应 pending 快照填图。
+        /// 【V1.12.18 双文件约定】现场相机每次拍照往 FTP 取图目录推两个文件：
+        ///   0000.jpeg（显示/归档主体）+ 0000.iv4p（基恩士复盘私有格式，原样归档）。
+        /// 本回调按扩展名分派：jpeg 填 FtpJpegPath、iv4p 填 FtpIvpPath，两个都到齐才算 IsSnapped。
+        /// （FileSystemWatcher 对两个文件各触发一次 Created/Renamed，到达顺序不保证。）
         /// 事件来自 FileSystemWatcher 线程；_finished 保护保证不会与超时回调重复收尾。
         /// </summary>
         private void OnFtpFileArrived(int cameraIndex, string fullPath)
         {
             if (_disposed || _busy == 0) return; // 已释放/非流程内到达的图忽略（相机制试图之类）
             var p = _pends.FirstOrDefault(x => x.CameraIndex == cameraIndex);
-            if (p == null || !p.TriggerOk || p.IsSnapped) return; // 无关相机/触发失败/已到过图都忽略
-            p.FtpPath = fullPath;
+            if (p == null || !p.TriggerOk || p.IsSnapped) return; // 无关相机/触发失败/已到齐过都忽略
+
+            // 按扩展名分派：.iv4p 进 iv4p 槽，其余（.jpeg/.jpg/.png…）一律当显示主体 jpeg
+            string ext = Path.GetExtension(fullPath ?? "");
+            if (!string.IsNullOrEmpty(ext) && ext.Equals(".iv4p", StringComparison.OrdinalIgnoreCase))
+                p.FtpIvpPath = fullPath;
+            else
+                p.FtpJpegPath = fullPath;
+
+            // 双文件都到齐才视为"图已到手"（正常必有；若 iv4p 偶发缺失走超时兜底，见 FinishAll）
+            if (string.IsNullOrEmpty(p.FtpJpegPath) || string.IsNullOrEmpty(p.FtpIvpPath))
+                return;
             p.IsSnapped = true;
             // 所有"需要等图"的相机都到位 → 整体收尾（忽略触发失败的那些，它们已经失败）
             if (_pends.All(x => !x.TriggerOk || x.IsSnapped))
@@ -470,25 +524,33 @@ namespace CommandCenter.Services
                     _nextWindowIndex = (_nextWindowIndex % _windowCount) + 1;
                     int stationNo = ResolveStation(targetWindow);
 
-                    // 图是否到手：FTP 模式看 FtpPath，TCP 模式看 ImageBytes（两者有其一即 hasImage）
+                    // 图是否到手：FTP 模式看 jpeg 路径，TCP 模式看 ImageBytes（两者有其一即 hasImage）
                     bool hasImage = p.TriggerOk && p.IsSnapped
-                        && (p.ImageBytes != null || !string.IsNullOrEmpty(p.FtpPath));
+                        && (p.ImageBytes != null || !string.IsNullOrEmpty(p.FtpJpegPath));
                     string archived = null;
                     if (hasImage)
                     {
                         // 归档：TCP 模式图在内存字节里，直接解码转存正式目录（不落 FTP 中转文件）；
-                        //       FTP 模式读源文件转存（见 ArchiveImage）。
+                        //       FTP 模式把 jpeg+iv4p 双文件原样复制到正式目录（V1.12.18）。
                         archived = (p.ImageBytes != null)
                             ? _imageStore.SaveImageBytes(p.ImageBytes, stationNo, p.IsOk, LatestSerialNumber)
-                            : ArchiveImage(p, stationNo);
+                            : _imageStore.SaveImageFilePair(p.FtpJpegPath, p.FtpIvpPath, stationNo, p.IsOk, LatestSerialNumber);
                         if (archived == null)
                         {
                             // 归档失败兜底：FTP 模式回退用源文件当结果（图至少能显示）；
                             // TCP 模式无源文件，明确报错让该窗口走失败占位（等现场实测确认格式后自然消除）。
-                            if (!string.IsNullOrEmpty(p.FtpPath))
-                                archived = p.FtpPath;
+                            if (!string.IsNullOrEmpty(p.FtpJpegPath))
+                                archived = p.FtpJpegPath;
                             else
                                 ErrorRaised?.Invoke($"点位{stationNo} 图像归档失败（TCP 取图，内存解码失败）");
+                        }
+                        else if (p.ImageBytes == null)
+                        {
+                            // FTP 模式：归档成功 → 删除 FTP 取图目录源文件（中转暂存区"处理即删"，
+                            // 文件名恒定 0000.jpeg/0000.iv4p，删了下一轮才能复用；失败只记日志不阻断）。
+                            // 后台线程执行，不碰 UI；删除必须放在归档成功之后，否则复制失败会把图弄丢。
+                            DeleteFtpSource(p.FtpJpegPath, stationNo);
+                            DeleteFtpSource(p.FtpIvpPath, stationNo);
                         }
                     }
                     anyImage |= !string.IsNullOrEmpty(archived);
@@ -538,60 +600,27 @@ namespace CommandCenter.Services
         }
 
         /// <summary>
-        /// 归档图片：把 FTP 新图读入内存并按模板转存到正式目录（年/月/日/SN/OK|NG + 点位号.png）。
-        /// 【V1.8.3 修复】FTP 服务端写完文件才触发 Created/Renamed，但有时事件先于写完到达，
-        ///   Image.FromFile 会抛"文件被占用/损坏"导致图丢失。改为：FileShare.ReadWrite 方式打开
-        ///   （正在写也能读），复制到内存后统一用 Image.FromStream 解码；读取失败短延迟重试最多
-        ///   3 次（共约 1.2s），仍失败返回 null。
-        /// 用内存解码同时避免 FTP 源文件可能被相机重写的文件占用问题。失败返回 null。
+        /// 删除 FTP 取图目录里的单个源文件（V1.12.18，"中转暂存区处理即删"）。
+        /// 文件不存在/删除失败一律静默记日志、不抛异常、不阻断收尾：
+        ///   - 不存在：本来就已删（重复删除场景），正常；
+        ///   - 被占用删除失败：下一轮拍照同名覆盖时会自然复用目录，多留一个文件无害，
+        ///     但会影响"文件名恒定 0000"的假设，故仍记日志供现场排查。
+        /// 必须在归档复制成功之后调用（调用方保证），否则复制失败会把图弄丢。
         /// </summary>
-        /// <param name="p">本点位触发/判定快照</param>
-        /// <param name="stationNo">本次存图点位（来自窗口点位映射，见 ResolveStation）</param>
-        private string ArchiveImage(PendingCamera p, int stationNo)
+        private static void DeleteFtpSource(string path, int stationNo)
         {
-            byte[] bytes = null;
-            Exception lastEx = null;
-            // 重试读取：事件早于文件写完时，等待 FTP 落盘（每次 Sleep 400ms，最多 3 次）
-            for (int i = 0; i < 3; i++)
-            {
-                try
-                {
-                    using (var fs = new FileStream(p.FtpPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                    using (var ms = new MemoryStream())
-                    {
-                        fs.CopyTo(ms);
-                        bytes = ms.ToArray();
-                    }
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    lastEx = ex;
-                    Thread.Sleep(400);
-                }
-            }
-
-            if (bytes == null)
-            {
-                LogHelper.Error("图片归档失败（读取 FTP 源文件多次仍失败）", lastEx);
-                ErrorRaised?.Invoke($"点位{stationNo} 图片归档失败：" + p.FtpPath);
-                return null;
-            }
-
+            if (string.IsNullOrWhiteSpace(path)) return;
             try
             {
-                using (var ms = new MemoryStream(bytes))
-                using (var src = Image.FromStream(ms))
-                using (var copy = new Bitmap(src))
+                if (File.Exists(path))
                 {
-                    return _imageStore.SaveImage(copy, stationNo, p.IsOk, LatestSerialNumber);
+                    File.Delete(path);
+                    LogHelper.Info($"点位{stationNo} 已删除 FTP 取图源文件：{path}");
                 }
             }
             catch (Exception ex)
             {
-                LogHelper.Error("图片归档失败（解码/保存出错）", ex);
-                ErrorRaised?.Invoke($"点位{stationNo} 图片归档失败：" + p.FtpPath);
-                return null;
+                LogHelper.Warn($"点位{stationNo} 删除 FTP 源文件失败（不影响本次结果）：{path} → {ex.Message}");
             }
         }
 
@@ -683,12 +712,15 @@ namespace CommandCenter.Services
         }
 
         /// <summary>
-        /// 一台相机一次检测的暂存快照：判定、图像（FTP 路径或 TCP 字节）、失败原因等，
+        /// 一台相机一次检测的暂存快照：判定、图像（FTP 双文件或 TCP 字节）、失败原因等，
         /// 在触发到收尾之间跨线程读取。
         /// （只被协调器内部使用，刻意不设锁——图到达与超时回调对同一快照的写都是"幂等填值"，
         ///  由 _finished 双收尾保护兜底，最坏情况只是日志里少一条。
         ///  IsSnapped 声明为 volatile：OnFtpFileArrived（FTP 线程）写、FinishAll（超时/收尾线程）
         ///  读，volatile 保证该标志的读一定看到最新的写，避免极小窗口读到旧值误判"图未到"。）
+        /// 【V1.12.18 双文件约定】FTP 模式每张照片对应 jpeg + iv4p 两个文件（现场与基恩士确认）：
+        ///   FtpJpegPath=显示/归档主体（0000.jpeg），FtpIvpPath=基恩士复盘私有格式（0000.iv4p），
+        ///   归档时两文件原样复制、成功后删除 FTP 取图目录源文件。
         /// </summary>
         private class PendingCamera
         {
@@ -697,9 +729,10 @@ namespace CommandCenter.Services
             public bool TriggerOk;     // 触发是否成功（Ftp 模式：成功才等这张图；Tcp 模式：取图失败也会被置 false）
             public bool IsOk;          // IV4 判定结论（触发失败时无意义）
             public string ResultText;  // 8 位判定文本
-            public string FtpPath;     // Ftp 模式：FTP 新图完整路径（到图后填）
+            public string FtpJpegPath; // Ftp 模式：FTP 取图目录里的 jpeg 完整路径（到图后填，显示/归档主体）
+            public string FtpIvpPath;  // Ftp 模式：FTP 取图目录里的 iv4p 完整路径（基恩士复盘用，原样归档）
             public byte[] ImageBytes;  // Tcp 模式：BR 读回的最新图像字节（24bit BMP，无则 null）
-            public volatile bool IsSnapped; // 是否已拿到图（Ftp 模式=新图到；Tcp 模式=BR 读回）。volatile 见类注释
+            public volatile bool IsSnapped; // 是否已拿到图（Ftp 模式=jpeg 新图到；Tcp 模式=BR 读回）。volatile 见类注释
             public string FailReason;  // 触发失败/取图失败/等图超时原因
         }
     }

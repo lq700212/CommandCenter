@@ -23,6 +23,8 @@ namespace CommandCenter.Views
     /// │【相机】 相机:[cmbCamera▾] 状态:[lblCamState]                    │
     /// │   [btnTrigger 仅触发T1] [btnTriggerRead 触发+判定T2]            │
     /// │   结果:[lblCamResult]（OK=绿 / NG=红 / 失败=灰）                │
+    /// │   [btnReadProgramNo 读当前程序号][lblCurrentProgram 当前程序:Pxxx]│
+    /// │   [btnSwProg1 切换程序→P001] [btnSwProg2 切换程序→P002]         │
     /// ├────────────────────────────────────────────────────────────────┤
     /// │【扫码枪】扫码枪:[cmbScanner▾] 状态:[lblScannerState]            │
     /// │   [btnScannerTrigger 发送触发指令]                               │
@@ -212,6 +214,9 @@ namespace CommandCenter.Views
             // 忙碌期间把"会发起网络操作"的按钮全部禁用，操作完成恢复
             btnTrigger.Enabled = !busy;
             btnTriggerRead.Enabled = !busy;
+            btnReadProgramNo.Enabled = !busy;
+            btnSwProg1.Enabled = !busy;
+            btnSwProg2.Enabled = !busy;
             btnReadMoveDone.Enabled = !busy;
             btnClearMoveDone.Enabled = !busy;
             btnStartOn.Enabled = !busy;
@@ -333,6 +338,104 @@ namespace CommandCenter.Views
                     }
                     FinishOp();
                 });
+            });
+        }
+
+        // ────────────── 相机程序切换（V1.12.19，基恩士侧仍在调试，供前期验证）──────────────
+        // 背景：现场"一台相机拍多个点位"，每个点位对应相机里一个程序（P000/P001/P002…）。
+        //   这几个按钮直接复用 KeyenceIV4Camera.SwitchProgram（PW,nnn）做切换验证；
+        //   "读当前程序号"按钮复用 ReadProgramNo（PR 指令）读回当前程序号，用来确认
+        //   切换是否真正生效（相机侧程序号以 P 开头三位，如 P001 → 程序号 1）。
+        // 注：按钮只验证"切换程序"链路，不触发拍照；要连拍一起验证先切程序再点 T2。
+
+        /// <summary>读当前程序号（PR）：显示 P000/P001/P002…，用于确认 PW 切换是否生效。</summary>
+        private void BtnReadProgramNo_Click(object sender, EventArgs e)
+        {
+            var cam = SelectedCamera();
+            if (cam == null) { MessageBox.Show("请先在相机列表选择一台相机。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+
+            SetBusy(true);
+            AppendLog($"→ 相机 {cam.IpLabel} 读取当前程序号（PR）…");
+            Task.Run(() =>
+            {
+                int no = cam.ReadProgramNo();
+                SafeInvoke(() =>
+                {
+                    if (no >= 0)
+                    {
+                        lblCurrentProgram.Text = "当前程序：" + $"P{no:D3}";   // P000/P001/P002…
+                        lblCurrentProgram.ForeColor = Color.Green;
+                        lblCamResult.Text = $"当前程序号 P{no:D3}（读回成功）";
+                        lblCamResult.ForeColor = Color.Green;
+                        AppendLog($"← 当前程序号 P{no:D3}");
+                    }
+                    else
+                    {
+                        lblCurrentProgram.Text = "当前程序：读取失败";
+                        lblCurrentProgram.ForeColor = Color.Red;
+                        lblCamResult.Text = "PR 读取失败（未连接/无响应）";
+                        lblCamResult.ForeColor = Color.Gray;
+                        AppendLog("← 读取当前程序号失败（未连接或通讯异常）");
+                    }
+                    FinishOp();
+                });
+            });
+        }
+
+        /// <summary>切换到相机程序 P001（发 PW,001）。成功则顺带读回确认。</summary>
+        private void BtnSwProg1_Click(object sender, EventArgs e)
+        {
+            SwitchCameraProgram(1, "P001");
+        }
+
+        /// <summary>切换到相机程序 P002（发 PW,002）。成功则顺带读回确认。</summary>
+        private void BtnSwProg2_Click(object sender, EventArgs e)
+        {
+            SwitchCameraProgram(2, "P002");
+        }
+
+        /// <summary>通用"切相机程序"：发 PW,nnn 并读回当前程序号做确认（V1.12.19）。
+        /// 后台线程执行，完成后 SafeInvoke 回 UI 显示结果。</summary>
+        /// <param name="programNo">目标程序号（0~127，越界自动夹取）</param>
+        /// <param name="display">界面显示名（如 "P001"），仅用于日志/结果文案</param>
+        private void SwitchCameraProgram(int programNo, string display)
+        {
+            var cam = SelectedCamera();
+            if (cam == null) { MessageBox.Show("请先在相机列表选择一台相机。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+
+            SetBusy(true);
+            AppendLog($"→ 相机 {cam.IpLabel} 切换程序 → {display}（PW,{programNo:D3}）…");
+            Task.Run(() =>
+            {
+                bool ok = cam.SwitchProgram(programNo);
+                if (ok)
+                {
+                    // 切成功再读回确认（基恩士侧可能还需几毫秒，直接读；失败不阻断主结果）
+                    int no = cam.ReadProgramNo();
+                    SafeInvoke(() =>
+                    {
+                        lblCurrentProgram.Text = no >= 0 ? $"当前程序：P{no:D3}" : "当前程序：P???";
+                        lblCurrentProgram.ForeColor = ok ? Color.Green : Color.Red;
+                        lblCamResult.Text = ok
+                            ? $"已切到 {display}（PW,{programNo:D3} 成功）"
+                            : $"切换 {display} 失败";
+                        lblCamResult.ForeColor = ok ? Color.Green : Color.Red;
+                        AppendLog($"← 切换 {display} 成功" + (no >= 0 ? $"，读回当前程序 P{no:D3}" : "（读回超时，可点'读当前程序号'确认）"));
+                        FinishOp();
+                    });
+                }
+                else
+                {
+                    SafeInvoke(() =>
+                    {
+                        lblCurrentProgram.Text = "当前程序：切换失败";
+                        lblCurrentProgram.ForeColor = Color.Red;
+                        lblCamResult.Text = $"切换 {display} 失败（PW 无响应/相机报错）";
+                        lblCamResult.ForeColor = Color.Red;
+                        AppendLog($"← 切换 {display} 失败（未连接或相机返回 ER）");
+                        FinishOp();
+                    });
+                }
             });
         }
 

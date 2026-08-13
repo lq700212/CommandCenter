@@ -97,9 +97,11 @@ namespace CommandCenter.Views
                 "可视化编辑存图目录结构（目录层级列表 + 文件名规则），并实时预览 OK/NG 落盘路径。\r\n当前结构：" + cur);
         }
 
-        /// <summary>给相机表格建好 4 列结构（列固定，运行时加一次即可，不用进设计器序列化）。
+        /// <summary>给相机表格建好列结构（列固定，运行时加一次即可，不用进设计器序列化）。
         /// 注意：旧版的"点位号"列已移除——存图点位统一由"窗口/点位配置…"（WindowStationMap）驱动；
-        /// "取图方式"列（V1.7.0）是下拉框，现场可直接在 Ftp/Tcp 间切换（对应 CameraConfig.ImageSource）。</summary>
+        /// "取图方式"列（V1.7.0）原是 Ftp/Tcp 下拉，V1.12.18 起现场只保留 FTP 取图
+        /// （相机 FTP 推图 0000.jpeg+0000.iv4p），故下拉只留 Ftp、不再提供 Tcp 直读选项；
+        /// "程序号"列（V1.12.18）对应触发前 PW 切换的相机程序（0~127，-1=不切换）。</summary>
         private void SetupCameraGridColumns()
         {
             // 仅在还没有"相机IP"列时初始化，保证重复调用不会越建越多
@@ -107,17 +109,18 @@ namespace CommandCenter.Views
             {
                 gridCameras.Columns.Add("IpAddress", "相机IP");
                 gridCameras.Columns.Add("CommandPort", "触发端口");
-                gridCameras.Columns.Add("FtpUploadDir", "FTP上传目录（留空用全局目录）");
-                // 取图方式：Ftp=相机 FTP 推图（默认，成熟）/ Tcp=上位机 BR 指令直接读图（V1.7.0 新增）
+                gridCameras.Columns.Add("FtpUploadDir", "FTP取图目录（留空用全局目录）");
+                // 取图方式：现场只保留 Ftp（V1.12.18 起相机 FTP 推图是唯一取图方式）
                 var srcCol = new DataGridViewComboBoxColumn
                 {
                     Name = "ImageSource",
                     HeaderText = "取图方式",
-                    SortMode = DataGridViewColumnSortMode.NotSortable // 组合列无排序意义
+                    SortMode = DataGridViewColumnSortMode.NotSortable // 组合列无意义，禁排序
                 };
                 srcCol.Items.Add("Ftp");
-                srcCol.Items.Add("Tcp");
                 gridCameras.Columns.Add(srcCol);
+                // 程序号（V1.12.18）：触发前 PW 切换的相机程序，0~127，-1=不切换
+                gridCameras.Columns.Add("ProgramNo", "程序号(-1=不切换)");
             }
         }
 
@@ -130,12 +133,12 @@ namespace CommandCenter.Views
             {
                 // ImageSource 为空（旧配置）时按 Ftp 兜底显示
                 string src = string.IsNullOrWhiteSpace(c.ImageSource) ? "Ftp" : c.ImageSource;
-                gridCameras.Rows.Add(c.IpAddress, c.CommandPort, c.FtpUploadDir, src);
+                gridCameras.Rows.Add(c.IpAddress, c.CommandPort, c.FtpUploadDir, src, c.ProgramNo);
             }
             // 至少留一行可见，别让表格空着无从下手
             if (gridCameras.Rows.Count == 0)
                 foreach (var c in CameraConfig.DefaultCameras())
-                    gridCameras.Rows.Add(c.IpAddress, c.CommandPort, c.FtpUploadDir, "Ftp");
+                    gridCameras.Rows.Add(c.IpAddress, c.CommandPort, c.FtpUploadDir, "Ftp", c.ProgramNo);
         }
 
         /// <summary>给两个扫码枪表格建好列结构（V1.12.8 起拆分为 TCP 表 + 串口表）。
@@ -342,12 +345,17 @@ namespace CommandCenter.Views
                 if (!int.TryParse(portTxt, out port)) port = 8500;   // TryParse 失败会写 0，手动回默认
                 // 取图方式：Ftp/Tcp（空值按 Ftp 兜底，与 ProductionCoordinator.IsTcpImage 判断一致）
                 string imgSrc = r.Cells["ImageSource"].Value == null ? "Ftp" : r.Cells["ImageSource"].Value.ToString();
+                // 程序号（V1.12.18）：触发前 PW 切换的相机程序，-1=不切换；空/非法按 -1（不切换）兜底
+                int programNo = -1;
+                string programTxt = r.Cells["ProgramNo"].Value == null ? "" : r.Cells["ProgramNo"].Value.ToString().Trim();
+                if (!int.TryParse(programTxt, out programNo)) programNo = -1;
                 cams.Add(new CameraConfig
                 {
                     IpAddress = ip,
                     CommandPort = Math.Max(1, port),
                     FtpUploadDir = r.Cells["FtpUploadDir"].Value == null ? "" : r.Cells["FtpUploadDir"].Value.ToString().Trim(),
-                    ImageSource = string.IsNullOrWhiteSpace(imgSrc) ? "Ftp" : imgSrc.Trim()
+                    ImageSource = string.IsNullOrWhiteSpace(imgSrc) ? "Ftp" : imgSrc.Trim(),
+                    ProgramNo = programNo
                 });
             }
             if (cams.Count == 0) cams.AddRange(CameraConfig.DefaultCameras()); // 兜底：至少现场两台默认相机

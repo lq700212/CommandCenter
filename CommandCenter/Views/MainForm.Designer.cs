@@ -11,7 +11,7 @@ namespace CommandCenter.Views
     /// 仍在 MainForm.cs 中生成，不放进这里。
     /// 【重要】整体顺序请参考 MainForm.cs 类注释里的 ASCII 布局图。
     ///   ┌──────────────────────────────────────────────────────────────┐
-    ///   │ 产品型号:[cmbRecipe▾] 序列号:[lblSerialTitle][lblSerial框]    │
+    ///   │ 产品型号:[cmbRecipe▾] 序列号:[lblSerialTitle][txtSerial框]    │
     ///   │  | 总数:[lblTotal] OK:[lblOk] NG:[lblNg]                     │
     ///   │          | [btnSettings系统设置]    ●[lblPlcStatus] ●[lblScannerStatus]│
     ///   ├──────────────────────────────────────────────────────────────┤
@@ -59,7 +59,7 @@ namespace CommandCenter.Views
             this.lblOk = new System.Windows.Forms.Label();
             this.lblTotal = new System.Windows.Forms.Label();
             this.lblSep1 = new System.Windows.Forms.Label();
-            this.lblSerial = new System.Windows.Forms.Label();
+            this.txtSerial = new System.Windows.Forms.TextBox();
             this.lblSerialTitle = new System.Windows.Forms.Label();
             this.cmbRecipe = new System.Windows.Forms.ComboBox();
             this.lblProductPrefix = new System.Windows.Forms.Label();
@@ -89,7 +89,7 @@ namespace CommandCenter.Views
             this.pnlTitleBar.Controls.Add(this.lblTotal);
             this.pnlTitleBar.Controls.Add(this.lblSep1);
             this.pnlTitleBar.Controls.Add(this.lblSerialTitle);
-            this.pnlTitleBar.Controls.Add(this.lblSerial);
+            this.pnlTitleBar.Controls.Add(this.txtSerial);
             this.pnlTitleBar.Controls.Add(this.cmbRecipe);
             this.pnlTitleBar.Controls.Add(this.lblProductPrefix);
             this.pnlTitleBar.Dock = System.Windows.Forms.DockStyle.Top;
@@ -225,21 +225,22 @@ namespace CommandCenter.Views
             this.lblSerialTitle.TabIndex = 24;
             this.lblSerialTitle.Text = "序列号:";
             // 
-            // lblSerial
-            // 序列号显示框：固定宽度、不随内容伸缩（AutoSize=false），加单线边框像一个"空框"。
-            // 框内只放序列号值（"序列号:"标题由 lblSerialTitle 显示在框外左侧），
-            // 没有序列号则框内留空；宽度固定避免前后字段跳动。
+            // txtSerial
+            // 序列号显示框（V1.12.19 由 Label 改为 TextBox）：点击即可出现输入光标直接录入，
+            // 替代旧的"双击弹窗手动输入"。外观刻意对齐原 Label 风格（固定宽度、单线边框、
+            // 同字号同色、白底跳出标题栏背景），平时像只读框、点击后正常编辑；
+            // 提交/取消/失焦交互见 MainForm.SetupSerialEditor（Enter 提交、Esc 还原、失焦非空提交）。
             //
-            this.lblSerial.AutoSize = false;
-            this.lblSerial.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.lblSerial.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
-            this.lblSerial.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
-            this.lblSerial.Location = new System.Drawing.Point(341, 12);
-            this.lblSerial.Name = "lblSerial";
-            this.lblSerial.Size = new System.Drawing.Size(220, 24);
-            this.lblSerial.TabIndex = 3;
-            this.lblSerial.Text = "";
-            this.lblSerial.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            this.txtSerial.AutoSize = false;
+            this.txtSerial.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.txtSerial.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
+            this.txtSerial.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
+            this.txtSerial.Location = new System.Drawing.Point(341, 12);
+            this.txtSerial.Name = "txtSerial";
+            this.txtSerial.Size = new System.Drawing.Size(220, 24);
+            this.txtSerial.TabIndex = 3;
+            this.txtSerial.Text = "";
+            this.txtSerial.BackColor = System.Drawing.Color.White;
             // 
             // cmbRecipe
             // 
@@ -339,7 +340,7 @@ namespace CommandCenter.Views
         private Label lblProductPrefix;
         private ComboBox cmbRecipe;
         private Label lblSerialTitle;
-        private Label lblSerial;
+        private TextBox txtSerial;
         private Label lblSep1;
         private Label lblTotal;
         private Label lblOk;

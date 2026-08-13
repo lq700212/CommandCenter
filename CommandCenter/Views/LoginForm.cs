@@ -56,9 +56,12 @@ namespace CommandCenter.Views
     ///   - 账号框默认填当前管理员账号（通常 admin），无需输入；记住密码回填会覆盖它；
     ///   - 登录：回车=登录（AcceptButton），校验通过 DialogResult=OK 关闭；
     ///   - 记住密码（chkRemember）：勾选后登录成功把"用户名+密码"用 Windows DPAPI
-    ///     加密存到 %LOCALAPPDATA%\CommandCenter\remembered_login.dat，下次打开登录框
-    ///     自动回填（记录用户名必须与当前管理员账号一致才回填）；取消勾选则清掉旧记录。
-    ///     注意：记住密码只对管理员账号生效，开发者账号登录不会写/清记住文件；
+    ///     加密存到 %LOCALAPPDATA%\CommandCenter\（记录用户名必须与当前账号一致才回填）；
+    ///     取消勾选则清掉旧记录。V1.12.21 起管理员与开发者都可记住，且记录互斥：
+    ///     - 管理员记住 → 存 remembered_login.dat；登录成功会把开发者文件一并清掉；
+    ///     - 开发者记住 → 存 remembered_login_dev.dat；登录成功会把管理员文件一并清掉；
+    ///     - 目的：机器上只保留"最近一次登录的那个角色"的账号记忆，防止跨角色残留
+    ///       （如 dev 记住了、登录框还回填 dev；admin 记住了却回填 admin 造成串号）。
     ///   - 修改密码：仅管理员账号可用（开发者密码在配置里维护，界面不支持改）；
     ///   - 密码只存 SHA-256 哈希（SecurityUtil.HashPassword），配置里看不到明文。
     /// </summary>
@@ -83,14 +86,25 @@ namespace CommandCenter.Views
             txtUser.Text = _config.Security.AdminUser ?? "admin";
 
             // 读取"记住密码"记录：勾选过的用户名+密码自动回填（DPAPI 解密，见 SecurityUtil）。
-            // 只有记录里的用户名与当前配置的管理员账号一致才回填，防止换账号后残留旧密码。
+            // V1.12.21 起管理员/开发者可各自记住（分文件）。回填规则：
+            //   管理员记住记录里的用户名==配置管理员账号 → 回填；
+            //   否则看开发者记录（需 DevEnabled）用户名==配置开发者账号 → 回填；
+            //   两边都不匹配（换账号/版本升级残留）则不回填，保持默认 admin。
             string savedUser, savedPwd;
-            if (SecurityUtil.LoadRememberedLogin(out savedUser, out savedPwd)
+            if (SecurityUtil.LoadRememberedLogin(false, out savedUser, out savedPwd)
                 && string.Equals(savedUser, _config.Security.AdminUser, StringComparison.OrdinalIgnoreCase))
             {
                 txtUser.Text = savedUser;
                 txtPwd.Text = savedPwd;
                 chkRemember.Checked = true; // 回填了就把勾选框也带上，用户能一眼看出"记住了"
+            }
+            else if (_config.Security.DevEnabled
+                && SecurityUtil.LoadRememberedLogin(true, out savedUser, out savedPwd)
+                && string.Equals(savedUser, _config.Security.DevUser, StringComparison.OrdinalIgnoreCase))
+            {
+                txtUser.Text = savedUser;
+                txtPwd.Text = savedPwd;
+                chkRemember.Checked = true; // 同上：回填开发者账号时也把勾选框带上
             }
 
             txtUser.Focus();
@@ -188,12 +202,15 @@ namespace CommandCenter.Views
             {
                 Role = LoginRole.Admin;
                 LogHelper.Info("管理员登录成功：" + _config.Security.AdminUser);
-                // 记住密码：勾选则 DPAPI 加密保存（下次自动回填），未勾选则清掉旧记录。
-                // 放在校验通过后才写，避免错误密码污染记住文件。
+                // 记住密码：勾选则 DPAPI 加密保存（下次自动回填，admin 存 remembered_login.dat），
+                // 未勾选则清掉管理员旧记录。放在校验通过后才写，避免错误密码污染记住文件。
+                // V1.12.21 互斥：管理员登录成功，同时清掉开发者记住记录——避免这台机器还残留
+                //   开发者的免密入口（换角色登录后只保留最近一次登录角色的记忆）。
                 if (chkRemember.Checked)
-                    SecurityUtil.SaveRememberedLogin(user, txtPwd.Text);
+                    SecurityUtil.SaveRememberedLogin(false, user, txtPwd.Text);
                 else
-                    SecurityUtil.ClearRememberedLogin();
+                    SecurityUtil.ClearRememberedLogin(false);
+                SecurityUtil.ClearRememberedLogin(true); // 清开发者记录（管理员登录后不再记住 dev）
                 DialogResult = DialogResult.OK;
                 Close();
                 return;
@@ -203,7 +220,14 @@ namespace CommandCenter.Views
             {
                 Role = LoginRole.Developer;
                 LogHelper.Info("开发者登录成功：" + _config.Security.DevUser);
-                // 开发者账号不参与"记住密码"：不回填、不清除管理员记住的记录，各自独立
+                // V1.12.21 开发者也可记住密码：勾选则存 remembered_login_dev.dat，
+                // 未勾选则清掉开发者旧记录；同时把管理员记住文件清掉（与管理员登录互斥，
+                // 防止 dev 登录后登录框仍回填管理员的免密账号，造成权限外泄）。
+                if (chkRemember.Checked)
+                    SecurityUtil.SaveRememberedLogin(true, user, txtPwd.Text);
+                else
+                    SecurityUtil.ClearRememberedLogin(true);
+                SecurityUtil.ClearRememberedLogin(false); // 清管理员记录（开发者登录后不再记住 admin）
                 DialogResult = DialogResult.OK;
                 Close();
                 return;
@@ -261,10 +285,12 @@ namespace CommandCenter.Views
 
             // 若勾了"记住密码"，把记住文件同步成新密码（否则下次回填旧密码会登录失败）；
             // 未勾选则清掉旧记录。改密码面板没有用户名输入框，这里直接用配置里的管理员账号。
+            // V1.12.21：改密码属管理员操作，同样清掉开发者记住记录（保持互斥，见 BtnLogin_Click）。
             if (chkRemember.Checked)
-                SecurityUtil.SaveRememberedLogin(_config.Security.AdminUser, newPwd);
+                SecurityUtil.SaveRememberedLogin(false, _config.Security.AdminUser, newPwd);
             else
-                SecurityUtil.ClearRememberedLogin();
+                SecurityUtil.ClearRememberedLogin(false);
+            SecurityUtil.ClearRememberedLogin(true); // 管理员改密码后不再记住 dev
 
             try
             {

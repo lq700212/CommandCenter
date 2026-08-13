@@ -144,7 +144,8 @@ namespace CommandCenter.Views
             // 
             // chkRemember
             // "记住密码"复选框：勾选后下次打开登录框自动回填用户名+密码（DPAPI 加密存本地，
-            // 见 SecurityUtil.SaveRememberedLogin）；取消勾选登录成功时删除旧记录（ClearRememberedLogin）
+            // 见 SecurityUtil.SaveRememberedLogin(bool isDev,...)）；取消勾选登录成功时删除旧记录
+            // （ClearRememberedLogin）。V1.12.21：管理员/开发者各自记住，登录成功互斥清除对方
             // 
             this.chkRemember.AutoSize = true;
             this.chkRemember.Font = new System.Drawing.Font("Microsoft YaHei", 9.5F);
