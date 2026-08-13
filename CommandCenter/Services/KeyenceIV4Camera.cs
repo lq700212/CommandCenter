@@ -24,7 +24,7 @@ namespace CommandCenter.Services
     ///   SendCommandAndReadLine）。这是 V1.0.1 血泪教训修复的核心：收帧不以 CR 正确切行，
     ///   残留换行符会污染下一次读取导致"隔一次判定失败"。
     ///
-    /// 【IV4 指令表（见 docs/通讯接入.md，以《IV4 通信、连接指南》为准）】
+    /// 【IV4 指令表（见 docs/CommandCenter.md 第四部分，以《IV4 通信、连接指南》为准）】
     ///   T1[CR]              触发拍摄；响应 T1[CR]（回显确认）
     ///   RT[CR]              读取判定结果；响应 RT, 工具结果(标准)[CR]
     ///                       或 RT, 工具结果(详细)[CR]
@@ -236,7 +236,7 @@ namespace CommandCenter.Services
         /// 返回去掉行尾符的正文；无响应/超时返回 null。
         ///
         /// 【V1.7.2 修复的两个现场级 bug】
-        /// ① CRLF 残留：IV4 响应以 CRLF 结尾（见 docs/通讯接入.md "CR 或 CRLF 结束，程序两者兼容"）。
+        /// ① CRLF 残留：IV4 响应以 CRLF 结尾（见 docs/CommandCenter.md 第四部分 "CR 或 CRLF 结束，程序两者兼容"）。
         ///    旧实现读到 '\r' 就停，把 '\n' 留在流里，下一次动作先读到残留 '\n' 判"无响应"，
         ///    表现为"第一次触发正常、第二次判定失败"交替出现。现在行首遇 CR/LF/NUL 一律跳过
         ///    （同时容忍相机响应前发送的空行），残留行尾不会污染下一次读取。

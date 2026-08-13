@@ -102,7 +102,7 @@ namespace CommandCenter.Models
         /// <summary>
         /// 相机名称/位置（V1.12.22，界面与日志显示用）：如"上相机"/"下相机"。
         /// 现场按安装位置称呼（上相机=相机1=19.87.6.213、下相机=相机2=19.87.6.212，
-        /// 见 DefaultCameras 与 docs/现场设备IP清单.md），显示在下拉框/状态灯文案里，
+        /// 见 DefaultCameras 与 docs/CommandCenter.md §2.3/§7），显示在下拉框/状态灯文案里，
         /// 空值则界面只显示"相机N IP"。纯展示字段，不影响任何通讯逻辑。
         /// </summary>
         public string Name { get; set; } = "";
@@ -120,7 +120,7 @@ namespace CommandCenter.Models
         public int CommandPort { get; set; } = 8500;
 
         // ─── IV4 无协议通信指令表（《IV4 通信、连接指南》）───
-        // 指令均以 CR(0x0D) 终止；T 系列指令含义见 docs/通讯接入.md
+        // 指令均以 CR(0x0D) 终止；T 系列指令含义见 docs/CommandCenter.md 第四部分
 
         /// <summary>仅触发拍摄指令（T1[CR]），响应回显 T1。用于"只触发、判定另取"场景。</summary>
         public string TriggerCommand { get; set; } = "T1";
@@ -348,7 +348,7 @@ namespace CommandCenter.Models
     /// 上位机监听本机 Port 端口（标准 502），等汇川主站 TCP 连入并读写上位机的保持寄存器区。
     /// IpAddress = 上位机监听绑定 IP（"0.0.0.0"=监听所有网卡，现场主机多网卡时可绑指定 IP）。
     ///
-    /// 【V2.7 协议（docs/上位机PLC通信接口定义文档.md）】请求-结果-复位三拍式握手：
+    /// 【V2.7 协议（docs/CommandCenter.md §5.5）】请求-结果-复位三拍式握手：
     ///   PLC只写（上位机读）：40001 扫码请求(0/1)、40002 上相机拍照请求(1~255=点位)、40003 下相机拍照请求；
     ///   PLC只读（上位机写）：40004 扫码结果(0/1/2)、40005 上相机结果、40006 下相机结果、
     ///                        40007~40011 产品型号(10 字符 ASCII，每寄存器 2 字符，高字节在前)。
@@ -371,7 +371,7 @@ namespace CommandCenter.Models
         /// <summary>单次读写超时（毫秒，从站模式主要用于日志/容错，不再阻塞主动连接）</summary>
         public int TimeoutMs { get; set; } = 2000;
 
-        // ─── 寄存器地址映射（V2.7 协议，见 docs/上位机PLC通信接口定义文档.md）───
+        // ─── 寄存器地址映射（V2.7 协议，见 docs/CommandCenter.md §5.5）───
         // 设计原则：定长请求放前面，结果与变长数据（型号）放后面，地址可向后扩展。
 
         /// <summary>PLC→上位机：扫码请求（V2.7）。PLC 写 1=请求扫码、0=无请求；上位机读到 1 触发扫码枪。</summary>

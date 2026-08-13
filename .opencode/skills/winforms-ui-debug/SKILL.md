@@ -300,7 +300,7 @@ exe.config 模板：
 - 构建通过（MSBuild 输出 exe、无 error）。
 - harness 复跑，对比修复前/后同坐标像素颜色，确认目标线/色消失且不引入新问题。
 - 冒烟测试主程序：`Start-Process` 启动 exe，等几秒确认进程存活再 `Stop-Process`。
-- 更新 `CHANGELOG.md`（写清改动范围/为什么/优化点），必要时 `docs/通讯接入.md`、`README.md`。
+- 更新 `CHANGELOG.md`（写清改动范围/为什么/优化点），必要时 `docs/CommandCenter.md`、`README.md`。
 - 删除 `bin/Debug` 下生成的 harness exe；源文件在临时目录不提交。
 - UTF-8 自检：`[IO.File]::ReadAllText(path, [Text.Encoding]::UTF8).Contains("预期中文")`。
 
