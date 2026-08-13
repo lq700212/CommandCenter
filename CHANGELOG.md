@@ -39,8 +39,26 @@
   - **窗体加宽（640→760）**：`lblHint/pnlMatrix/tblMatrix/grpProgram` 内容宽 600→720，矩阵格子
     变宽后"归属相机·点位号"第二行（7 列时格子约 94px）能一行显示完；`dgvPrograms`/`lblProgNote`
     同步加宽，确定/取消贴右缘，`lblProgHint` 文案修正（去掉已移除的"默认"项说法）；
-    相机下拉 `cmbCamera` 加宽 140→190（+`DropDownWidth=230`，IP 完整显示），`lblModel/cmbModel/
+     相机下拉 `cmbCamera` 加宽 140→190（+`DropDownWidth=230`，IP 完整显示），`lblModel/cmbModel/
     lblProgHint` 依次右移避让。
+  - **相机↔型号联动过滤（V2.12.x 增强，含本次）**：相机候选=当前型号下"有点位"的相机
+    （`ProgramsFor(型号).Count>0`）、型号候选=当前相机"有点位"的型号，二者双向过滤：
+    型号切到只有一台相机有点位的型号（如 Z121 只有下相机）时，相机下拉自动默认选中那台、
+    且不出现该型号下没有点位的相机；反向：相机先选中时，型号下拉不出现该相机没有点位的型号
+    （如上相机不出现 Z121、下相机不出现 U172）。过滤空集回退全量防下拉为空；
+    位置→相机下标经 `_cameraPositions` 换算，`_syncing` 抑制双向过滤事件死循环。
+  - **初始默认 + 型号延迟生效（含本次）**：打开时 **cmbCamera 默认=第一台相机、cmbModel 默认=
+    主界面当前型号**（若该型号不在第一台相机候选里则用其第一个选项）；WindowPointForm 程序映射区
+    切型号经回调只同步设置页"产品型号"下拉（OnSave 写 `_cfg.ProductModel`）——**不实时传 MainForm
+    切运营型号**：主界面标题栏型号下拉/窗口矩阵/协调器一律等用户点设置页【保存】后由
+    `ApplyRuntimeConfig` 统一刷新（延迟生效；避免配置对话框里翻型号时主界面矩阵跟着乱跳。
+    V2.12.x 曾实现"切型号即 SwitchModel 实时生效"，现场反馈改为延迟到保存后）。
+  - **DataGridView DataError 修复（含本次）**：修复 WindowPointForm 打开报"DataGridViewComboBoxCell
+    值无效"——根因：`ReloadProgramGrid` 加载的"相机+型号"编辑副本点位/程序号值可能不在下拉列候选里
+    （打开时 `_matrixModel`（按主界面型号）与程序映射区 `_programModel`（第一台相机候选）不一致时
+    点位列候选缺该相机的点位；或旧配置里有 >127 的越界程序号）。修复：① 程序号 >127 统一按"不切换"
+    显示；② 逐行把实际点位/程序号**动态补进下拉候选**（任何值都能显示、可重选）；③ 挂
+    `dgvPrograms.DataError` 吞掉漏网的边界值（`e.ThrowException=false`），打开不再弹异常对话框。
 - **`Views/SettingsForm.cs` / `SettingsForm.Designer.cs`**：`WindowPointForm` 构造调用补传
   `_cfg.Display.WindowPointMaps`；`UpdateAutoFitUi` 与三处 ToolTip/提示文案更新——
   "自适应只影响行列形状、不影响点位编辑"，去掉"编辑点位/交换/恢复已锁定"的过时说明。

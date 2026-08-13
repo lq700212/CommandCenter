@@ -18,10 +18,17 @@ namespace CommandCenter.Views
     ///      结果存进 DisplayConfig.WindowPointMaps（按型号分表）。
     ///   ② 【点位 → 相机程序号】每台相机各自一张表（V1.12.25 新增），**V2.8 起再按产品型号分表**：
     ///      同一台相机的程序库会随产品型号变化（如"上相机"型号 U171 用 P000~P012、U172 用 P013~P028），
-    ///      所以型号下拉【只列真实产品型号】（V2.12.x 起移除"默认（不区分型号）"项）、默认选中与主界面
-    ///      标题栏型号一致的值，选某型号即编辑该相机在该型号下的映射表（ModelStationPrograms）。
+    ///      所以型号下拉【只列真实产品型号】（V2.12.x 起移除"默认（不区分型号）"项），打开时
+    ///      相机默认=第一台相机、型号默认=主界面（MainForm）当前型号（不在该相机候选则用其第一个
+    ///      选项），选某型号即编辑该相机在该型号下的映射表（ModelStationPrograms）；本窗体里切型号
+    ///      只同步设置页"产品型号"下拉（onModelChanged 回调），【不实时切主界面运营型号】——等用户
+    ///      点设置页"保存"后 MainForm.ApplyRuntimeConfig 统一刷新标题栏/矩阵/协调器（延迟生效）。
     ///      触发时按"当前产品型号→点位"切到对应程序（见
     ///      ProductionCoordinator.ResolveProgramForStation）。
+    ///      **V2.12.x 相机↔型号联动过滤**：某相机在某型号下"有点位"=ProgramsFor(型号).Count>0。
+    ///      型号选定后，相机下拉只列该型号有点位的相机（无点位相机不出现）；若该型号只有一台相机
+    ///      有点位（如 Z121 只有下相机），型号一切过去相机自动默认选中那台。反向同理：相机先选定后，
+    ///      型号下拉不出现该相机没有点位的型号。过滤空集回退全量（防手改配置空表把下拉弄空）。
     ///
     /// ┌───────────────────────────────────────────────────────────────────┐
     /// │ 窗口/点位与相机程序配置                                              │
@@ -110,7 +117,7 @@ namespace CommandCenter.Views
         private readonly List<string> _productModels;
 
         /// <summary>当前程序映射区正在编辑的型号（V2.12.x 起恒为真实型号，无"默认"项；
-        /// 默认选中与主界面标题栏型号一致，见 BuildProgramGrid）。</summary>
+        /// 打开时默认=第一台相机的第一个有效型号，见 BuildProgramGrid）。</summary>
         private string _programModel = "";
 
         private int _rows;   // 矩阵行数（与主界面一致；切型号会随点位表重算）
@@ -143,9 +150,30 @@ namespace CommandCenter.Views
         /// <summary>当前相机映射区正在编辑哪台相机（cmbCamera 下标，-1=还没选）</summary>
         private int _programCamIdx = -1;
 
+        /// <summary>全量型号候选（_productModel ∪ _productModels，联动过滤的原始集合，见 BuildProgramGrid）。</summary>
+        private List<string> _allModels = new List<string>();
+
+        /// <summary>全量相机下标列表（1:1 对应 _cameras，联动过滤/兜底用，见 BuildProgramGrid）。</summary>
+        private List<int> _allCameraIdx = new List<int>();
+
+        /// <summary>cmbCamera 当前位置 → 相机下标 的映射（V2.12.x 联动过滤后相机下拉不再等于相机列表全量，
+        /// 位置和下标不能直接混用，SelectedIndex 必须经本表换算回 _cameras 下标，见 PopulateCameraItems）。</summary>
+        private List<int> _cameraPositions = new List<int>();
+
+        /// <summary>联动重建两个下拉期间置 true，抑制 SelectedIndexChanged 重入（避免相机↔型号互相过滤死循环）。</summary>
+        private bool _syncing;
+
+        /// <summary>
+        /// 型号变更通知回调（V2.12.x，延迟生效）：用户在程序映射区型号下拉里切型号时触发（传新型号名）。
+        /// 现在上游（SettingsForm）只在回调里同步设置页"产品型号"下拉（OnSave 写 _cfg.ProductModel），
+        /// **不实时切主界面运营型号**——MainForm 的标题栏型号/窗口矩阵/协调器统一等用户点【保存】后
+        /// ApplyRuntimeConfig 刷新（避免配置对话框里翻型号时主界面矩阵跟着乱跳）。为 null 时不回调。
+        /// </summary>
+        private readonly Action<string> _onModelChanged;
+
 public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfig> cameras,
             List<bool> enabledTarget, List<string> productModels, bool autoFit, string productModel,
-            List<ModelWindowPointMap> windowPointMaps)
+            List<ModelWindowPointMap> windowPointMaps, Action<string> onModelChanged = null)
         {
             // 注意：targetMap（WindowStationMap）参数仍接收但 V2.12.1 起不再写回（点位由相机点位表
             // 决定），保留参数仅为兼容调用方签名；本窗体实际落盘的只有 WindowEnabled + 相机点位表
@@ -154,6 +182,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             _productModels = productModels ?? new List<string>();
             _autoFit = autoFit;
             _productModel = productModel ?? "";
+            _onModelChanged = onModelChanged;
             _windowPointMapsTarget = windowPointMaps ?? new List<ModelWindowPointMap>();
 
             // 矩阵当前铺排用的产品型号（V2.12.1）：初始=构建传入的当前运营型号；之后用户在下部
@@ -218,6 +247,11 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             }
 
             InitializeComponent();      // 先解析设计器里的静态控件
+            // DataError 兜底：DataGridViewComboBoxCell 单元格值不在下拉候选里时（旧配置里非法点位/
+            // 程序号、切型号窗口期 _matrixModel 与 _programModel 不一致等边界），DataGridView 默认会
+            // 弹"值无效"异常对话框。ReloadProgramGrid 已把候选补齐/规范化，这里再兜底吞掉漏网的，
+            // 保证打开对话框不弹窗；该行数据仍保留，用户编辑该行自然修正。
+            dgvPrograms.DataError += (s, e) => e.ThrowException = false;
             BuildMatrix();              // 按 _rows×_cols 动态生成窗口格子按钮
             BuildProgramGrid();         // 初始化相机程序映射区：下拉 + 表格列
             WireEvents();               // 挂按钮/格子交互
@@ -305,47 +339,51 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         }
 
         /// <summary>
-        /// 初始化相机程序映射区（V1.12.25；V2.8 加型号维度；V2.12.x 移默认项）：
-        ///   - 相机下拉列出每台相机（显示名称/IP）；
-        ///   - 型号下拉列出全局产品型号 + 当前运营型号（AppConfig.ProductModels ∪ MainForm 标题栏型号），
-        ///     默认选中与主界面标题栏下拉一致的值；
+        /// 初始化相机程序映射区（V1.12.25；V2.8 加型号维度；V2.12.x 移默认项；V2.12.x 加相机↔型号联动过滤）：
+        ///   - 相机下拉【联动候选】＝当前型号下"有点位"的相机（ProgramsFor(型号).Count>0）；
+        ///     某型号只有一台相机有点位（如 Z121 只有下相机）时，切到该型号自动默认选中那台相机，
+        ///     没有点位的相机不出现在下拉里；
+        ///   - 型号下拉【联动候选】＝当前相机"有点位"的型号（双向过滤：相机先选定时，
+        ///     该相机没有点位的型号不出现）；打开时相机默认=第一台相机、型号默认=主界面当前型号
+        ///     （不在该相机候选里则用其第一个选项）；切型号经 onModelChanged 回调只同步设置页型号
+        ///     （延迟生效，不实时切主界面运营型号）；
         ///   - DataGridView 两列：点位 / 相机程序号（V1.12.26 起下拉选择，不必手输）；
         ///   - 选中某台相机 + 某型号时把该组合的编辑副本灌进表格。
         /// 【下拉可选项·V1.12.26 澄清】点位列＝窗口映射里的点位（数量=窗口数，点位默认=窗口编号、
         ///   调整也只是互换/个别改号）；程序号列＝相机侧程序库（"不切换"+0~127，程序数量和编号
         ///   由相机实际装的程序决定、与窗口数量无关，现场动态选）。
+        /// 【联动过滤的边界】若某型号下没有任何相机有点位（理论不会，窗口总数≥1），或某相机在
+        ///   任何型号下都没有点位（未配任何点位表），候选会回退全量——保证下拉永不为空、界面可用。
         /// </summary>
         private void BuildProgramGrid()
         {
-            cmbCamera.Items.Clear();
-            for (int i = 0; i < _cameras.Count; i++)
-            {
-                var cam = _cameras[i];
-                string name = string.IsNullOrWhiteSpace(cam.Name) ? $"相机{i + 1}" : cam.Name;
-                cmbCamera.Items.Add($"{name}  {cam.IpAddress}");
-            }
-
-            // 型号下拉（V2.8；V2.12.x 起移除"默认（不区分型号）"项）：
-            //   候选 = 全局产品型号列表（AppConfig.ProductModels）+ 当前运营型号（_productModel，
-            //   即主界面标题栏 cmbModel 的选中值，来自 SettingsForm 传入。主界面候选是预置三型号，
-            //   与本窗体候选不同源，先把当前型号加进去保证能选中、能编辑到这张表，重复值去重）。
-            //   默认选中 = 当前运营型号，与主界面标题栏下拉所见一致（用户诉求）。
-            //   选某型号即编辑该相机在该型号下的映射表（ModelStationPrograms）。
-            cmbModel.Items.Clear();
-            if (!string.IsNullOrWhiteSpace(_productModel))
-                cmbModel.Items.Add(_productModel);
+            // 全量候选（联动过滤的原始集合）：
+            //   相机 = 所有相机（_allCameraIdx，1:1 对应 _cameras）；
+            //   型号 = 全局产品型号列表（AppConfig.ProductModels）+ 当前运营型号（_productModel，
+            //           即主界面标题栏 cmbModel 的选中值，来自 SettingsForm 传入。主界面候选是预置三型号，
+            //           与本窗体候选不同源，先把当前型号加进去保证能选中、能编辑到这张表，重复值去重）。
+            _allCameraIdx = new List<int>();
+            for (int i = 0; i < _cameras.Count; i++) _allCameraIdx.Add(i);
+            _allModels = new List<string>();
+            if (!string.IsNullOrWhiteSpace(_productModel)) _allModels.Add(_productModel);
             foreach (var m in _productModels)
-                if (!string.IsNullOrWhiteSpace(m) && !cmbModel.Items.Contains(m)) cmbModel.Items.Add(m);
-            // 当前型号一定在候选里（上面已先加入），找不到只会在 _productModel 为空时发生，兜底选首个。
-            int modelSel = string.IsNullOrWhiteSpace(_productModel) ? 0 : cmbModel.Items.IndexOf(_productModel);
-            if (modelSel < 0) modelSel = 0;
-            // 注意：此处仍在 WireEvents 之前设置 SelectedIndex，不会触发 SelectedIndexChanged，
-            // _programModel 需手动同步赋值（= 选中项，恒为真实型号）。
-            if (cmbModel.Items.Count > 0)
-            {
-                cmbModel.SelectedIndex = modelSel;
-                _programModel = cmbModel.SelectedItem?.ToString() ?? "";
-            }
+                if (!string.IsNullOrWhiteSpace(m) && !_allModels.Contains(m)) _allModels.Add(m);
+
+            // 联动初始值：相机默认 = 第一台相机（_cameras[0]，现场=上相机）；型号默认 = 优先主界面
+            // 当前型号（_productModel，打开时与 MainForm 标题栏 cmbModel 对齐），若该型号不在第一台
+            // 相机的有效候选里（该相机没有它的点位），回退到该相机候选的第一个选项。之后用户手动
+            // 切型号/相机才走双向过滤（SyncDropDowns），打开时不强制"跳号"，方便逐台相机配程序表。
+            int initCam = _allCameraIdx.Count > 0 ? _allCameraIdx[0] : -1;
+            var initModels = ModelCandidatesFor(initCam);
+            string initModel = !string.IsNullOrWhiteSpace(_productModel) && initModels.Contains(_productModel)
+                ? _productModel                                     // 主界面当前型号可用 → 对齐主界面
+                : (initModels.Count > 0 ? initModels[0] : "");      // 否则该相机第一个有效型号
+            var (camSel, modelSel) = SyncDropDowns(initCam, initModel);
+            _programCamIdx = camSel;
+            _programModel = modelSel;
+            // 填充两个下拉（此时 WireEvents 尚未挂，SelectedIndex 赋值不会触发联动回调，安全）
+            PopulateCameraItems(camSel);
+            PopulateModelItems(modelSel);
 
             // 点位下拉候选：以【窗口映射的点位】为准（数量=窗口数；点位默认=窗口编号，改也只是互换或个别调整）。
             // 为什么不再加"所有相机已配点位"当候选（V1.12.26 澄清）：点位数量应能被窗口数量确定，
@@ -363,8 +401,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
 
             if (_cameras.Count > 0)
             {
-                cmbCamera.SelectedIndex = 0;   // 注意：此处在 WireEvents 之前，不会触发 SelectedIndexChanged，
-                _programCamIdx = 0;            // 必须显式 ReloadProgramGrid，否则首次打开表格是空的（看不到已有映射）
+                // 相机候选已按联动填充、_programCamIdx 已同步，此处显式灌入表格（构造时事件未挂，需手动调一次）
                 ReloadProgramGrid();
             }
             if (_cameras.Count == 0)
@@ -373,6 +410,111 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 btnAddProg.Enabled = false;
                 btnDelProg.Enabled = false;
             }
+        }
+
+        /// <summary>
+        /// 相机候选列表（V2.12.x 联动过滤）：= 当前型号（model）下"有点位"的相机下标
+        /// （ProgramsFor(型号).Count>0 才算有点位，型号没配表会回退默认表，见 CameraConfig.ProgramsFor）。
+        /// 边界：该型号下没有任何相机有点位时回退全量相机（理论不会发生——窗口总数≥1，但防手改配置空表）。
+        /// </summary>
+        private List<int> CameraCandidatesFor(string model)
+        {
+            var list = new List<int>();
+            for (int i = 0; i < _cameras.Count; i++)
+            {
+                var cam = _cameras[i];
+                if (cam != null && cam.ProgramsFor(model).Count > 0) list.Add(i);
+            }
+            return list.Count > 0 ? list : new List<int>(_allCameraIdx);
+        }
+
+        /// <summary>
+        /// 型号候选列表（V2.12.x 联动过滤）：= 当前相机（camIdx）"有点位"的型号
+        /// （该相机 ProgramsFor(型号).Count>0）。边界：该相机在任何型号下都没点位时回退全量型号。
+        /// </summary>
+        private List<string> ModelCandidatesFor(int camIdx)
+        {
+            var list = new List<string>();
+            if (camIdx >= 0 && camIdx < _cameras.Count)
+            {
+                var cam = _cameras[camIdx];
+                foreach (var m in _allModels)
+                    if (cam != null && cam.ProgramsFor(m).Count > 0) list.Add(m);
+            }
+            return list.Count > 0 ? list : new List<string>(_allModels);
+        }
+
+        /// <summary>
+        /// 双向联动收敛（V2.12.x 增强）：相机候选="当前型号下有点位"的相机、型号候选="当前相机有点位"
+        /// 的型号，二者互相过滤，切换一侧另一侧必须跟随——否则会出现无效组合（比如 Z121 只有下相机
+        /// 有点位，型号切到 Z121 后相机下拉还停在上相机，映射区编辑的就是"上相机+Z121"这种不存在点位
+        /// 的组合）。收敛过程：
+        ///   ① 按 preferModel 过滤相机候选：preferCam（原选中）还在候选里就保留，否则选唯一/首台；
+        ///   ② 按确定后的相机过滤型号候选：preferModel 还在候选里就保留，否则选唯一/首个；
+        ///   ③ 若②把型号换掉了，相机候选再保一遍——但新型号一定包含这台相机（它在②的候选来源里），
+        ///      所以②/③一般不发生，两次遍历保证稳定。
+        /// 返回稳定后的 (相机下标, 型号名)。
+        /// </summary>
+        private (int, string) SyncDropDowns(int preferCam, string preferModel)
+        {
+            string model = preferModel;
+            int cam = preferCam;
+
+            var cams = CameraCandidatesFor(model);
+            if (cam < 0 || !cams.Contains(cam)) cam = cams.Count > 0 ? cams[0] : -1;
+
+            var models = ModelCandidatesFor(cam);
+            if (!models.Contains(model)) model = models.Count > 0 ? models[0] : "";
+
+            cams = CameraCandidatesFor(model);
+            if (cam < 0 || !cams.Contains(cam)) cam = cams.Count > 0 ? cams[0] : -1;
+
+            return (cam, model);
+        }
+
+        /// <summary>把联动收敛后的 (相机,型号) 落到两个下拉。_syncing 抑制事件重入（联动双向过滤期间
+        /// 的 SelectedIndex 变化不再触发 SelectedIndexChanged，由调用方统一 ReloadProgramGrid）。</summary>
+        private void ApplySelections(int camIdx, string model)
+        {
+            _syncing = true;
+            try
+            {
+                _programCamIdx = camIdx;
+                _programModel = model;
+                PopulateCameraItems(camIdx);
+                PopulateModelItems(model);
+            }
+            finally { _syncing = false; }
+        }
+
+        /// <summary>按当前型号（_programModel）候选重建相机下拉，并选中 selectedCam（相机下标）。
+        /// 同时维护 _cameraPositions 映射（位置→相机下标），供 SelectedIndexChanged 换算用。</summary>
+        private void PopulateCameraItems(int selectedCam)
+        {
+            var list = CameraCandidatesFor(_programModel);
+            _cameraPositions = list;
+            cmbCamera.Items.Clear();
+            foreach (int ci in list)
+            {
+                var cam = _cameras[ci];
+                string name = string.IsNullOrWhiteSpace(cam.Name) ? $"相机{ci + 1}" : cam.Name;
+                cmbCamera.Items.Add($"{name}  {cam.IpAddress}");
+            }
+            int idx = list.IndexOf(selectedCam);
+            if (idx < 0 && list.Count > 0) idx = 0;
+            if (idx >= 0) cmbCamera.SelectedIndex = idx;
+        }
+
+        /// <summary>按当前相机（_programCamIdx）候选重建型号下拉，并选中 selectedModel。
+        /// 型号候选是字符串（型号名本身），SelectedItem 即型号，无需额外位置映射。</summary>
+        private void PopulateModelItems(string selectedModel)
+        {
+            var list = ModelCandidatesFor(_programCamIdx);
+            cmbModel.Items.Clear();
+            foreach (var m in list) cmbModel.Items.Add(m);
+            int idx = list.IndexOf(selectedModel);
+            if (idx < 0 && list.Count > 0) idx = 0;
+            if (idx >= 0) cmbModel.SelectedIndex = idx;
         }
 
         /// <summary>重建"点位列"下拉候选（V2.12.1）：点位由【相机点位表】唯一决定，候选 = 当前矩阵型号
@@ -418,14 +560,32 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         }
 
         /// <summary>重新把当前"相机+型号"组合的编辑副本灌入表格（切换相机/型号/增删行后调用）。
-        /// 下拉列填值：点位/程序号都直接放 int；程序号 -1 用"不切换"文案（与下拉选项一致）。</summary>
+        /// 下拉列填值：点位/程序号都直接放 int；程序号 -1 或超界用"不切换"文案（与下拉选项一致）。
+        /// 【DataError 防控】DataGridViewComboBoxCell 的单元格值【必须在下拉候选里】，否则渲染时抛
+        /// "值无效"的 ArgumentException（现场实测报错）。防三件事：
+        ///   ① 程序号 >127（非法，配置越界）统一按"不切换"显示，不放进下拉（候选只到 127）；
+        ///   ② 点位列值可能来自"该相机某型号编辑副本"，而候选按矩阵型号（_matrixModel）生成——
+        ///      打开时 _matrixModel 与程序映射区型号 _programModel 可能不一致（主界面当前型号不在
+        ///      第一台相机候选时），点位超出候选。这里逐行把实际点位/程序号**动态补进下拉候选**，
+        ///      保证任何值都能显示（下拉多一项无副作用，重选仍可编辑）；
+        ///   ③ 仍有漏网的（用户手改配置/边界值）由 dgvPrograms.DataError 兜底吞掉（见构造）。</summary>
         private void ReloadProgramGrid()
         {
             if (_programCamIdx < 0 || _programCamIdx >= _programEdits.Count) return;
             dgvPrograms.Rows.Clear();
             foreach (var item in _slot())
             {
-                object prog = item.ProgramNo < 0 ? "不切换" : (object)item.ProgramNo;
+                // 程序号：<0（不切换）或 >127（越界）→ "不切换"；其余 0~127 合法才放 int。
+                object prog = (item.ProgramNo < 0 || item.ProgramNo > 127) ? "不切换" : (object)item.ProgramNo;
+
+                // 点位列候选补齐：复制表里有点位、但当前矩阵型号候选没有 → 动态加入，
+                // 否则 DataGridViewComboBoxCell 值无效直接弹异常（见方法注释②）。
+                if (item.StationNo >= 1 && !colStation.Items.Contains(item.StationNo))
+                    colStation.Items.Add(item.StationNo);
+                // 程序号列候选补齐：正常情况下 0~127 已在初始候选里，防列被清空/边界情况再保一手。
+                if (prog is int p && !colProgram.Items.Contains(p))
+                    colProgram.Items.Add(p);
+
                 dgvPrograms.Rows.Add(item.StationNo, prog);
             }
         }
@@ -477,23 +637,41 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
 
             cmbCamera.SelectedIndexChanged += (s, e) =>
             {
-                // 切换相机：先把"旧相机+当前型号"的表格内容留存在副本里，再切到新相机的映射
+                // 联动重建下拉期间（_syncing）触发的 SelectedIndex 变化一律忽略，由 ApplySelections
+                // 统一刷新表格，避免"双向过滤"互相触发死循环。
+                if (_syncing) return;
+                // 切换相机：先把"旧相机+当前型号"的表格内容留存在副本里，再切到新相机的映射。
+                // 注意：联动过滤后下拉位置 ≠ 相机下标，必须经 _cameraPositions 换算回 _cameras 下标。
                 FlushProgramGrid();
-                _programCamIdx = cmbCamera.SelectedIndex;
+                _programCamIdx = (cmbCamera.SelectedIndex >= 0 && cmbCamera.SelectedIndex < _cameraPositions.Count)
+                    ? _cameraPositions[cmbCamera.SelectedIndex] : -1;
+                // 相机变了 → 型号候选要跟随过滤（该相机没有点位的型号不出现在下拉里）：
+                // 以新相机为优先保留值做双向收敛，落回两个下拉后再灌表。
+                var (cam, model) = SyncDropDowns(_programCamIdx, _programModel);
+                ApplySelections(cam, model);
                 ReloadProgramGrid();
             };
             cmbModel.SelectedIndexChanged += (s, e) =>
             {
+                if (_syncing) return;
                 // 切换型号：先把"当前相机+旧型号"的表格内容留存在副本里，再切到新型号映射。
-                // V2.12.x 起候选全为真实型号（无"默认"项），_programModel 恒 = 选中型号。
+                // V2.12.x 起候选全为真实型号（无"默认"项），SelectedItem 即型号名，无需位置映射。
                 FlushProgramGrid();
-                _programModel = cmbModel.SelectedItem?.ToString() ?? "";
+                string preferModel = cmbModel.SelectedItem?.ToString() ?? "";
+                // 型号变了 → 相机候选要跟随过滤（该型号下没有点位的相机不出现，若该型号只有一台
+                // 相机有点位（如 Z121 只有下相机），SyncDropDowns 会把相机默认切到那台——用户诉求）。
+                var (cam, model) = SyncDropDowns(_programCamIdx, preferModel);
+                ApplySelections(cam, model);
                 ReloadProgramGrid();
                 // V2.12.1：型号决定窗口矩阵（总数/行列/相机标注点位都按型号点位表），程序映射区
                 // 切型号时矩阵必须跟随重建——否则矩阵还停留在旧型号布局（用户实测 bug）。
-                string matrixModel = string.IsNullOrEmpty(_programModel) ? _productModel : _programModel;
+                string matrixModel = string.IsNullOrEmpty(model) ? _productModel : model;
                 if (matrixModel != _matrixModel)
                     ApplyMatrixForModel(matrixModel);
+                // V2.12.x：型号最终落定后通知上层（SettingsForm/MainForm）同步主界面标题栏 cmbModel
+                // ——配置对话框里选什么型号，主界面就切过去运营，两个 cmbModel 始终对齐。
+                if (!string.IsNullOrWhiteSpace(model))
+                    _onModelChanged?.Invoke(model);
             };
             btnAddProg.Click += (s, e) =>
             {

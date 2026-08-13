@@ -1231,6 +1231,9 @@ namespace CommandCenter.Views
             // V2.10.1：把主窗体标题栏型号下拉的"当前选中值"传给设置窗体，保证两个 cmbModel 同步。
             // 不传 _config.ProductModel 的原因：标题栏下拉在配置型号为空时会默认选第一个候选，
             // 但 _config.ProductModel 仍是空，设置页直接读配置会显示空白（见 SettingsForm 的 _titleBarModel）。
+            // V2.12.x：配置对话框（SettingsForm→WindowPointForm）里切型号【不实时影响主界面】——
+            // 只同步设置页"产品型号"下拉（OnSave 时写 _cfg.ProductModel），用户点【保存】后本方法
+            // 下面的 ApplyRuntimeConfig 才刷新标题栏型号下拉 + 窗口矩阵 + 协调器（见 ApplyRuntimeConfig）。
             using (var dlg = new SettingsForm(_config, cmbModel.SelectedItem?.ToString()))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;

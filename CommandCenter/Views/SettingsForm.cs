@@ -466,6 +466,15 @@ namespace CommandCenter.Views
             // 窗口总数=相机点位和、点位编辑锁定则两种模式一致），详见 WindowPointForm。
             btnEditPoints.Click += (s, e) =>
             {
+                // 型号变更（V2.12.x 延迟生效）：WindowPointForm 程序映射区切了型号，只同步设置页
+                // "产品型号"下拉（OnSave 时写 _cfg.ProductModel）——**不实时传给 MainForm 切运营**。
+                // 主界面标题栏型号/窗口矩阵/协调器一律等用户点【保存】后由 MainForm.ApplyRuntimeConfig
+                // 统一刷新（避免配置对话框里翻型号时主界面矩阵跟着乱跳）。
+                Action<string> modelLink = m =>
+                {
+                    if (string.IsNullOrWhiteSpace(m)) return;
+                    if (cmbModel.Text != m) cmbModel.Text = m;   // 设置页顶部产品型号下拉同步
+                };
                 using (var dlg = new WindowPointForm(_cfg.Display.WindowStationMap,
                                                      (int)nudRows.Value, (int)nudCols.Value,
                                                      CollectCamerasFromGrid(),
@@ -475,7 +484,8 @@ namespace CommandCenter.Views
                                                          .ToList(),
                                                      chkAutoFit.Checked,
                                                      cmbModel.Text?.Trim() ?? "",
-                                                     _cfg.Display.WindowPointMaps))
+                                                     _cfg.Display.WindowPointMaps,
+                                                     modelLink))
                 {
                     dlg.ShowDialog(this);
                 }
