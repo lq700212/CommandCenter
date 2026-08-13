@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using CommandCenter.Models;
@@ -70,6 +72,12 @@ namespace CommandCenter.Views
         private readonly List<CameraConfig> _cameraConfigs;  // 相机配置列表（取每台 FTP 取图目录用，与 _cameras 下标对应）
         private readonly string _serialSnapshot;             // 打开测试窗体时的当前产品序列号快照（存图 {SN} 目录用）
         private volatile bool _busy;                         // 防止连点/并发触发（跨线程读）
+
+        // T2 触发后等待相机 FTP 推图的最长等待时间（V1.12.27）：
+        // 相机拍完照到把 jpeg/iv4p 推到 FTP 取图目录有网络/存储延迟，触发成功返回时图未必已到。
+        // 主流程靠 FileSystemWatcher 事件等图到达（OnFtpFileArrived），测试窗体没有事件机制，
+        // 改为"触发后轮询扫描取图目录"，最多等这么久还见不到新图才报失败，防止"触发成功却没图"。
+        private const int FtpWaitAfterTriggerMs = 5000;
 
         public DevTestForm(PlcService plc, List<KeyenceIV4Camera> cameras,
             List<IScanner> scanners, List<ScanConfig> scannerConfigs,
@@ -328,6 +336,9 @@ namespace CommandCenter.Views
         /// 上位机再去该相机的 FTP 取图目录拿【修改时间最新】的 jpeg（+iv4p 如有），
         /// 在界面右侧 picTestShot 闪图，并按主窗体相同的归档规则保存到
         /// ImageConfig.SaveRootDir 下（点位固定用 1——测试场景未指定点位）。
+        /// 【V1.12.27 时序修复】T2 触发成功后不能立即扫目录：相机推图到 FTP 有延迟，
+        /// 立即扫可能取到旧图或空目录。现在触发后轮询等待最多 5 秒，认"修改时间不早
+        /// 于触发时刻"的新图，超时才报失败。
         /// 复用主窗体传入的 _imageStore 实例与相机连接，不新建任何连接、不改配置。
         /// 所有网络/文件 IO 在后台线程执行，完成后 SafeInvoke 回 UI 更新。
         /// </summary>
@@ -347,11 +358,36 @@ namespace CommandCenter.Views
                 string fetchError = null;
                 if (r.Succeeded)
                 {
-                    var pair = ResolveLatestFtpPair(camIndex);
+                    // V1.12.27 时序修复：T2 触发成功只代表"相机已拍照并回判定"，图推到 FTP
+                    // 取图目录还有延迟（网络/存储），立即扫目录可能扫不到本次新图。
+                    // 主流程靠 FileSystemWatcher 事件等图到达，测试窗体没有事件机制，
+                    // 改为"记录触发时刻 → 轮询扫目录"：直到出现"修改时间不早于触发时刻"
+                    // 的 jpeg（视为本次新图）或等待超时；超时后仍有旧图残留则取最新对兜底。
+                    DateTime triggerUtc = DateTime.UtcNow;
+                    var stopwatch = Stopwatch.StartNew();
+                    var pair = new ImageStore.LatestPairResult();
+                    while (stopwatch.ElapsedMilliseconds < FtpWaitAfterTriggerMs)
+                    {
+                        var candidate = ResolveLatestFtpPair(camIndex);
+                        // 找到本次触发后的新图 → 直接收下（jpeg 的时间戳晚于触发时刻）
+                        if (!string.IsNullOrEmpty(candidate.JpegPath)
+                            && IsNewerThanTrigger(candidate.JpegPath, triggerUtc))
+                        {
+                            pair = candidate;
+                            break;
+                        }
+                        // 还没等到新图：等 200ms 再扫（等相机 FTP 上传完成；后台线程不阻塞 UI）
+                        Thread.Sleep(200);
+                    }
+                    // 兜底：等待超时仍未见"新图"，但目录里可能有旧图残留——取最新一对，
+                    // 由下方按实际结果提示（有图会照常归档，无图则报"没推到图"）。
+                    if (string.IsNullOrEmpty(pair.JpegPath))
+                        pair = ResolveLatestFtpPair(camIndex);
+
                     jpeg = pair.JpegPath;
                     iv4p = pair.IvpPath;
                     if (string.IsNullOrEmpty(jpeg))
-                        fetchError = "FTP 取图目录里没有 jpeg 图片（检查相机是否已推图）";
+                        fetchError = "FTP 取图目录里没有 jpeg 图片（相机已触发但未推图，请检查相机 FTP 配置/网络）";
                     else if (_imageStore != null)
                     {
                         archived = _imageStore.SaveImageFilePair(jpeg, iv4p, 1, r.IsOk, _serialSnapshot);
@@ -380,12 +416,15 @@ namespace CommandCenter.Views
                         if (archived != null)
                         {
                             // 闪图 + 显示存档路径（主窗体保存目录下，点位 1）
-                            ShowTestImage(archived);
-                            lblTestImagePath.Text = "最近存图：" + archived;
-                            lblTestImagePath.ForeColor = Color.FromArgb(46, 158, 107);
+                            bool shown = ShowTestImage(archived);
+                            lblTestImagePath.Text = shown
+                                ? "最近存图：" + archived
+                                : "存图成功但预览加载失败：" + archived;
+                            lblTestImagePath.ForeColor = shown ? Color.FromArgb(46, 158, 107) : Color.Red;
                             AppendLog($"→ 已取图并存档（点位1）：{archived}"
                                 + (string.IsNullOrEmpty(iv4p) ? "（无 iv4p）" : "")
-                                + "，已删除 FTP 源图");
+                                + "，已删除 FTP 源图"
+                                + (shown ? "" : "（预览图加载失败，文件可能被占用）"));
                         }
                         else
                         {
@@ -420,14 +459,33 @@ namespace CommandCenter.Views
             return _imageStore.FindLatestPair(dir);
         }
 
-        /// <summary>在右侧预览框显示一张图片（闪图）。替换前释放旧图防 GDI 句柄泄漏。</summary>
-        private void ShowTestImage(string path)
+        /// <summary>在右侧预览框显示一张图片（闪图）。返回是否显示成功；
+        /// 图片加载失败（文件被占用/损坏）时返回 false，调用方据此提示，不再静默留白。</summary>
+        private bool ShowTestImage(string path)
         {
             var img = ProductionCoordinator.LoadImageSafe(path);
             var old = picTestShot.Image;
             picTestShot.Image = null;
             old?.Dispose();
             picTestShot.Image = img;
+            return img != null;
+        }
+
+        /// <summary>
+        /// 判断文件是否是"本次 T2 触发之后新推的图"（V1.12.27）：
+        /// 修改时间（UTC）不早于触发时刻即视为新图。文件读取失败视为"不是新图"（保守，
+        /// 防把正在写入/被占用打不开的半成品图当成新图）。容差 1 秒防相机/上位机时钟微差。
+        /// </summary>
+        private static bool IsNewerThanTrigger(string path, DateTime triggerUtc)
+        {
+            try
+            {
+                return File.GetLastWriteTimeUtc(path) >= triggerUtc.AddSeconds(-1);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         // ────────────── 相机程序切换（V1.12.19，基恩士侧仍在调试，供前期验证）──────────────
