@@ -231,11 +231,11 @@ namespace CommandCenter.Views
             this.lblDir.Text = "图片保存根目录:";
             //
             // txtSaveDir
-            // 图片保存根目录（绝对路径），右侧预留到滚动面板边缘（宽 570）
+            // 图片保存根目录（绝对路径），右侧预留到滚动面板边缘（宽 790，窗体加宽后右缘 920）
             //
             this.txtSaveDir.Location = new System.Drawing.Point(130, 102);
             this.txtSaveDir.Name = "txtSaveDir";
-            this.txtSaveDir.Size = new System.Drawing.Size(570, 25);
+            this.txtSaveDir.Size = new System.Drawing.Size(790, 25);
             this.txtSaveDir.TabIndex = 9;
             this.txtSaveDir.Text = "E:\\Images";
             //
@@ -261,11 +261,11 @@ namespace CommandCenter.Views
             //
             // txtFileNameTpl
             // 图片文件名模板。原右侧的占位符常驻标签已删，说明并入悬停 ToolTip；
-            // 输入框一路加宽到面板右缘，与"图片保存根目录"对齐。
+            // 输入框一路加宽到面板右缘（宽 790），与"图片保存根目录"对齐。
             //
             this.txtFileNameTpl.Location = new System.Drawing.Point(130, 181);
             this.txtFileNameTpl.Name = "txtFileNameTpl";
-            this.txtFileNameTpl.Size = new System.Drawing.Size(570, 25);
+            this.txtFileNameTpl.Size = new System.Drawing.Size(790, 25);
             this.txtFileNameTpl.TabIndex = 13;
             this.txtFileNameTpl.Text = "{点位}";
             //
@@ -383,6 +383,9 @@ namespace CommandCenter.Views
             this.gridCameras.AllowUserToDeleteRows = true;
             this.gridCameras.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
             this.gridCameras.BackgroundColor = System.Drawing.Color.White;
+            // 表头与单元格内容居中（V2.12.6 相机表含 PLC 索引列，现场习惯居中看）
+            this.gridCameras.ColumnHeadersDefaultCellStyle.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
+            this.gridCameras.DefaultCellStyle.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
             this.gridCameras.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.gridCameras.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.gridCameras.EditMode = System.Windows.Forms.DataGridViewEditMode.EditOnEnter;
@@ -390,7 +393,7 @@ namespace CommandCenter.Views
             this.gridCameras.Name = "gridCameras";
             this.gridCameras.RowHeadersVisible = false;
             this.gridCameras.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
-            this.gridCameras.Size = new System.Drawing.Size(680, 150);
+            this.gridCameras.Size = new System.Drawing.Size(900, 150);
             this.gridCameras.TabIndex = 21;
             //
             // btnAddCam
@@ -433,6 +436,9 @@ namespace CommandCenter.Views
             this.gridScannersTcp.AllowUserToDeleteRows = true;
             this.gridScannersTcp.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
             this.gridScannersTcp.BackgroundColor = System.Drawing.Color.White;
+            // 表头与单元格内容居中（与相机列表一致）
+            this.gridScannersTcp.ColumnHeadersDefaultCellStyle.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
+            this.gridScannersTcp.DefaultCellStyle.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
             this.gridScannersTcp.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.gridScannersTcp.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.gridScannersTcp.EditMode = System.Windows.Forms.DataGridViewEditMode.EditOnEnter;
@@ -440,7 +446,7 @@ namespace CommandCenter.Views
             this.gridScannersTcp.Name = "gridScannersTcp";
             this.gridScannersTcp.RowHeadersVisible = false;
             this.gridScannersTcp.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
-            this.gridScannersTcp.Size = new System.Drawing.Size(680, 120);
+            this.gridScannersTcp.Size = new System.Drawing.Size(900, 120);
             this.gridScannersTcp.TabIndex = 27;
             //
             // btnAddScannerTcp
@@ -483,6 +489,9 @@ namespace CommandCenter.Views
             this.gridScannersSerial.AllowUserToDeleteRows = true;
             this.gridScannersSerial.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
             this.gridScannersSerial.BackgroundColor = System.Drawing.Color.White;
+            // 表头与单元格内容居中（与相机列表一致）
+            this.gridScannersSerial.ColumnHeadersDefaultCellStyle.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
+            this.gridScannersSerial.DefaultCellStyle.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
             this.gridScannersSerial.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.gridScannersSerial.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.gridScannersSerial.EditMode = System.Windows.Forms.DataGridViewEditMode.EditOnEnter;
@@ -490,7 +499,7 @@ namespace CommandCenter.Views
             this.gridScannersSerial.Name = "gridScannersSerial";
             this.gridScannersSerial.RowHeadersVisible = false;
             this.gridScannersSerial.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
-            this.gridScannersSerial.Size = new System.Drawing.Size(680, 120);
+            this.gridScannersSerial.Size = new System.Drawing.Size(900, 120);
             this.gridScannersSerial.TabIndex = 31;
             //
             // btnAddScannerSerial
@@ -564,7 +573,7 @@ namespace CommandCenter.Views
             // 固定在底部 pnlBottom，不随内容滚动，始终可见可点。
             //
             this.btnSave.DialogResult = System.Windows.Forms.DialogResult.OK;
-            this.btnSave.Location = new System.Drawing.Point(530, 9);
+            this.btnSave.Location = new System.Drawing.Point(750, 9);
             this.btnSave.Name = "btnSave";
             this.btnSave.Size = new System.Drawing.Size(90, 32);
             this.btnSave.TabIndex = 40;
@@ -573,10 +582,10 @@ namespace CommandCenter.Views
             //
             // btnCancel
             // 取消：直接关闭，不写盘；回车/ESC 快捷键见 AcceptButton/CancelButton。
-            // 与"保存"右侧对齐，两者间留 10px 间隙。
+            // 与"保存"右侧对齐，两者间留 10px 间隙；窗体加宽后仍贴右缘（960-90-20=850）。
             //
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(630, 9);
+            this.btnCancel.Location = new System.Drawing.Point(850, 9);
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(90, 32);
             this.btnCancel.TabIndex = 41;
@@ -594,7 +603,7 @@ namespace CommandCenter.Views
             this.pnlBottom.Dock = System.Windows.Forms.DockStyle.Bottom;
             this.pnlBottom.Location = new System.Drawing.Point(0, 650);
             this.pnlBottom.Name = "pnlBottom";
-            this.pnlBottom.Size = new System.Drawing.Size(740, 50);
+            this.pnlBottom.Size = new System.Drawing.Size(960, 50);
             this.pnlBottom.TabIndex = 42;
             //
             // SettingsForm
@@ -603,7 +612,7 @@ namespace CommandCenter.Views
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.AcceptButton = this.btnSave;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(740, 700);
+            this.ClientSize = new System.Drawing.Size(960, 700);
             // 先加 pnlScroll(Dock=Fill) 再加 pnlBottom(Dock=Bottom)：
             // WinForms 按倒序 z-index 处理 Dock，后加入的 pnlBottom 先占底部，pnlScroll 再填满剩余。
             this.Controls.Add(this.pnlScroll);

@@ -32,6 +32,10 @@
   默认地址注释、类头 ASCII 图同步多相机语义；通用读写 `txtReadAddr` 默认值 2 改为 2（第1台请求）。
 - **`Views/SettingsForm.cs`**：相机表新增"PLC请求索引/PLC结果索引"两列（0=自动/第3台起必填），
   `LoadCameraRows` 填值、`CollectCamerasFromGrid` 读回并校验 0~65535。
+- **`Views/SettingsForm.Designer.cs`**：窗体加宽 **740 → 960**（ClientSize/pnlBottom），三张列表
+  （相机/TCP扫码枪/串口扫码枪）宽 680→900、存图根目录/文件名模板输入框 570→790、底部保存/取消
+  按钮移至右缘（750/850），相机表长列名（FTP目录、PLC请求/结果索引）两行放得下，底部按钮随
+  窗体加宽保持贴右。
 - **文档**：`docs/CommandCenter.md`（§5.1/§5.2/§5.3/§5.4/§5.5 全部相机通道描述、§1 功能测试
   说明、§7 相机配置示例、第八部分 V2.12.6 条目；**修正 §5.5 相机结果取值范围补 3=跳过**）、
   `AGENTS.md`（PLC 握手协议地址约定段更新）、`CHANGELOG.md`。

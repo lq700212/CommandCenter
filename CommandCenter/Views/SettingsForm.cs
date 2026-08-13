@@ -187,11 +187,21 @@ namespace CommandCenter.Views
                 // 主界面显示规则以它为准（有名称显示名称、无名称显示"相机N"=序号）
                 gridCameras.Columns.Add("SeqNo", "序号");
                 gridCameras.Columns["SeqNo"].ReadOnly = true;
-                gridCameras.Columns["SeqNo"].Width = 52;
+                // Fill 模式下 Width 会被覆盖，必须用【FillWeight + MinimumWidth】控制列宽：
+                // 序号列给最小权重 1 + 下限 40px（不设 FillWeight 会用默认 100，把列宽全抢走，
+                // 这就是之前"序号列超宽"的根因）。✓ 先设 MinimumWidth 再设 FillWeight。
+                gridCameras.Columns["SeqNo"].MinimumWidth = 40;
+                gridCameras.Columns["SeqNo"].FillWeight = 1;
+                // Fill 模式按 FillWeight 比例分剩余宽度（窗体已加宽到 960）：
+                // FTP 目录路径最长、PLC 两列次之，给大权重；IP/端口/取图方式/相机名适中，序号最小。
                 gridCameras.Columns.Add("Name", "相机名称(上/下)");
+                gridCameras.Columns["Name"].FillWeight = 3;
                 gridCameras.Columns.Add("IpAddress", "相机IP");
+                gridCameras.Columns["IpAddress"].FillWeight = 3;
                 gridCameras.Columns.Add("CommandPort", "触发端口");
+                gridCameras.Columns["CommandPort"].FillWeight = 2;
                 gridCameras.Columns.Add("FtpUploadDir", "FTP取图目录（留空用全局目录）");
+                gridCameras.Columns["FtpUploadDir"].FillWeight = 7;
                 // 取图方式：现场只保留 Ftp（V1.12.18 起相机 FTP 推图是唯一取图方式）
                 var srcCol = new DataGridViewComboBoxColumn
                 {
@@ -201,11 +211,14 @@ namespace CommandCenter.Views
                 };
                 srcCol.Items.Add("Ftp");
                 gridCameras.Columns.Add(srcCol);
+                gridCameras.Columns["ImageSource"].FillWeight = 2;
                 // V2.12.6 每台相机一路 PLC 通道：请求/结果 DataStore 索引（PLC 协议号=索引+40000）。
                 // 0=按相机序号自动（第1台=2/5 协议40002/40005、第2台=3/6 协议40003/40006）；
                 // 第 3 台起 0 表示"该相机通道未配置、不参与轮询"，新增相机必须填上现场分配的地址。
                 gridCameras.Columns.Add("PlcRequestAddress", "PLC请求索引(0=自动/第3台起必填)");
+                gridCameras.Columns["PlcRequestAddress"].FillWeight = 4;
                 gridCameras.Columns.Add("PlcResultAddress", "PLC结果索引(0=自动/第3台起必填)");
+                gridCameras.Columns["PlcResultAddress"].FillWeight = 4;
             }
         }
 
