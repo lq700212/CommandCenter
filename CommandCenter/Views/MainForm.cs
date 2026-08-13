@@ -17,7 +17,8 @@ namespace CommandCenter.Views
     /// 【界面布局】
     /// ┌───────────────────────────────────────────────────────────────────┐
     /// │ 产品型号:[1]产品A▾ | 序列号:[框] | 总数:0 | [OK] | [NG] | [系统设置] │
-    /// │                                        ●PLC ●扫码枪 ●相机1 ●相机2   │
+    /// │                                        ●PLC ●扫码枪 ●上相机 ●下相机 │
+    /// │（相机灯/下拉显示配置名称：有名称显名称，无名称回退"相机N"即序号）       │
     /// ├───────────────────────────────────────────────────────────────────┤
     /// │  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐                  │
     /// │  │ W1   │ │ W2   │ │ W3   │ │ W4   │ │ W5   │                   │
@@ -325,7 +326,7 @@ namespace CommandCenter.Views
                         Dock = DockStyle.Right,
                         Width = 96,
                         TextAlign = ContentAlignment.MiddleRight,
-                        Text = $"● 相机{i + 1}",
+                        Text = $"● {CamDisplayName(i)}",
                         ForeColor = Color.FromArgb(150, 150, 150),
                         Font = new Font("Microsoft YaHei", 10F, FontStyle.Bold)
                     };
@@ -394,16 +395,25 @@ namespace CommandCenter.Views
         }
 
         /// <summary>
+        /// 第 i 台相机的显示名（V1.12.23）：有配置名称（上相机/下相机/…）用名称，
+        /// 无名称回退"相机N"（N=i+1，即设置界面的序号）。所有主界面展示相机的文案
+        /// （相机灯/悬停/下拉）都应走这里，保证"序号=ID"唯一对应，有名称就显名称。
+        /// </summary>
+        private string CamDisplayName(int i)
+        {
+            if (i < 0 || i >= _cameras.Count) return "相机";
+            string name = _cameras[i].DisplayName;
+            return string.IsNullOrWhiteSpace(name) ? $"相机{i + 1}" : name;
+        }
+
+        /// <summary>
         /// 生成下拉列表第 i 台相机的显示文案："上相机  19.87.6.213"（V1.12.22 起带名称）。
         /// 名称来自 CameraConfig.Name（配置缺省为空则退回 "相机N  IP"），状态用圆点表
         /// </summary>
         private string CamOverviewLabel(int i)
         {
             if (i < 0 || i >= _cameras.Count) return "";
-            string name = _cameras[i].DisplayName;
-            string ip = _cameras[i].IpAddressOnly;
-            if (string.IsNullOrWhiteSpace(name)) return $"相机{i + 1}  {ip}";
-            return $"{name}  {ip}";
+            return $"{CamDisplayName(i)}  {_cameras[i].IpAddressOnly}";
         }
 
         /// <summary>
@@ -454,7 +464,7 @@ namespace CommandCenter.Views
             _lblCamAggregate.Text = "● 相机";
 
             // 悬停明细：列出每台"名字+状态"，方便现场快速定位是哪台断了（只显示 IP，不带端口）
-            var lines = _cameras.Select((c, i) => $"相机{i + 1} {c.IpAddressOnly}：" + (c.IsConnected ? "已连接" : "断连"));
+            var lines = _cameras.Select((c, i) => $"{CamDisplayName(i)} {c.IpAddressOnly}：" + (c.IsConnected ? "已连接" : "断连"));
             if (_camTip != null) _camTip.SetToolTip(_lblCamAggregate, string.Join("\n", lines));
 
             if (_cmbCamOverview != null) _cmbCamOverview.Invalidate(); // 重绘各下拉项的状态圆点

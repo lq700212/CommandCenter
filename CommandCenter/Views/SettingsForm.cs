@@ -18,12 +18,12 @@ namespace CommandCenter.Views
     /// │ 文件名模板:   [{点位}]   （占位符提示见界面）              │
     /// │ 窗口点位: [窗口/点位配置...] 点格改存图点位/可交换窗口位置   │
     /// │ OK/NG显示: [√标题栏高亮]                                   │
-    /// │ 相机列表: ┌────────┬────┬──────────┬────────────────────────┐ │
-    /// │            │ 相机IP │端口│ 取图方式  │ FTP上传目录            │ │
-    /// │            ├────────┼────┼──────────┼────────────────────────┤ │
-    /// │            │ 192…   │8500│ Ftp/Tcp  │ D:\…\ftp\cam1          │ │
-    /// │            └────────┴────┴──────────┴────────────────────────┘ │
-    /// │            [添加一台] [删除选中]                               │
+    /// │ 相机列表: ┌────┬────────┬────┬──────────┬────────────────────────┐ │
+    /// │            │序号│ 相机IP │端口│ 取图方式  │ FTP上传目录            │ │
+    /// │            ├────┼────────┼────┼──────────┼────────────────────────┤ │
+    /// │            │ 1  │ 192…   │8500│ Ftp      │ D:\…\ftp\cam1          │ │
+    /// │            └────┴────────┴────┴──────────┴────────────────────────┘ │
+    /// │            [添加一台] [删除选中]                                     │
     /// │ 扫码枪列表(TCP): ┌────┬────────┬──────┬──────────┐               │
     /// │                   │启用│ IP     │ 端口 │ 触发指令 │               │
     /// │                   └────┴────────┴──────┴──────────┘               │
@@ -38,6 +38,8 @@ namespace CommandCenter.Views
     /// 本文件只负责"数据 ↔ 控件"：构造时把 AppConfig 填进界面（LoadFromConfig），
     /// 点保存回写（OnSave，仅改内存对象，返回 DialogResult.OK，上层写盘并热生效 V1.6.0 免重启）。
     /// 相机行数即相机台数：多台直接加行，各配各的 IP / 触发端口 / FTP 上传目录。
+    /// 序号列=相机ID（V1.12.23）：只读展示 1 起的行序，主界面显示规则"
+    /// 有名称显名称（上相机/下相机）、无名称显相机N"中的 N 就是这一列。
     /// 扫码枪行数即扫码枪台数（V1.8.1 起）：启用勾选=是否接入。
     /// V1.12.8 起 TCP 与串口拆为两张表（gridScannersTcp / gridScannersSerial），方式由所在表决定，
     /// 不再有"方式"下拉列——解决同一张表行间切 Tcp/Serial 导致整列显隐混乱的 bug。
@@ -107,6 +109,11 @@ namespace CommandCenter.Views
             // 仅在还没有"相机IP"列时初始化，保证重复调用不会越建越多
             if (gridCameras.Columns["IpAddress"] == null)
             {
+                // V1.12.23：序号列=相机ID（=列表位置 1 起的编号），只读不参与编辑，
+                // 主界面显示规则以它为准（有名称显示名称、无名称显示"相机N"=序号）
+                gridCameras.Columns.Add("SeqNo", "序号");
+                gridCameras.Columns["SeqNo"].ReadOnly = true;
+                gridCameras.Columns["SeqNo"].Width = 52;
                 gridCameras.Columns.Add("Name", "相机名称(上/下)");
                 gridCameras.Columns.Add("IpAddress", "相机IP");
                 gridCameras.Columns.Add("CommandPort", "触发端口");
@@ -126,20 +133,39 @@ namespace CommandCenter.Views
         }
 
         /// <summary>把现有相机配置逐行填进表格，方便现场看着改。
+        /// 序号列=ID（V1.12.23）：显示列表位置 1 起的编号（相机1=1、相机2=2…），
+        /// 主界面按"有名称显名称、无名称显相机N"对应。
         /// 空表格时按现场默认两台相机（V1.12.22，相机1=上=19.87.6.213→D:\IV存图\1、
         /// 相机2=下=19.87.6.212→D:\IV存图\2）填两行模板行。</summary>
         private void LoadCameraRows()
         {
+            int seq = 0; // 相机ID：从 1 开始编号，等于列表位置（数组 index+1）
             foreach (var c in _cfg.Cameras ?? new List<CameraConfig>())
             {
+                seq++;
                 // ImageSource 为空（旧配置）时按 Ftp 兜底显示
                 string src = string.IsNullOrWhiteSpace(c.ImageSource) ? "Ftp" : c.ImageSource;
-                gridCameras.Rows.Add(c.Name, c.IpAddress, c.CommandPort, c.FtpUploadDir, src, c.ProgramNo);
+                gridCameras.Rows.Add(seq, c.Name, c.IpAddress, c.CommandPort, c.FtpUploadDir, src, c.ProgramNo);
             }
             // 至少留一行可见，别让表格空着无从下手
             if (gridCameras.Rows.Count == 0)
                 foreach (var c in CameraConfig.DefaultCameras())
-                    gridCameras.Rows.Add(c.Name, c.IpAddress, c.CommandPort, c.FtpUploadDir, "Ftp", c.ProgramNo);
+                    gridCameras.Rows.Add(++seq, c.Name, c.IpAddress, c.CommandPort, c.FtpUploadDir, "Ftp", c.ProgramNo);
+        }
+
+        /// <summary>
+        /// 重排相机表"序号"列（V1.12.23）：序号=相机ID=表格行序 1 起的编号。
+        /// 新增/删除相机后调用，保证与主界面"相机N"及配置列表位置始终一致；
+        /// 保存时读配置列表顺序，序号列只作展示 ID 不落盘。
+        /// </summary>
+        private void RenumberCameraSeq()
+        {
+            int seq = 0;
+            foreach (DataGridViewRow r in gridCameras.Rows)
+            {
+                if (r.Cells["SeqNo"].Value == null) continue; // 末尾"新行"占位行跳过
+                r.Cells["SeqNo"].Value = ++seq;
+            }
         }
 
         /// <summary>给两个扫码枪表格建好列结构（V1.12.8 起拆分为 TCP 表 + 串口表）。
@@ -225,12 +251,18 @@ namespace CommandCenter.Views
             btnAddCam.Click += (s, e) =>
             {
                 var def = CameraConfig.DefaultCameras()[0];
-                gridCameras.Rows.Add(def.Name, def.IpAddress, 8500, def.FtpUploadDir, "Ftp", def.ProgramNo);
+                gridCameras.Rows.Add(0, def.Name, def.IpAddress, 8500, def.FtpUploadDir, "Ftp", def.ProgramNo);
+                RenumberCameraSeq(); // 追加后重排序号（ID=行序），删除/排序后同样调用
             };
-            // 删除选中：把当前选中的行整行移除；没有选中行则什么都不做
+// 删除选中：把当前选中的行整行移除；没有选中行则什么都不做
             // 【V1.8.4 修复】末尾"新行"（AllowUserToAddRows 附带的 * 占位行）不在 SelectedRows 里，
             //   用户点击该空白行再点删除，原来会误报"未选中行"——现改为：删除=放弃该占位行。
-            btnDelCam.Click += (s, e) => DeleteSelectedRows(gridCameras, "相机");
+            // V1.12.23：删除后重排序号列（序号=ID=行序）
+            btnDelCam.Click += (s, e) =>
+            {
+                DeleteSelectedRows(gridCameras, "相机");
+                RenumberCameraSeq(); // 删中间某台后，后续相机序号自动前移，保持连续
+            };
 
             // 添加一台 TCP 扫码枪：追加一行默认配置（V1.12.8 起 TCP 独立成表；
             // 默认现场实测 IP/触发指令，V1.12.0；V1.12.9 起默认勾选"启用"——
