@@ -394,12 +394,16 @@ namespace CommandCenter.Views
         }
 
         /// <summary>
-        /// 生成下拉列表第 i 台相机的显示文案："相机N  IP"（V1.10.0：只显示 IP，不显示端口）。
-        /// 状态用圆点表达（不混进文字），由 CmbCamOverview_DrawItem 自绘。
+        /// 生成下拉列表第 i 台相机的显示文案："上相机  19.87.6.213"（V1.12.22 起带名称）。
+        /// 名称来自 CameraConfig.Name（配置缺省为空则退回 "相机N  IP"），状态用圆点表
         /// </summary>
         private string CamOverviewLabel(int i)
         {
-            return $"相机{i + 1}  {_cameras[i].IpAddressOnly}";
+            if (i < 0 || i >= _cameras.Count) return "";
+            string name = _cameras[i].DisplayName;
+            string ip = _cameras[i].IpAddressOnly;
+            if (string.IsNullOrWhiteSpace(name)) return $"相机{i + 1}  {ip}";
+            return $"{name}  {ip}";
         }
 
         /// <summary>

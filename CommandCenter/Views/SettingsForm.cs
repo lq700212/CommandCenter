@@ -107,6 +107,7 @@ namespace CommandCenter.Views
             // 仅在还没有"相机IP"列时初始化，保证重复调用不会越建越多
             if (gridCameras.Columns["IpAddress"] == null)
             {
+                gridCameras.Columns.Add("Name", "相机名称(上/下)");
                 gridCameras.Columns.Add("IpAddress", "相机IP");
                 gridCameras.Columns.Add("CommandPort", "触发端口");
                 gridCameras.Columns.Add("FtpUploadDir", "FTP取图目录（留空用全局目录）");
@@ -125,20 +126,20 @@ namespace CommandCenter.Views
         }
 
         /// <summary>把现有相机配置逐行填进表格，方便现场看着改。
-        /// 空表格时按现场默认两台相机（V1.9.8，IP 写死 19.87.6.212 / 19.87.6.213）
-        /// 填两行模板行，保证打开设置就看到两台相机、直接改参数即可。</summary>
+        /// 空表格时按现场默认两台相机（V1.12.22，相机1=上=19.87.6.213→D:\IV存图\1、
+        /// 相机2=下=19.87.6.212→D:\IV存图\2）填两行模板行。</summary>
         private void LoadCameraRows()
         {
             foreach (var c in _cfg.Cameras ?? new List<CameraConfig>())
             {
                 // ImageSource 为空（旧配置）时按 Ftp 兜底显示
                 string src = string.IsNullOrWhiteSpace(c.ImageSource) ? "Ftp" : c.ImageSource;
-                gridCameras.Rows.Add(c.IpAddress, c.CommandPort, c.FtpUploadDir, src, c.ProgramNo);
+                gridCameras.Rows.Add(c.Name, c.IpAddress, c.CommandPort, c.FtpUploadDir, src, c.ProgramNo);
             }
             // 至少留一行可见，别让表格空着无从下手
             if (gridCameras.Rows.Count == 0)
                 foreach (var c in CameraConfig.DefaultCameras())
-                    gridCameras.Rows.Add(c.IpAddress, c.CommandPort, c.FtpUploadDir, "Ftp", c.ProgramNo);
+                    gridCameras.Rows.Add(c.Name, c.IpAddress, c.CommandPort, c.FtpUploadDir, "Ftp", c.ProgramNo);
         }
 
         /// <summary>给两个扫码枪表格建好列结构（V1.12.8 起拆分为 TCP 表 + 串口表）。
@@ -219,9 +220,13 @@ namespace CommandCenter.Views
         /// </summary>
         private void WireButtonEvents()
         {
-            // 添加一台相机：直接往表格追加一行默认值（默认 IP 用现场相机1，V1.9.8），现场改 IP/端口/取图方式即可
-            btnAddCam.Click += (s, e) => gridCameras.Rows.Add(
-                CameraConfig.DefaultCameras()[0].IpAddress, 8500, "", "Ftp");
+            // 添加一台相机：直接往表格追加一行默认值（默认取现场相机1：上相机 19.87.6.213 +
+            // FTP 目录 D:\IV存图\1，V1.12.22），现场改 IP/端口/取图方式即可
+            btnAddCam.Click += (s, e) =>
+            {
+                var def = CameraConfig.DefaultCameras()[0];
+                gridCameras.Rows.Add(def.Name, def.IpAddress, 8500, def.FtpUploadDir, "Ftp", def.ProgramNo);
+            };
             // 删除选中：把当前选中的行整行移除；没有选中行则什么都不做
             // 【V1.8.4 修复】末尾"新行"（AllowUserToAddRows 附带的 * 占位行）不在 SelectedRows 里，
             //   用户点击该空白行再点删除，原来会误报"未选中行"——现改为：删除=放弃该占位行。
@@ -351,6 +356,7 @@ namespace CommandCenter.Views
                 if (!int.TryParse(programTxt, out programNo)) programNo = -1;
                 cams.Add(new CameraConfig
                 {
+                    Name = r.Cells["Name"].Value == null ? "" : r.Cells["Name"].Value.ToString().Trim(),
                     IpAddress = ip,
                     CommandPort = Math.Max(1, port),
                     FtpUploadDir = r.Cells["FtpUploadDir"].Value == null ? "" : r.Cells["FtpUploadDir"].Value.ToString().Trim(),

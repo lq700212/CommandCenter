@@ -19,8 +19,9 @@ namespace CommandCenter.Models
         /// 一次"到位"信号会对列表中每台都触发一次、各取各的图（见 ProductionCoordinator）。
         /// 注意：存图点位与相机无关，由 DisplayConfig.WindowStationMap（窗口→点位映射）统一管理。
         ///
-        /// 【默认值（V1.9.8 现场定稿）】现场固定两台相机，IP 已确定——相机1=19.87.6.212、
-        /// 相机2=19.87.6.213，无配置/空配置时用 CameraConfig.DefaultCameras() 兜底这两台，
+        /// 【默认值（V1.12.22 现场定稿）】现场固定两台相机，相机1=上相机=19.87.6.213、
+        /// 相机2=下相机=19.87.6.212，FTP 取图目录为 D:\IV存图\1 / D:\IV存图\2（见
+        /// CameraConfig.DefaultCameras），无配置/空配置时用它兜底这两台。
         /// 设置窗体默认行 / 主窗体空配置兜底与这里保持一致（改现场 IP 只改这一处工厂方法即可）。
         ///
         /// 【为什么初始化器用空列表而不是 DefaultCameras()（V1.9.9 修复 4 台 bug）】
@@ -67,8 +68,16 @@ namespace CommandCenter.Models
     /// </summary>
     public class CameraConfig
     {
-        /// <summary>相机 IP（V1.9.8 现场定稿：默认=现场相机1 19.87.6.212，相机2 见 DefaultCameras）</summary>
-        public string IpAddress { get; set; } = "19.87.6.212";
+        /// <summary>
+        /// 相机名称/位置（V1.12.22，界面与日志显示用）：如"上相机"/"下相机"。
+        /// 现场按安装位置称呼（上相机=相机1=19.87.6.213、下相机=相机2=19.87.6.212，
+        /// 见 DefaultCameras 与 docs/现场设备IP清单.md），显示在下拉框/状态灯文案里，
+        /// 空值则界面只显示"相机N IP"。纯展示字段，不影响任何通讯逻辑。
+        /// </summary>
+        public string Name { get; set; } = "";
+
+        /// <summary>相机 IP（V1.12.22 现场定稿：相机1=上相机=19.87.6.213，相机2 见 DefaultCameras）</summary>
+        public string IpAddress { get; set; } = "19.87.6.213";
 
         /// <summary>
         /// 该相机的 FTP 上传目录（相机作为 FTP 客户端把照片推到这台，独立监听）。
@@ -167,8 +176,10 @@ namespace CommandCenter.Models
         public bool EnableFtpMonitor { get; set; } = true;
 
         /// <summary>
-        /// 现场默认的两台相机（V1.9.8 定稿：IP 已写死，无需现场改 IP）。
-        /// 相机1=19.87.6.212、相机2=19.87.6.213，其余参数取模型默认。
+        /// 现场默认的两台相机（V1.12.22 定稿：相机1=上相机、相机2=下相机）。
+        /// 相机1=上相机=19.87.6.213 → FTP 取图目录 D:\IV存图\1；
+        /// 相机2=下相机=19.87.6.212 → FTP 取图目录 D:\IV存图\2。
+        /// 其余参数取模型默认。
         /// 【为什么收敛成一个方法】三处需要"默认两台相机"（未配置时 AppConfig.Cameras 的
         ///   初值、主窗体 BuildServices 的空配置兜底、设置窗体空表格默认行/添加行），
         ///   若各自硬编码 IP，改现场 IP 要改好几个地方、极易漏。统一走本方法，
@@ -177,8 +188,8 @@ namespace CommandCenter.Models
         /// </summary>
         public static List<CameraConfig> DefaultCameras() => new List<CameraConfig>
         {
-            new CameraConfig { IpAddress = "19.87.6.212" },
-            new CameraConfig { IpAddress = "19.87.6.213" }
+            new CameraConfig { Name = "上相机", IpAddress = "19.87.6.213", FtpUploadDir = @"D:\IV存图\1" },
+            new CameraConfig { Name = "下相机", IpAddress = "19.87.6.212", FtpUploadDir = @"D:\IV存图\2" }
         };
     }
 

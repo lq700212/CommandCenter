@@ -75,9 +75,15 @@ namespace CommandCenter.Views
             _scannerConfigs = scannerConfigs ?? new List<ScanConfig>();
             InitializeComponent();
 
-            // 填充相机下拉框：每台一行"相机N IP:端口"（与主窗体标题栏命名一致）
+            // 填充相机下拉框：每台一行"相机N IP:端口"（V1.12.22 起带名称：上相机/下相机）
             for (int i = 0; i < _cameras.Count; i++)
-                cmbCamera.Items.Add($"相机{i + 1}  {_cameras[i].IpLabel}");
+            {
+                string name = _cameras[i].DisplayName;
+                string label = string.IsNullOrWhiteSpace(name)
+                    ? $"相机{i + 1}  {_cameras[i].IpLabel}"
+                    : $"{name}  {_cameras[i].IpLabel}";
+                cmbCamera.Items.Add(label);
+            }
             if (cmbCamera.Items.Count > 0) cmbCamera.SelectedIndex = 0;
 
             // 填充扫码枪下拉框：TCP 显示 IP:端口，串口显示 COM口号+波特率

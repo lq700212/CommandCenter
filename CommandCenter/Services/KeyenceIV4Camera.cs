@@ -76,6 +76,9 @@ namespace CommandCenter.Services
 
         public KeyenceIV4Camera(CameraConfig cfg) => _cfg = cfg;
 
+        /// <summary>相机名称（上相机/下相机，V1.12.22）：界面/日志显示用，取配置 Name；空则为空串。</summary>
+        public string DisplayName => _cfg?.Name ?? "";
+
         /// <summary>日志/界面区分用标签：IP:端口（多相机时能分清断开的是哪台）</summary>
         public string IpLabel => $"{_cfg.IpAddress}:{_cfg.CommandPort}";
 
