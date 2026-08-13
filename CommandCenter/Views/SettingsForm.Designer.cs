@@ -18,7 +18,7 @@ namespace CommandCenter.Views
     ///   │    （上下各留 12px 空隙，避免与文件名模板行挤在一起）     │
     ///   │ 文件名模板:     [txtFileNameTpl]                          │
     ///   │ 窗口点位: [btnEditPoints 窗口/点位配置…]                  │
-    ///   │ OK/NG显示: [√标题栏高亮]                                  │
+    ///   │ OK/NG显示: [√标题栏高亮] [√窗口徽标]                        │
     ///   │ 相机列表:                                                │
     ///   │   ┌──────────────────────────────────────────────────┐   │
     ///   │   │ gridCameras（DataGridView）                      │   │
@@ -89,6 +89,7 @@ namespace CommandCenter.Views
             this.btnEditPoints = new System.Windows.Forms.Button();
             this.lblOkNg = new System.Windows.Forms.Label();
             this.chkTitleOkNg = new System.Windows.Forms.CheckBox();
+            this.chkWindowOkNg = new System.Windows.Forms.CheckBox();
             this.lblCams = new System.Windows.Forms.Label();
             this.gridCameras = new System.Windows.Forms.DataGridView();
             this.btnAddCam = new System.Windows.Forms.Button();
@@ -308,6 +309,19 @@ namespace CommandCenter.Views
             this.chkTitleOkNg.Text = "标题栏高亮";
             this.chkTitleOkNg.UseVisualStyleBackColor = true;
             //
+            // chkWindowOkNg
+            // 主界面窗口右下角 OK/NG 徽标显示开关（V2.10.3）：每格相机画面上叠加自绘
+            // 矩形框 OK/NG（随 okColorName/ngColorName 配色）。默认关（V1.9.5 曾整体移除，
+            // 保持现状画面干净），勾选后保存即时生效。
+            //
+            this.chkWindowOkNg.AutoSize = true;
+            this.chkWindowOkNg.Location = new System.Drawing.Point(255, 251);
+            this.chkWindowOkNg.Name = "chkWindowOkNg";
+            this.chkWindowOkNg.Size = new System.Drawing.Size(102, 23);
+            this.chkWindowOkNg.TabIndex = 16;
+            this.chkWindowOkNg.Text = "窗口徽标";
+            this.chkWindowOkNg.UseVisualStyleBackColor = true;
+            //
             // lblCams
             // 相机列表标题，加粗醒目
             //
@@ -477,6 +491,7 @@ namespace CommandCenter.Views
             this.pnlScroll.Controls.Add(this.btnAddCam);
             this.pnlScroll.Controls.Add(this.gridCameras);
             this.pnlScroll.Controls.Add(this.lblCams);
+            this.pnlScroll.Controls.Add(this.chkWindowOkNg);
             this.pnlScroll.Controls.Add(this.chkTitleOkNg);
             this.pnlScroll.Controls.Add(this.lblOkNg);
             this.pnlScroll.Controls.Add(this.btnEditPoints);
@@ -585,6 +600,8 @@ namespace CommandCenter.Views
                 "在列表末尾添加一台相机（默认值可直接改 IP / 端口 / FTP 上传目录）。");
             this.tip.SetToolTip(this.chkTitleOkNg,
                 "标题栏的 OK / NG 计数用\"实心彩色色块 + 白字\"高亮（绿底=OK、红底=NG），\r\n比普通彩色文字醒目得多。取消则回退彩色文字样式。保存后即时生效。");
+            this.tip.SetToolTip(this.chkWindowOkNg,
+                "主界面每个显示窗口右下角叠加一个【矩形框 OK/NG 徽标】（样子同标题栏色块，\r\n颜色随 \"OK颜色/NG颜色\" 配置）。默认关闭（保持画面干净），需要实时看每格结果时可勾选。\r\n保存后即时生效。");
             this.tip.SetToolTip(this.btnDelCam,
                 "删除选中的相机行；未选中时先点选要删的行。");
             this.tip.SetToolTip(this.lblScannersTcp,
@@ -637,6 +654,7 @@ namespace CommandCenter.Views
         private Button btnEditPoints;
         private Label lblOkNg;
         private CheckBox chkTitleOkNg;
+        private CheckBox chkWindowOkNg;
         private Label lblCams;
         private DataGridView gridCameras;
         private Button btnAddCam;

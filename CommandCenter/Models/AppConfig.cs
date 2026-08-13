@@ -488,6 +488,15 @@ namespace CommandCenter.Models
         /// </summary>
         public bool TitleOkNgHighlight { get; set; } = true;
 
+        /// <summary>
+        /// 主界面各显示窗口【右下角 OK/NG 徽标】是否显示（V2.10.3）。
+        /// 徽标为自绘矩形框 + 框内文字（OK 绿、NG 红，颜色随 OkColorName/NgColorName），
+        /// 叠加在每格相机画面上方。V1.9.5 曾因"现场嫌占画面"整块移除，
+        /// 现把显隐改为可配置：默认 false（与移除后现状一致，保持画面干净），
+        /// 现场需要醒目 OK/NG 时在系统设置里勾选"窗口徽标"即可。
+        /// </summary>
+        public bool WindowOkNgVisible { get; set; } = false;
+
         /// <summary>按配置反解出 OK/NG 实际画刷色，配置非法时回退默认</summary>
         public Color OkColor => ColorFromName(OkColorName, Color.Green);
         public Color NgColor => ColorFromName(NgColorName, Color.Red);

@@ -20,6 +20,8 @@ namespace CommandCenter.Controls
     ///     WindowPointForm 查询/比对（见 DisplayConfig.WindowStationMap）。
     ///   - V1.9.5：去掉右下角 OK/NG 徽标（现场嫌占画面），判定状态仍由
     ///     主流程记录（IsOk/SetOkNgStatus 保留接口，只是不再叠加显示在画面上）。
+    ///   - V2.10.3：OK/NG 徽标改为【可配置显隐】——由 MainForm 按 DisplayConfig.WindowOkNgVisible
+    ///     控制（默认 false 不显示，勾选后右下角叠加自绘矩形框 OK/NG，颜色随配置 OK/NG 色）。
     /// </summary>
     public class CameraDisplayControl : UserControl
     {
@@ -31,6 +33,9 @@ namespace CommandCenter.Controls
 
         /// <summary>当前结果：true=OK，false=NG</summary>
         private bool _isOk = true;
+
+        /// <summary>右下角 OK/NG 徽标（V2.10.3，默认隐藏，由配置控制显隐）</summary>
+        private readonly OkNgBadge _badge;
 
         /// <summary>窗口编号（1 起）</summary>
         private int _windowIndex;
@@ -67,8 +72,23 @@ namespace CommandCenter.Controls
             };
             Controls.Add(_windowIndexLabel);
 
-            // 控件尺寸变化时，保证编号标签始终浮在最上层（不被图片盖住）
-            Resize += (s, e) => _windowIndexLabel.BringToFront();
+            // ③ 右下角 OK/NG 徽标（V2.10.3）：叠加在画面上方、默认隐藏，由主窗体按配置控制
+            //    显隐与颜色。Anchor=Bottom|Right → 控件缩放时始终贴在右下角且间距固定。
+            _badge = new OkNgBadge
+            {
+                Size = new Size(52, 24),
+                Location = new Point(Size.Width - 52 - 6, Size.Height - 24 - 6),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                Visible = false
+            };
+            Controls.Add(_badge);
+
+            // 控件尺寸变化时，保证编号标签与 OK/NG 徽标始终浮在最上层（不被图片盖住）
+            Resize += (s, e) =>
+            {
+                _windowIndexLabel.BringToFront();
+                _badge.BringToFront();
+            };
 
             // 双击放大/还原（V1.12.15）：
             // ★ 直接订阅"子控件"的 MouseDoubleClick，而非依赖父控件的冒泡（血泪教训）——
@@ -116,16 +136,30 @@ namespace CommandCenter.Controls
         }
 
         /// <summary>
-        /// 设置检测结果（V1.9.5：仅记录状态，画面上已不叠加 OK/NG 徽标）。
+        /// 设置检测结果：记录状态，并同步到 OK/NG 徽标（V2.10.3——徽标显示时跟随结果变色）。
         /// </summary>
         /// <param name="isOk">true=OK，false=NG</param>
         public void SetOkNgStatus(bool isOk)
         {
             _isOk = isOk;
+            _badge.IsOk = isOk;
         }
 
         /// <summary>当前结果：true=OK，false=NG</summary>
         public bool IsOk => _isOk;
+
+        /// <summary>设置右下角 OK/NG 徽标是否显示（V2.10.3，由主窗体按配置调用）。</summary>
+        public void SetOkNgVisible(bool visible)
+        {
+            _badge.Visible = visible;
+        }
+
+        /// <summary>设置徽标 OK/NG 颜色（V2.10.3，跟随 display.okColorName/ngColorName）。</summary>
+        public void SetOkNgColors(Color ok, Color ng)
+        {
+            _badge.OkColor = ok;
+            _badge.NgColor = ng;
+        }
 
         /// <summary>当前窗口编号</summary>
         public int WindowIndex => _windowIndex;

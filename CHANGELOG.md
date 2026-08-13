@@ -1,5 +1,34 @@
 # 版本改动记录
 
+## V2.10.3（2026-08-13）主界面窗口右下角 OK/NG 徽标改为可配置显隐
+
+> OK/NG 徽标控件（OkNgBadge）自 V1.9.5 因"现场嫌占画面"从窗口画面上移除了（控件未删、
+> 状态仍记录），本次把它"复活"为**可配置开关**：默认仍不显示，现场想要实时看每格 OK/NG
+> 就在系统设置里勾选"窗口徽标"。
+
+### 改动范围
+- **`Models/AppConfig.cs`**：`DisplayConfig` 新增 **`WindowOkNgVisible`**（JSON
+  `windowOkNgVisible`，默认 false），控制主界面各显示窗口右下角 OK/NG 徽标显隐。
+- **`Controls/OkNgBadge.cs`**：新增 `OkColor`/`NgColor` 可配置色属性（默认仍 绿/红），
+  `OnPaint` 改用配置色；与现场"OK=绿、NG=红、矩形框+文字同色"习惯一致且支持配色。
+- **`Controls/CameraDisplayControl.cs`**：重新挂上 OK/NG 徽标（右下角、Anchor=Bottom|Right、
+  默认隐藏、Resize 时保持浮在图片之上）；`SetOkNgStatus` 同步徽标颜色；
+  新增 `SetOkNgVisible(bool)` / `SetOkNgColors(Color,Color)`。
+- **`Views/MainForm.cs`**：`BuildWindowGrid` 创建每个窗口时按配置设置徽标显隐与颜色
+  （构造与热更都走此方法，保存即生效）。
+- **`Views/SettingsForm*.cs`**：OK/NG 显示行新增 **`chkWindowOkNg`（"窗口徽标"）**，
+  与"标题栏高亮"同一行、右侧、垂直居中对齐；`LoadFromConfig`/`OnSave` 读写新配置；
+  ASCII 布局图与 ToolTip 同步。
+- **文档**：`README.md`（可配置项）、`docs/CommandCenter.md`（第一部分"显示"段）补充
+  `WindowOkNgVisible` 字段名/默认值/用途；`CHANGELOG.md` 记录。
+
+### 为什么这么改
+- 徽标功能本身是好的（现场要随时看到每格结果），只是"一直显示"让画面冗余才被去掉；
+  做成开关后两头兼顾：默认画面干净，需要时一键开启。
+
+### 优化点
+- 沿用既有 OkNgBadge 自绘实现，不新增控件；颜色跟随 `okColorName/ngColorName` 配置，不写死。
+
 ## V2.10.2（2026-08-13）WindowPointForm 细修：禁用跟点位 / 下拉候选刷新 / 空表提示 / 标签居中
 
 > 对"窗口/点位与相机程序配置"对话框做一轮细修，全部是累积发现的小问题：

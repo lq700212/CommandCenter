@@ -742,6 +742,10 @@ namespace CommandCenter.Views
                     Dock = DockStyle.Fill
                 };
                 win.SetWindowIndex(w); // 显示"原窗口编号"（点位归属仍按 WindowStationMap[w-1]）
+                // V2.10.3：按配置控制右下角 OK/NG 徽标显隐与颜色（默认关；BuildWindowGrid 在
+                // 构造与热更都会调用，改配置保存后即时生效）
+                win.SetOkNgVisible(_config.Display.WindowOkNgVisible);
+                win.SetOkNgColors(_config.Display.OkColor, _config.Display.NgColor);
                 // 双击放大/还原（V1.12.15）：每格订阅双击事件，由 OnWindowDoubleClicked 统一处理。
                 win.WindowDoubleClicked += OnWindowDoubleClicked;
                 _windowControls[w] = win;

@@ -159,7 +159,7 @@ namespace CommandCenter.Views
             this.btnTriggerRead.ForeColor = System.Drawing.Color.White;
             this.btnTriggerRead.Location = new System.Drawing.Point(186, 84);
             this.btnTriggerRead.Name = "btnTriggerRead";
-            this.btnTriggerRead.Size = new System.Drawing.Size(176, 36);
+            this.btnTriggerRead.Size = new System.Drawing.Size(260, 36);
             this.btnTriggerRead.TabIndex = 3;
             this.btnTriggerRead.Text = "触发+判定T2（取图存图）";
             this.btnTriggerRead.UseVisualStyleBackColor = false;

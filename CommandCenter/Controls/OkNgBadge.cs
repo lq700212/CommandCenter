@@ -18,11 +18,29 @@ namespace CommandCenter.Controls
     {
         private bool _isOk = true;
 
+        // V2.10.3：颜色可配置（跟随 display.okColorName/ngColorName），默认仍为现场习惯 OK=绿/NG=红。
+        private Color _okColor = Color.Green;
+        private Color _ngColor = Color.Red;
+
         /// <summary>true=OK(绿色)，false=NG(红色)</summary>
         public bool IsOk
         {
             get => _isOk;
             set { _isOk = value; Invalidate(); } // 颜色变化后立即重绘
+        }
+
+        /// <summary>OK 徽标颜色（默认绿，现场习惯 OK=绿）</summary>
+        public Color OkColor
+        {
+            get => _okColor;
+            set { _okColor = value; Invalidate(); }
+        }
+
+        /// <summary>NG 徽标颜色（默认红，现场习惯 NG=红）</summary>
+        public Color NgColor
+        {
+            get => _ngColor;
+            set { _ngColor = value; Invalidate(); }
         }
 
         public OkNgBadge()
@@ -39,7 +57,7 @@ namespace CommandCenter.Controls
         {
             base.OnPaint(e);
 
-            Color accent = IsOk ? Color.Green : Color.Red; // OK=绿，NG=红
+            Color accent = IsOk ? _okColor : _ngColor; // OK=绿，NG=红
 
             Graphics g = e.Graphics;
             Rectangle rect = ClientRectangle;
