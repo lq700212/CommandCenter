@@ -85,7 +85,15 @@ namespace CommandCenter.Services
 
         // ── 扫码通道 ──
         private readonly List<IScanner> _scanners = new List<IScanner>();
-        private volatile bool _serialReceived;  // 本次扫码是否已收到 SN（扫码枪事件/手动输入置位）
+        private volatile bool _serialReceived;  // 是否已收到 SN（扫码枪事件/手动输入置位）。
+        //   V2.14.9 语义调整："已收到但尚未消费本轮"的码。扫码枪持续读码时码可能先于
+        //   PLC 扫码请求到达，务必保留到本轮消费（BeginScanChannel 不再无条件清零）；
+        //   消费后（StepScanChannel 写扫码 OK）即清，防残留污染下一轮。
+        //   V2.14.9 加"码时间窗"：收到码时记录到达时刻 _serialArrivedUtc，BeginScanChannel 判断
+        //   该码是否在"请求到达前 ScanCodeKeepMs 内"扫到——是→本件提前扫到，保留直接消费；
+        //   否→上一件残留（重复扫/产品未离开/旧手动输入），丢弃重新等新码，杜绝串号/误 OK。
+        private DateTime _serialArrivedUtc;     // 最近一次收到码/手动输入的时刻（码时间窗判断用；
+                                                //   扫码枪工作线程写、轮询线程读，毫秒级偏差可接受）
         private bool _scanHooked;               // 是否已订阅扫码枪事件（防重复订阅）
         private DateTime _scanArriveUtc;        // 扫码请求受理时刻（判断 SN 等待超时）
 
@@ -100,6 +108,13 @@ namespace CommandCenter.Services
         /// <summary>扫码等待 SN 的超时（毫秒）：扫码请求到位后产品迟迟没被扫到（没贴码/扫码枪没读到），
         /// 超时写结果 2（扫码 NG）上报 PLC，避免流程卡死。</summary>
         private const int ScanWaitMs = 30000;
+
+        /// <summary>扫码码时间窗（毫秒，V2.14.9）：PLC 扫码请求到达前，该窗口内扫到的码视为
+        /// "本件提前扫到"予以保留（产品在枪前扫过、请求后到位）；窗口之外更早到达的码一律视为
+        /// 上一件残留（同件重复扫/产品未走开/操作员提前输的旧 SN）直接丢弃，防止串号、防止误 OK。
+        /// 取值权衡：过小会把"枪离到位远、间隔大"的本件码也当残留丢掉（复现 NG）；过大又防不住
+        /// 残留。现场若"过枪→PLC 请求"间隔明显大于 2s，请调大此值并同步注释。</summary>
+        private const int ScanCodeKeepMs = 2000;
 
         /// <summary>到位轮询周期（毫秒）：连上 PLC 时用</summary>
         private const int PollMs = 200;
@@ -122,11 +137,14 @@ namespace CommandCenter.Services
         /// <summary>
         /// 手动输入/更新当前产品序列号（V1.12.17，UI 线程调用）。
         /// 与扫码枪收码等效：置 _serialReceived=true，处于"扫码等 SN"通道时下一拍即完成扫码。
+        /// 【V2.14.9】同步记录到达时刻 _serialArrivedUtc，纳入码时间窗判定（否则手动输入的码
+        /// 会被当成"旧残留"在 BeginScanChannel 丢弃）。
         /// </summary>
         public void SetManualSerial(string code)
         {
             LatestSerialNumber = code ?? "";
             _serialReceived = true;
+            _serialArrivedUtc = DateTime.UtcNow;
             LogHelper.Info("手动输入序列号：" + LatestSerialNumber);
         }
 
@@ -218,10 +236,13 @@ namespace CommandCenter.Services
                 sc.SerialNumberScanned -= OnScannerCode;
         }
 
-        /// <summary>扫码枪读码事件（工作线程）：置"本次 SN 已到"标志，扫码通道据此推进。</summary>
+        /// <summary>扫码枪读码事件（工作线程）：置"本次 SN 已到"标志，扫码通道据此推进。
+        /// 【V2.14.9】同步记录码到达时刻 _serialArrivedUtc——BeginScanChannel 靠它判断该码
+        /// 是否在"请求前 ScanCodeKeepMs 窗口内"（本件提前扫到）还是"更早的残留"（丢弃防串号）。</summary>
         private void OnScannerCode(object sender, string code)
         {
             _serialReceived = true;
+            _serialArrivedUtc = DateTime.UtcNow;
         }
 
         /// <summary>暂停流程（界面手动暂停时调用，停在空闲）。</summary>
@@ -300,13 +321,30 @@ namespace CommandCenter.Services
 
         // ════════════════ 通道① 扫码 ════════════════
 
-        /// <summary>受理扫码请求：清 SN 标志、触发扫码枪，进入"等 SN"步骤。</summary>
+        /// <summary>受理扫码请求：触发扫码枪，进入"等 SN"步骤。
+        /// 【V2.14.9 时序修复 + 码时间窗】
+        ///   ① 不再无条件清 _serialReceived——现场节奏可能是"枪先扫到码、PLC 后发请求"
+        ///      （枪持续读码，产品在枪前晃一下就出了码，随后 PLC 请求才到位）。若在这里无条件
+        ///      清零，会把这颗"已经到手的码"丢掉，之后 30s 等不到新码 → 误报扫码 NG(2)。
+        ///   ② 但也不能照单全收：上一件消费后可能残留旧码（同件重复扫/产品未走开/操作员提前
+        ///      输的旧 SN），直接保留会造成串号或误 OK。故引入**码时间窗**——只保留"请求到达前
+        ///      ScanCodeKeepMs(2s) 内"扫到的码（视为本件提前扫到，下一步轮询立即消费出 OK）；
+        ///      窗口之外更早的码一律丢弃，重新等本件新码。
+        ///   ③ 真正的清零改到"码已消费后"（StepScanChannel OK 分支写结果 1 时），消费即清。</summary>
         private void BeginScanChannel()
         {
             _activeCh = ChScan;
             _chStep = 0;                    // 步骤0：等 SN
-            _serialReceived = false;
-            _scanArriveUtc = DateTime.UtcNow;
+            _scanArriveUtc = DateTime.UtcNow;   // 超时基准：本轮扫码请求到达时刻（30s 判 NG 用）
+
+            // 码时间窗过滤（V2.14.9）：已有码，但太旧（超过请求前 ScanCodeKeepMs）→ 当残留丢弃。
+            if (_serialReceived &&
+                (DateTime.UtcNow - _serialArrivedUtc).TotalMilliseconds > ScanCodeKeepMs)
+            {
+                LogHelper.Warn($"丢弃超过码时间窗({ScanCodeKeepMs}ms)的残留码（上一件残留/重复扫/旧手动输入），重新等待本件扫码");
+                _serialReceived = false;
+            }
+
             if (_scanners.Count > 0)
             {
                 // 有扫码枪：发触发指令开始读码（TCP 场景重发 LON 开激光；串口为空操作），
@@ -332,10 +370,16 @@ namespace CommandCenter.Services
             if (_chStep == 0)
             {
                 // 等 SN：扫到（扫码枪/手动输入）→ OK；超时 → NG 兜底不卡流程
+                // 【V2.14.9 时序修复】码"先扫到、请求后到"也在第一步被消费：
+                // BeginScanChannel 不再清零，若请求到达时 _serialReceived 已是 true
+                // （请求前枪已扫到码），这里立即走 OK——不丢已到手的码。
                 if (_serialReceived)
                 {
                     _plc.WriteProductModel(_productModel);
                     _plc.WriteScanResult(1);      // 扫码 OK
+                    _serialReceived = false;      // V2.14.9：码已消费即清零，防止残留 true 污染下一轮
+                                                 // （否则下一轮 BeginScanChannel 不清，会把上一轮的码
+                                                 //  当成新一轮的 SN 误报 OK——见 BeginScanChannel 注释）
                     _chStep = 1;
                     SetState("扫码完成，等待 PLC 复位请求");
                     LogHelper.Info($"扫码 OK：SN={LatestSerialNumber}，已上报型号[{_productModel}]与结果(1)");
