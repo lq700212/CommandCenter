@@ -169,8 +169,8 @@ namespace CommandCenter.Views
             //
             // cmbModel
             // 固定产品型号（V2.7 协议）：每次扫码完成上位机写入 PLC 40007~40011，最多 10 字符。
-            // V2.8 起为可编辑下拉：候选项=预置三型号 U171/U172/Z121（DefaultProductModels）∪ 配置已有
-            // ProductModels（去重合并，配置缺字段也能直接选到三型号），也可手动输入新型号；
+            // V2.8 起为可编辑下拉：候选项=预置型号 U171/Z121（DefaultProductModels）∪ 配置已有
+            // ProductModels（去重合并，配置缺字段也能直接选到型号），也可手动输入新型号；
             // 保存时若不在候选则自动加入。型号同时决定点位→程序号查哪张表。
             //
             this.cmbModel.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDown;

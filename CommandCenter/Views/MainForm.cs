@@ -659,9 +659,9 @@ namespace CommandCenter.Views
         // ────────────── 产品型号下拉（V2.8）──────────────
         /// <summary>
         /// 填充"产品型号"下拉（V2.8，可重入：构造与设置保存热更都会调用）。
-        /// 候选 = 预置三型号（AppConfig.DefaultProductModels）∪ 配置已有型号（_config.ProductModels），
+        /// 候选 = 预置型号（AppConfig.DefaultProductModels）∪ 配置已有型号（_config.ProductModels），
         /// 去重、忽略空白、当前配置型号不在候选时补进去——保证 appconfig 缺 productModels 字段/
-        /// 为空时标题栏也直接能下拉选 U171/U172/Z121（现场三型号写死预置，无需依赖配置文件）。
+        /// 为空时标题栏也直接能下拉选 U171/Z121（现场型号写死预置，无需依赖配置文件）。
         /// DropDownStyle=DropDownList 只能从清单选（型号只认候选，不乱输）。
         /// 【防误触】填充/选中期间置 _modelComboInit=true，屏蔽 SelectedIndexChanged，
         /// 只有"用户真实选择"才进入 SwitchModel。
@@ -1089,8 +1089,29 @@ namespace CommandCenter.Views
         private void SubscribeCoordinatorEvents()
         {
             _coordinator.InspectionFinished += OnInspectionFinished;
+            _coordinator.RoundStarted += OnRoundStarted;
             _coordinator.StateChanged += OnStateChanged;
             _coordinator.ErrorRaised += msg => LogHelper.Warn("界面收到错误：" + msg);
+        }
+
+        /// <summary>
+        /// 新一轮开始（V2.14.11）：收到 PLC 扫码请求，清空所有窗口的图片显示。
+        /// 新的一轮第一步就是扫码，上一轮的图片已过时；提前清掉，等到新一轮
+        /// 相机判定返回后再逐窗口 SetImage 新图，避免新旧两轮画面混在一起。
+        /// 事件来自协调整轮询后台线程，统一 BeginInvoke 回 UI 线程再遍历窗口。
+        /// </summary>
+        private void OnRoundStarted()
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(OnRoundStarted));
+                return;
+            }
+            foreach (var w in _windowControls.Values)
+            {
+                try { w?.SetImage(null); } catch { }
+            }
         }
 
         /// <summary>

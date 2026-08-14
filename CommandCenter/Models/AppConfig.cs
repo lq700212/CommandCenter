@@ -53,25 +53,24 @@ namespace CommandCenter.Models
         public string ProductModel { get; set; } = "U171";
 
         /// <summary>
-        /// 产品型号候选列表（V2.8）：现场可切换的型号清单，默认预置现场三型号
-        ///   ["U171", "U172", "Z121"]（见 DefaultProductModels）。
+        /// 产品型号候选列表（V2.8）：现场可切换的型号清单，默认预置现场型号
+        ///   ["U171", "Z121"]（见 DefaultProductModels）。
         /// 用途：
         ///   ① 设置窗体"产品型号"可编辑下拉的候选项（也可手动输入新型号，保存时自动加入本列表）；
         ///   ② "窗口/点位配置…"里"点位→相机程序号"映射按型号分表编辑时的型号下拉候选。
         /// 【为什么不写成属性初始化器默认值】与 Cameras 同理（V1.9.9）：Newtonsoft 反序列化对
         ///   已有实例的集合是复用并 Add 进 json 元素而非整值替换，预置默认会把 json 里的型号
-        ///   叠加重复。故初始化器给空列表，默认三型号统一交给 ConfigStore.Load 的"空/缺省兜底"。
+        ///   叠加重复。故初始化器给空列表，默认型号统一交给 ConfigStore.Load 的"空/缺省兜底"。
         /// </summary>
         public List<string> ProductModels { get; set; } = new List<string>();
 
         /// <summary>
-        /// 现场默认产品型号候选（V2.8，见 ProductModels）。三型号对应现场两套相机程序映射：
-        ///   U171：上相机 P000~P012、下相机 P000~P003；U172：上相机 P013~P028；
-        ///   Z121：下相机 P005~P007（具体点位→程序号见 CameraConfig.DefaultCameras）。
+        /// 现场默认产品型号候选（V2.8，见 ProductModels）。两型号对应现场两套相机程序映射：
+        ///   U171：上相机点位 1~18、下相机点位 1~4；Z121：上相机点位 1~26、下相机点位 1~3。
         /// 返回全新列表实例，调用方可直接 AddRange/复制，不共享引用。
         /// </summary>
         public static List<string> DefaultProductModels() =>
-            new List<string> { "U171", "U172", "Z121" };
+            new List<string> { "U171", "Z121" };
 
         /// <summary>主界面显示窗口 / 标题栏配置</summary>
         public DisplayConfig Display { get; set; } = new DisplayConfig();
@@ -204,8 +203,8 @@ namespace CommandCenter.Models
         /// <summary>
         /// 本相机按【产品型号】分组的"点位→相机程序号"映射表（V2.8，设置页 WindowPointForm 型号下拉编辑）。
         ///
-        /// 【为什么按型号分表】现场同一台相机的程序库分型号：U171/U172 等不同产品型号对应的相机
-        ///   程序号不同（例：上相机型号 U171 用 P000~P012、型号 U172 用 P013~P028，点位归属也不同）。
+        /// 【为什么按型号分表】现场同一台相机的程序库分型号：U171/Z121 等不同产品型号对应的相机
+        ///   程序号不同（例：上相机型号 U171 用 P000~P012、型号 Z121 用 P013~P028，点位归属也不同）。
         ///   型号列表来自 AppConfig.ProductModels，切型号后查对应型号的表切程序，型号没配的表就
         ///   回退 StationPrograms 默认表。每张表结构同 StationPrograms（点位→程序号）。
         ///
@@ -312,9 +311,10 @@ namespace CommandCenter.Models
         /// 其余参数取模型默认。
         /// 【V2.8 预置型号映射】每台相机按型号预置"点位→程序号"表（ModelStationPrograms，
         ///   现场定稿，见下）：切到对应型号后触发相机前自动切程序。
-        ///   上相机：U171→P000~P012、U172→P013~P028；下相机：U171→P000~P003、Z121→P005~P007。
-        ///   没列出的型号（如上相机 Z121）运行时查不到型号表，回退默认表 StationPrograms
-        ///   （本次未预置 → 不切换程序，保持相机当前程序）。
+        ///   上相机：U171→点位1~18/P000~P012、Z121→点位1~26/P013~P028；
+        ///   下相机：U171→点位1~4/P000~P003、Z121→点位1~3/P005~P007。
+        ///   没列出的型号（如下相机 U171 的点位不在下相机表里）运行时查不到型号表，
+        ///   回退默认表 StationPrograms（本次未预置 → 不切换程序，保持相机当前程序）。
         /// 【为什么收敛成一个方法】三处需要"默认两台相机"（未配置时 AppConfig.Cameras 的
         ///   初值、主窗体 BuildServices 的空配置兜底、设置窗体空表格默认行/添加行），
         ///   若各自硬编码 IP，改现场 IP 要改好几个地方、极易漏。统一走本方法，
@@ -339,7 +339,7 @@ namespace CommandCenter.Models
                             (1, 0), (2, 1), (3, 2), (4, 2), (5, 2), (6, 2), (7, 3), (8, 4),
                             (9, 5), (10, 6), (11, 7), (12, 8), (13, 9), (14, 10), (15, 10),
                             (16, 10), (17, 11), (18, 12)) },
-                        new ModelStationPrograms { ModelName = "U172", Programs = Table(
+                        new ModelStationPrograms { ModelName = "Z121", Programs = Table(
                             (1, 13), (2, 14), (3, 14), (4, 28), (5, 15), (6, 15), (7, 15),
                             (8, 15), (9, 15), (10, 16), (11, 17), (12, 18), (13, 18),
                             (14, 19), (15, 20), (16, 21), (17, 21), (18, 22), (19, 23),
@@ -895,15 +895,20 @@ namespace CommandCenter.Models
         ///   {时间}   精确到毫秒的时间戳 yyyyMMdd_HHmmss_fff（多张同点位防重名用）
         ///   {SN}     序列号（若文件名也要带 SN 可加）
         ///   例：默认 "{点位}" → 1.png
+        /// ⚠️ V2.14.11：**双格式归档（SaveImageFilePair）已不再使用本模板**——现场定稿
+        ///   归档文件名 = 相机源文件名 + "_" + 时间戳（如 0084_20260814_102030_123.jpeg），
+        ///   本字段仅旧版 TCP/BR 取图（SaveImage/SaveImageBytes）仍按模板命名，属历史兼容。
         /// </summary>
         public string FileNameTemplate { get; set; } = "{点位}";
 
         /// <summary>
-        /// 存图文件名是否默认追加时间戳后缀（V1.12.18）。
-        /// true(默认)：最终文件名 = 模板渲染结果 + "_" + 时间戳(yyyyMMdd_HHmmss_fff)。
+        /// 存图文件名是否追加时间戳后缀（V1.12.18）。
+        /// true(默认)：双格式归档（SaveImageFilePair）最终文件名 =
+        ///   相机源文件名 + "_" + 时间戳(yyyyMMdd_HHmmss_fff)（V2.14.11 起源文件名不再套模板）；
+        ///   旧版 SaveImage 则是 模板渲染结果 + "_" + 时间戳。
         ///   防止"同点位重复拍照/重复触发"时覆盖旧图——现场同点位可能被多次触发，
         ///   每张图都要保留（旧版仅靠 _2/_3 递增兜底，命名不清）。
-        /// false：保持模板渲染结果原名（模板带 {时间} 时基本不重名，此开关仅作保险）。
+        /// false：保持原名（模板带 {时间} 时基本不重名，此开关仅作保险）。
         /// </summary>
         public bool FileTimestampSuffix { get; set; } = true;
 

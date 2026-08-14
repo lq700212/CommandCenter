@@ -125,6 +125,13 @@ namespace CommandCenter.Services
         /// <summary>检测完成事件：携带一次结果（含图片路径、OK/NG、序号、点位号）。每张图各抛一次。</summary>
         public event Action<WindowData, int> InspectionFinished;
 
+        /// <summary>
+        /// 新一轮开始事件（V2.14.11）：收到 PLC 扫码请求（40001=1）时触发，表示"本轮生产已启动、
+        /// 第一个动作就是扫码"。UI 借此清空上一轮残留的窗口图片，准备显示新一轮结果。
+        /// 在轮询后台线程触发；订阅方（MainForm）需自行 Invoke 回 UI 线程再操作控件。
+        /// </summary>
+        public event Action RoundStarted;
+
         /// <summary>检测流程异常提醒（参数为提示文本）</summary>
         public event Action<string> ErrorRaised;
 
@@ -336,6 +343,11 @@ namespace CommandCenter.Services
             _activeCh = ChScan;
             _chStep = 0;                    // 步骤0：等 SN
             _scanArriveUtc = DateTime.UtcNow;   // 超时基准：本轮扫码请求到达时刻（30s 判 NG 用）
+
+            // V2.14.11：新一轮开始，通知 UI 清空上一轮各窗口图片（新的一轮第一个动作就是扫码，
+            // 上一轮的图片已过时，提前清掉避免与新结果混淆）。事件在轮询线程触发，
+            // UI 侧 BeginInvoke 回 UI 线程再遍历窗口 SetImage(null)。
+            RoundStarted?.Invoke();
 
             // 码时间窗过滤（V2.14.9）：已有码，但太旧（超过请求前 ScanCodeKeepMs）→ 当残留丢弃。
             if (_serialReceived &&

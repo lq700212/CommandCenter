@@ -90,7 +90,7 @@ namespace CommandCenter.Utils
                         TriggerCommand = "LON"
                     }
                 };
-            // 产品型号候选列表（V2.8）：null/空时用现场默认三型号（U171/U172/Z121），
+            // 产品型号候选列表（V2.8）：null/空时用现场默认型号（U171/Z121），
             // 保证设置窗体"产品型号"下拉与"窗口/点位配置"的型号下拉有候选可点。
             if (cfg.ProductModels == null || cfg.ProductModels.Count == 0)
                 cfg.ProductModels = Models.AppConfig.DefaultProductModels();

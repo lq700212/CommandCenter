@@ -1,5 +1,48 @@
 # 版本改动记录
 
+## V2.14.11（2026-08-14）U172 型号清理 + 新一轮清窗 + 存图文件名带时间戳
+
+> ① 现场只有 U171/Z121 两个在产型号，删除历史遗留的 U172：上相机原 U172 的
+> "点位→程序号"表并入 Z121（点位 1~26/程序 13~28 不变），下相机 Z121 表不动。
+> ② 每轮开始（PLC 发扫码请求 40001）时清空主界面各窗口图片，准备显示新一轮结果。
+> ③ 归档文件名由"模板渲染名"改为"相机源文件名 + _时间戳"。
+
+### 改动范围
+- **U172 型号清理**：
+  - `Models/AppConfig.cs`：`DefaultProductModels()` 候选 `["U171","U172","Z121"]` →
+    **`["U171","Z121"]`**（U172 移除）；`DefaultCameras()` 上相机 `ModelName="U172"` 的表整体改为
+    `"Z121"`（点位 1~26/程序 13~28 原样保留）；同步更新 `ProductModels`/`DefaultCameras()` 注释。
+  - **注释/死代码清理**：ConfigStore / MainForm / MainForm.Designer / SettingsForm /
+    SettingsForm.Designer / WindowPointForm 中所有"U172 并入/迁移"注释与逻辑全部删除
+    （项目未上线，无存量配置需要迁移，迁移方法 `MigrateProductModels` 一并删除）。
+- **新一轮清窗（显示逻辑）**：
+  - `Services/ProductionCoordinator.cs`：新增 `RoundStarted` 事件，`BeginScanChannel`
+    （收到 PLC 扫码请求 40001=1）受理时触发——新的一轮第一个动作就是扫码，上一轮图片已过时。
+  - `Views/MainForm.cs`：订阅 `RoundStarted`，`OnRoundStarted` BeginInvoke 回 UI 线程后
+    遍历 `_windowControls` 全部 `SetImage(null)` 清空（回到深灰空态）。
+- **存图文件名带时间戳（存图逻辑）**：
+  - `Services/ImageStore.cs`：`SaveImageFilePair` 文件名主体改用**相机源文件主名**
+    （`Path.GetFileNameWithoutExtension(jpegPath)`，如 0084），加 `_时间戳`（`FileTimestampSuffix`
+    默认 true）→ `0084_20260814_164022_461.jpeg` + 同名 `.iv4p`；**不再用 `FileNameTemplate` 渲染**。
+  - `Models/AppConfig.cs`：`FileNameTemplate`/`FileTimestampSuffix` 注释同步更新（模板仅旧版
+    TCP/BR 取图兼容，双格式归档不再读取）。
+
+### 为什么这么改
+- **型号冗余**：U172 在产现场不使用，候选只留 U171/Z121 更贴近实际（下拉不再出现没人用的 U172）。
+- **不上线无迁移**：项目未上线，不存在带 U172 的存量配置，迁移代码属死代码，直接删除。
+- **新一轮清窗**：PLC 每次发扫码请求代表一件新产品开始检测，上一轮的图片必须清掉，
+  否则新旧两轮画面混在一起，操作员无法区分当前窗口显示的是哪一件。
+- **原文件名_时间戳**：现场要求归档文件一眼能对应回相机里的原图（0084 → 0084_时间戳）；
+  时间戳防同点位重复触发时覆盖历史图。
+
+### 验证
+- 构建通过（MSBuild Debug/AnyCPU）。
+- 反射验证存图：源 `0084.jpeg` → 归档 `0084_20260814_164022_461.jpeg` + 同名 `.iv4p`；
+  `FileTimestampSuffix=false` 时保留原文件名 `0099.jpeg`。
+- 反射验证默认：`DefaultProductModels()`=`U171, Z121`；上相机 `[U171(18点), Z121(26点)]`、
+  下相机 `[U171(4点), Z121(3点)]`。
+- 冒烟：exe 启动 4 秒进程存活正常。
+
 ## V2.14.10（2026-08-14）修复相机判定全 NG：T2 详细格式总判定未识别，触发计数被误当判定位
 
 > 现场现象：相机明明判定 OK（现场照片有 OK），但上位机标题栏 OK 恒 0、NG=拍照张数、

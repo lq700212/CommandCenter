@@ -24,7 +24,7 @@ namespace CommandCenter.Views
     /// 说明：
     ///   - 标题栏面板 pnlTitleBar：Dock=Top，FixedHeight=48；内部字段用绝对坐标，
     ///     运行时由 MainForm.InitTitleBarRuntime/RelayoutTitleBar 按"显示开关"紧凑重排。
-    ///   - 产品型号（cmbModel，V2.8 可选下拉）：候选恒预置 U171/U172/Z121（配置候选去重合并），
+    ///   - 产品型号（cmbModel，V2.8 可选下拉）：候选恒预置 U171/Z121（配置候选去重合并），
     ///     操作员在标题栏直接下拉切换当前生产型号，切换即生效（重建协调器按新型号查相机映射表 +
     ///     写盘持久化），与系统设置窗体 PLC 区"产品型号"是同一个值。
     ///   - lblProductPrefix 的文案与各信息字段的 Visible 由 Display 配置控制（运行时设置）。
@@ -288,7 +288,8 @@ namespace CommandCenter.Views
             // 
             // 产品型号下拉（V2.8）：操作员在标题栏直接选当前生产型号，切换即生效（重建协调器
             // 按新型号查相机映射表切程序 + 写盘持久化）。候选初始在 InitModelCombo 运行时填充，
-            // 恒预置 U171/U172/Z121（与配置 ProductModels 去重合并），DropDownList 只能从清单选。
+            // 恒预置 U171/Z121（与配置 ProductModels 去重合并），
+            // DropDownList 只能从清单选。
             // 运行坐标由 RelayoutTitleBar 按标题栏整行重排，这里只是设计器初始参照。
             this.cmbModel.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbModel.FlatStyle = System.Windows.Forms.FlatStyle.Flat;

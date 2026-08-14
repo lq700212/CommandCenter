@@ -148,15 +148,19 @@ namespace CommandCenter.Services
         /// 现场约定（与基恩士工程师确认）：相机拍照后往自己的 FTP 取图目录推两个文件——
         ///   `0000.jpeg`：上位机显示/归档用（显示取 jpeg 格式即可）；
         ///   `0000.iv4p`：基恩士复盘问题用的私有格式，上位机不解析、原样复制保存；
-        /// 目录按 ImageConfig.SubDirs 逐级渲染建目录，文件名 = FileNameTemplate 渲染结果
-        /// + 时间戳后缀（FileTimestampSuffix=true 时，防同点位重复拍照重名覆盖）。
+        /// 目录按 ImageConfig.SubDirs 逐级渲染建目录。
+        /// 归档文件名（V2.14.11 定稿）= **相机源文件原名 + "_" + 时间戳(yyyyMMdd_HHmmss_fff)**
+        ///   ——即取 FTP 目录里源文件去掉扩展名的主名（如 0084 → 0084），
+        ///   直接拼时间戳后缀，**不再用 FileNameTemplate 模板渲染**（现场要求"原文件名_时间戳"，
+        ///   一眼能对应回相机里的原图；时间戳防同点位重复拍照重名覆盖）。
+        ///   例：源 0084.jpeg/0084.iv4p → 归档 0084_20260814_102030_123.jpeg / 同名 .iv4p。
         /// 注意：本方法只做"复制"，【不删除】FTP 取图目录源文件——删除动作由协调器在
         /// 复制成功且确认归档完成后执行（见 ProductionCoordinator.FinishAll），避免复制失败丢图。
         /// </summary>
         /// <param name="jpegPath">FTP 取图目录里的 jpeg 源文件完整路径</param>
         /// <param name="iv4pPath">FTP 取图目录里的 iv4p 源文件完整路径（可为空/不存在则跳过）</param>
-        /// <param name="stationNo">相机点位号（本相机点位表 StationNo，进文件名 {点位}；上下相机
-        ///     同号重复，靠目录里的 {相机} 层隔离）</param>
+        /// <param name="stationNo">相机点位号（本相机点位表 StationNo，进目录 {OKNG} 与文件名模板占位；
+        ///     上下相机同号重复，靠目录里的 {相机} 层隔离）</param>
         /// <param name="isOk">本次结果（OK/NG 进目录 {OKNG}）</param>
         /// <param name="serial">产品序列号（进 {SN} 目录）</param>
         /// <param name="cameraName">相机名（进目录/文件名 {相机}；保留 null/空时渲染为"未知相机"）</param>
@@ -171,13 +175,14 @@ namespace CommandCenter.Services
                     return null;
                 }
                 DateTime now = DateTime.Now;
-                // 文件名主体 = 模板渲染结果；模板为空时兜底用 "IMG_{时间戳}"
-                string stem = RenderTemplate(_cfg.FileNameTemplate, now, serial, isOk, stationNo, cameraName);
-                if (string.IsNullOrWhiteSpace(stem))
-                    stem = "IMG_" + now.ToString("yyyyMMdd_HHmmss_fff");
-                // 时间戳后缀：默认追加（现场约定，防同点位重复拍照覆盖旧图）
+                // 文件名主体（V2.14.11）= 相机源文件去掉扩展名的主名（如 0084），不再用模板渲染。
+                // 现场要求"原文件名_时间戳"：一眼能对应回相机原图；时间戳防同点位重复拍照覆盖。
+                string srcStem = Path.GetFileNameWithoutExtension(jpegPath);
+                if (string.IsNullOrWhiteSpace(srcStem))
+                    srcStem = "IMG_" + now.ToString("yyyyMMdd_HHmmss_fff");   // 兜底：异常文件名也用时间戳
+                // 时间戳后缀（默认追加，防同点位重复拍照覆盖旧图）
                 if (_cfg.FileTimestampSuffix)
-                    stem = stem + "_" + now.ToString("yyyyMMdd_HHmmss_fff");
+                    srcStem = srcStem + "_" + now.ToString("yyyyMMdd_HHmmss_fff");
 
                 // 目录：按 SubDirs 逐级渲染（与 SaveImage 完全同一套规则，保证两种入口归档位置一致）
                 var levels = _cfg.SubDirs ?? new List<string>();
@@ -193,7 +198,7 @@ namespace CommandCenter.Services
                 Directory.CreateDirectory(dir);
 
                 // 复制 jpeg（保持原格式，不再重编码——现场要求显示/归档都走相机原图）
-                string jpegName = SanitizeForPath(stem) + ".jpeg";
+                string jpegName = SanitizeForPath(srcStem) + ".jpeg";
                 string jpegTarget = Path.Combine(dir, jpegName);
                 CopyWithRetry(jpegPath, jpegTarget, "jpeg");
 
@@ -201,7 +206,7 @@ namespace CommandCenter.Services
                 string iv4pResult = null;
                 if (!string.IsNullOrWhiteSpace(iv4pPath) && File.Exists(iv4pPath))
                 {
-                    string iv4pName = SanitizeForPath(stem) + ".iv4p";
+                    string iv4pName = SanitizeForPath(srcStem) + ".iv4p";
                     string iv4pTarget = Path.Combine(dir, iv4pName);
                     CopyWithRetry(iv4pPath, iv4pTarget, "iv4p");
                     iv4pResult = iv4pTarget;

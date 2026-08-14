@@ -18,7 +18,7 @@ namespace CommandCenter.Views
     ///      恢复默认（重置出厂铺排 + 全部启用）——自适应/非自适应都可用，
     ///      结果存进 DisplayConfig.WindowPointMaps（按型号分表）。
     ///   ② 【点位 → 相机程序号】每台相机各自一张表（V1.12.25 新增），**V2.8 起再按产品型号分表**：
-    ///      同一台相机的程序库会随产品型号变化（如"上相机"型号 U171 用 P000~P012、U172 用 P013~P028），
+    ///      同一台相机的程序库会随产品型号变化（如"上相机"型号 U171 用 P000~P012、Z121 用 P013~P028），
     ///      所以型号下拉【只列真实产品型号】（V2.12.x 起移除"默认（不区分型号）"项），打开时
     ///      相机默认=第一台相机、型号默认=主界面（MainForm）当前型号（不在该相机候选则用其第一个
     ///      选项），选某型号即编辑该相机在该型号下的映射表（ModelStationPrograms）；本窗体里切型号
@@ -267,7 +267,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
 
         /// <summary>
         /// 按某产品型号重建窗口矩阵（V2.12.1）：窗口总数/行列随型号点位表变化（U171=上18+下4=22 窗、
-        /// U172=上26=26 窗…），切型号必须重建 TableLayoutPanel，否则矩阵跟不上新型号（用户实测的
+        /// Z121=上26+下3=29 窗…），切型号必须重建 TableLayoutPanel，否则矩阵跟不上新型号（用户实测的
         /// "切型号后矩阵不刷新"bug 的根治）。步骤：重算布局 → _map/_enabled 重新对齐（保留已有的
         /// 禁用状态，按窗口号前缀截断）→ BuildMatrix 重建格子 → RefillStationColumn（点位列候选
         /// 随矩阵点位更新）→ RefreshCells。

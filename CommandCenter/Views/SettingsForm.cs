@@ -95,8 +95,9 @@ namespace CommandCenter.Views
             txtPlcIp.Text = _cfg.Plc.IpAddress;
             nudPlcPort.Value = _cfg.Plc.Port;
             // 固定产品型号（V2.7 协议，每次扫码写入 PLC 40007~40011，最多 10 字符；V2.8 可编辑下拉）
-            // 下拉候选 = "预置三型号 U171/U172/Z121（DefaultProductModels）∪ 配置追加型号（ProductModels）"：
-            // 用户要求"直接预置"，即使 appconfig 缺 productModels 字段/为空，这里也恒能选到三型号；
+            // 下拉候选 = "预置型号 U171/Z121（DefaultProductModels）
+            //             ∪ 配置追加型号（ProductModels）"：
+            // 用户要求"直接预置"，即使 appconfig 缺 productModels 字段/为空，这里也恒能选到型号；
             // 手输新型号保存后自动加入候选（见 OnSave）。
             cmbModel.Items.Clear();
             var modelCandidates = new List<string>();
