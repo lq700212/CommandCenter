@@ -42,8 +42,11 @@ namespace CommandCenter.Services
     ///   该窗口被禁用（WindowEnabled=false）时视为"该点位跳过"，直接写结果 3。
     ///   存图点位 = 相机点位号（文件名 {点位}），按相机的 {相机} 目录层隔离（见 ImageStore）。
     ///
-    /// 【线程】请求轮询在后台线程（PositionTimer），相机触发/取图/归档在 Task 后台线程，
-    ///   通过 _chanResult（volatile）回传结果给轮询线程写 PLC；界面刷新走事件
+    /// 【线程】请求轮询在后台线程（PositionTimer），相机触发/取图/归档在 Task 后台线程。
+    ///   V2.13.7 起相机结果"判定即写"：Task 里判定（T2）一返回就立即 WriteCameraResult 落 PLC 结果
+    ///   寄存器，不再等取图/归档；取图/归档/显示成为纯异步补充材料（图缺失只影响显示/存图，
+    ///   不回退结果）。_chanResult（volatile）仍由 Task 回传、轮询线程兜底再写一次（幂等），
+    ///   并新增 _taskDone 标记控制通道释放（见 StepCameraChannel）。界面刷新走事件
     ///   （InspectionFinished 由订阅方 Invoke 回 UI 线程）。本类不接触任何控件，纯业务编排。
     /// </summary>
     public class ProductionCoordinator : IDisposable
@@ -74,6 +77,10 @@ namespace CommandCenter.Services
         private volatile int _activeCh = ChNone; // 当前活动通道（ChScan=扫码、>0=相机ID）
         private volatile int _chStep;     // 通道内步骤：见各通道推进逻辑
         private volatile int _chanResult = -1;   // 相机拍照结果：-1=未出，1=OK，2=NG，3=跳过
+        // V2.13.7：相机拍照 Task 是否【完全】结束（判定+取图+归档+显示都做完）。
+        // 判定即写后结果提前落 PLC、通道可进"等复位"，但【通道释放】必须等 Task 收尾，
+        // 防止"上一拍还在归档、下一拍请求已进来"导致同相机并发取图/混图（见 StepCameraChannel）。
+        private volatile bool _taskDone;
         private int _pendStation;         // 相机通道当前点位（轮询线程读写）
 
         // ── 扫码通道 ──
@@ -386,13 +393,15 @@ namespace CommandCenter.Services
                 // 点位禁用/无相机：不拍照、不显示、不计数，直接写结果 3（跳过）告诉 PLC 走下一工位
                 _chanResult = 3;
                 _chStep = 1;
+                _taskDone = true;   // 无 Task 后台工作，通道随时可复位（等 PLC 复位请求即可）
                 LogHelper.Info($"点位{stationNo} 已禁用或无相机，上报跳过(3)（{camLabel}）");
                 SetState($"点位{stationNo} 已禁用，跳过拍照");
                 return;
             }
 
             _chanResult = -1;
-            _chStep = 1;    // 步骤1：拍照进行中（Task 出结果后写 PLC）
+            _chStep = 1;    // 步骤1：拍照进行中（判定即写，Task 里判定一出就落结果，不等图归档）
+            _taskDone = false;  // V2.13.7：Task 结束（判定+取图+归档+显示全做完）才允许通道释放
             SetState($"点位{stationNo} 触发 {camLabel} 拍照");
             LogHelper.Info($"收到 PLC 拍照请求：{camLabel}，点位{stationNo}（窗口{windowIndex}）");
 
@@ -455,7 +464,11 @@ namespace CommandCenter.Services
 
             if (_chStep == 1)
             {
-                // 拍照 Task 已出结果（1=OK / 2=NG / 3=跳过）→ 写本相机通道的结果寄存器
+                // 步骤1：判定已出结果（1=OK / 2=NG / 3=跳过）→ 写本相机通道的结果寄存器。
+                // 【V2.13.7 判定即写】Task 里判定（T2）一返回就 WriteCameraResult 立即落 PLC，
+                // 不等取图/归档（图是异步补的）。这里由轮询线程兜底再写一次（幂等，值不变）：
+                //   ① 万一 Task 提前写失败，这里补上；② skip 分支（_chanResult=3）没有 Task，
+                //      只有这里能写。写完后进 step2 等 PLC 复位请求。
                 if (_chanResult >= 0)
                 {
                     int code = _chanResult;
@@ -467,12 +480,17 @@ namespace CommandCenter.Services
                 return;
             }
 
-            // 步骤2：等 PLC 把请求寄存器复位为 0 → 复位结果寄存器，通道完成
-            bool ok = _plc.ReadCameraRequest(cfg, out int still) && still == 0;
-            if (ok)
+            // 步骤2：等 PLC 把请求寄存器复位为 0 → 复位结果寄存器，通道完成。
+            // 【V2.13.7 防并发闸门】除 PLC 复位请求外，还必须等拍照 Task 完全结束（_taskDone）——
+            // 判定即写后 PLC 可能很快读走结果并复位请求，但取图/归档/显示可能还在后台进行；
+            // 若此刻就释放通道，PLC 下一拍请求进来会再开一个 Task，同一相机两个 Task 并发取图/删源
+            // （"处理即删"会互相删掉对方刚归档的图），窗口错乱。等 Task 收尾再放行。
+            bool reqReset = _plc.ReadCameraRequest(cfg, out int still) && still == 0;
+            if (reqReset && _taskDone)
             {
                 _plc.WriteCameraResult(cfg, 0);
                 _activeCh = ChNone;
+                _chStep = 0;
                 SetState("等待 PLC 请求");
             }
         }
@@ -555,7 +573,19 @@ namespace CommandCenter.Services
                     }
                 }
 
-                // ③ 取图 + 归档（Ftp：轮询取图目录拿最新对；Tcp：BR 同步读回）
+                // ⭐【V2.13.7 判定即写】判定（T2 的 RT 响应 / 退化 T1）此刻已返回，PLC 要的就是这个
+                // OK/NG 结论——立即落 PLC 结果并回传状态机，不再等"取图→归档→删源"（那可能 0.5~2s）。
+                //  ・code 提前按判定定死（原来在取图后才 code=isOk?1:2），后续取图/归档失败【不回退】
+                //    结果：图中途没到只影响窗口显示/存图，PLC 仍按相机判定收结果（图缺失有日志+警告）。
+                //  ・_plc.WriteCameraResult 内部有锁，与轮询线程 step1 的兜底写同名幂等、安全并发。
+                //  ・通道释放不依赖这次写（见 StepCameraChannel 的 _taskDone 闸门），不会并发混图。
+                code = isOk ? 1 : 2;
+                _chanResult = code;
+                _plc.WriteCameraResult(cfg, code);
+                LogHelper.Info($"相机[{camName}] 点位{stationNo} 判定即写已落 PLC：{(isOk ? "OK(1)" : "NG(2)")}");
+
+                // ③ 取图 + 归档（Ftp：轮询取图目录拿最新对；Tcp：BR 同步读回）——纯异步补充材料，
+                //  只影响窗口显示与存图，不参与 PLC 结果（结果已在②末尾写掉）
                 bool hasImage = false;
                 if (IsTcpImage(cfg))
                 {
@@ -606,7 +636,9 @@ namespace CommandCenter.Services
                 if (!hasImage)
                 {
                     preview?.Dispose(); // 归档失败：提前加载的预览图没被显示事件带走，立即释放防句柄泄漏
-                    return; // 无图 → 保持 code=2（NG）
+                    // 无图 → 结果已在"判定即写"阶段落 PLC（1/2），这里直接返回不改变结果：
+                    // code 保持判定值（isOk?1:2），finally 落 _chanResult 与已写值一致（幂等）。
+                    return;
                 }
 
                 // ④ 显示 + 计数（抛给 UI 线程刷新对应窗口）
@@ -623,7 +655,6 @@ namespace CommandCenter.Services
                     StationNo = stationNo
                 };
                 InspectionFinished?.Invoke(data, windowIndex);
-                code = isOk ? 1 : 2; // 有图 → 按判定定结果：1=OK，2=NG（文档 40005/40006 语义）
                 LogHelper.Info($"点位{stationNo} 检测完成：{(isOk ? "OK" : "NG")} → {archived}（窗口{windowIndex}）");
             }
             catch (Exception ex)
@@ -633,7 +664,8 @@ namespace CommandCenter.Services
             }
             finally
             {
-                _chanResult = code; // 回传轮询线程落 PLC 结果（volatile，可见）
+                _chanResult = code; // 兜底：与判定即写阶段已写出的 PLC 结果一致（幂等）；失败路径靠这里落 NG
+                _taskDone = true;   // V2.13.7：拍照 Task 完全结束（判定+取图+归档+显示），放行通道复位
             }
         }
 
