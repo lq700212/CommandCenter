@@ -82,6 +82,14 @@ namespace CommandCenter.Services
         private bool _scanHooked;               // 是否已订阅扫码枪事件（防重复订阅）
         private DateTime _scanArriveUtc;        // 扫码请求受理时刻（判断 SN 等待超时）
 
+        // ── FTP 取图信号加速（V2.13.6 恢复事件驱动）──
+        // ImageStore 为每台相机 FTP 目录挂 FileSystemWatcher（MainForm.BuildServices 里 AddMonitor 启动），
+        // 新图到达触发 FtpFileArrived → 本类置位该相机的信号 → WaitForFtpImage 立即醒来重扫目录
+        // （消除了纯轮询最长 200ms 的被动延迟）；事件漏报/失效时 200ms 超时轮询照常兜底，两者互补。
+        // 每拍（WaitForFtpImage）开始前 Reset 一次，保证"本次触发后的新图事件"才唤醒本拍。
+        private ManualResetEventSlim[] _ftpArrive = new ManualResetEventSlim[0];
+        private bool _ftpHooked;                // 是否已订阅 FtpFileArrived（防重复订阅）
+
         /// <summary>扫码等待 SN 的超时（毫秒）：扫码请求到位后产品迟迟没被扫到（没贴码/扫码枪没读到），
         /// 超时写结果 2（扫码 NG）上报 PLC，避免流程卡死。</summary>
         private const int ScanWaitMs = 30000;
@@ -134,12 +142,34 @@ namespace CommandCenter.Services
             _windowPointMap = Models.DisplayConfig.ResolveWindowPointMap(
                 _cameraCfgs, _productModel, windowPointMaps);
 
+            // V2.13.6：为每台相机准备一个"FTP 新图到达"信号（数组至少 1 个防越界），
+            // 订阅 ImageStore 的新图事件——相机推图到目录的瞬间即可唤醒等图流程，不必等下一个轮询周期。
+            int n = Math.Max(1, _cameraCfgs.Count);
+            _ftpArrive = new ManualResetEventSlim[n];
+            for (int i = 0; i < n; i++) _ftpArrive[i] = new ManualResetEventSlim(false);
+            if (!_ftpHooked && _imageStore != null)
+            {
+                _imageStore.FtpFileArrived += OnFtpFileArrived;
+                _ftpHooked = true;
+            }
+
             // 请求轮询：后台线程 200ms 一问 PLC。
             // ★ 必须用 System.Threading.Timer：此前用 Forms.Timer 在 UI 线程同步读 PLC，
             //   不可达 IP 时把界面整个卡住（点"系统设置"半天没反应就是这原因）。
             _positionTimer = new System.Threading.Timer(
                 PositionTimer_Tick, null,
                 System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
+        }
+
+        /// <summary>
+        /// ImageStore 的 FTP 新图事件回调（V2.13.6 恢复信号加速）。运行在 FileSystemWatcher 监听线程，
+        /// 只做"置位对应相机信号"这一件非阻塞的事——真正的取图/归档仍在等图的 Task 线程里做。
+        /// <paramref name="cameraIndex"/> = 相机列表下标（AddMonitor 注册时相机的下标），与 _ftpArrive 对齐。
+        /// </summary>
+        private void OnFtpFileArrived(int cameraIndex, string path)
+        {
+            if (cameraIndex >= 0 && cameraIndex < _ftpArrive.Length)
+                _ftpArrive[cameraIndex].Set();
         }
 
         /// <summary>开始运行：订阅扫码枪事件 + 启动 PLC 请求轮询。</summary>
@@ -608,15 +638,22 @@ namespace CommandCenter.Services
         }
 
         /// <summary>
-        /// FTP 模式等图：触发后轮询该相机取图目录，直到出现"修改时间不早于触发时刻"的
-        /// jpeg（视为本次新图）或等待超时；超时仍取最新一对兜底（有旧图残留也照常归档）。
-        /// 相机推图到 FTP 有延迟，立即扫可能取到旧图或空目录，故必须按时间窗判断。
+        /// FTP 模式等图：触发后等该相机取图目录出现"修改时间不早于触发时刻"的 jpeg（视为本次新图），
+        /// 或等待超时；超时仍取最新一对兜底（有旧图残留也照常归档）。
+        ///
+        /// 【V2.13.6 信号加速】相机推图到 FTP 有延迟，纯轮询每隔 200ms 才扫一次目录，最坏多等一拍。
+        /// 现在 ImageStore 的 FileSystemWatcher 一发现新文件就会 Set 本相机的 _ftpArrive 信号，
+        /// 下面用 Wait(200) 等待"信号或超时"——图一到立即醒来重扫马上拿到，事件漏报再靠 200ms 兜底轮询。
+        /// 每拍开始先 Reset：把上一拍残留的信号清掉，保证"本次触发之后的新图事件"才唤醒本拍。
         /// </summary>
         /// <returns>jpeg 完整路径（无则空字符串），iv4p 通过 out 返回（可为 null）</returns>
         private string WaitForFtpImage(CameraConfig cfg, DateTime triggerUtc, out string iv4p)
         {
             iv4p = null;
             int waitMs = Math.Max(2000, cfg.ImageWaitMs); // 至少 2s，防配置过小立刻判失败
+            int camIdx = _cameraCfgs.IndexOf(cfg);        // 相机在下标 → 对应信号
+            bool hasSignal = camIdx >= 0 && camIdx < _ftpArrive.Length;
+            if (hasSignal) _ftpArrive[camIdx].Reset();    // 清掉上一拍残留信号
             var stopwatch = Stopwatch.StartNew();
             var pair = new ImageStore.LatestPairResult();
             while (stopwatch.ElapsedMilliseconds < waitMs)
@@ -627,7 +664,12 @@ namespace CommandCenter.Services
                     pair = c;
                     break;
                 }
-                Thread.Sleep(200);
+                // 等"该相机 FTP 有新文件"信号，最多 200ms：事件到立即重扫（加速），
+                // 无事件则 200ms 后照常轮询（兜底，事件漏报不失图）。
+                if (hasSignal)
+                    _ftpArrive[camIdx].Wait(200);
+                else
+                    Thread.Sleep(200);
             }
             if (string.IsNullOrEmpty(pair.JpegPath))
                 pair = _imageStore.FindLatestPair(FtpDirFor(cfg)); // 超时兜底：取最新一对
@@ -872,8 +914,20 @@ namespace CommandCenter.Services
             _disposed = true;
             _running = false;
             UnhookScannerEvents();
+            // V2.13.6：退订 FTP 新图事件、释放信号量。注意【不 Dispose _imageStore】——
+            // ImageStore 归 MainForm 主窗体所有（SwitchModel/热更时被多代协调器复用），
+            // 之前协调器 Dispose 顺手关掉它会导致切型号后相机 FTP 监听失效（图照拍但事件加速丢失）。
+            if (_ftpHooked && _imageStore != null)
+            {
+                _imageStore.FtpFileArrived -= OnFtpFileArrived;
+                _ftpHooked = false;
+            }
+            foreach (var s in _ftpArrive)
+            {
+                try { s.Dispose(); } catch { }
+            }
+            _ftpArrive = new ManualResetEventSlim[0];
             _positionTimer?.Dispose();
-            _imageStore.Dispose();
         }
     }
 }

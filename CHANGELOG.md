@@ -1,5 +1,41 @@
 # 版本改动记录
 
+## V2.13.6（2026-08-14）FTP 取图信号加速恢复 + ImageStore 所有权修正（修复切型号后监听失效）
+
+> 排查发现 `ImageStore.AddMonitor`/`FtpFileArrived` 长期是**无调用方的死代码**（取图链路早已重构为
+> `WaitForFtpImage` 主动轮询），且协调器 `Dispose()` 原本会调用 `_imageStore.Dispose()`——一旦补上
+> watcher，`SwitchModel` 只重建协调器、复用同一 ImageStore 时监听会被误关。本次把文档里承诺的
+> "事件信号加速 + 轮询兜底"双保险真正落地，并把 ImageStore 所有权明确化。
+
+### 改动范围
+- **`Services/ProductionCoordinator.cs`**：
+  - 新增长度 `Math.Max(1, _cameraCfgs.Count)` 的 `ManualResetEventSlim[] _ftpArrive` 信号数组 + `_ftpHooked`
+    标志，构造时订阅 `_imageStore.FtpFileArrived += OnFtpFileArrived` 并初始化信号；
+  - 新增 `OnFtpFileArrived(int cameraIndex)` 回调：按相机下标 `Set()` 对应信号（Watcher 一推图立刻唤醒等图）；
+  - `WaitForFtpImage` 等待循环由 `Thread.Sleep(200)` 改为 `_ftpArrive[idx].Wait(200)`（行首 `Reset()`
+    清残留信号，事件到来自动醒来重扫目录，消除纯轮询最长 200ms 被动延迟），超时轮询/`FindLatestPair`
+    重扫逻辑不变；
+  - **`Dispose()` 不再 `Dispose(_imageStore)`**，改为退订 `FtpFileArrived` 事件 + 释放全部信号对象
+    （ImageStore 归 MainForm 所有）。
+- **`Views/MainForm.cs`**：
+  - `BuildServices` 创建 `_imageStore` 后循环每台相机 `_imageStore.AddMonitor(dir, ci)` 启动 FileSystemWatcher
+    （目录规则与 `FtpDirFor` 一致：相机 `FtpUploadDir` 非空用它、否则回退全局 `FtpRootDir`）；
+  - `ApplyRuntimeConfig` 重建服务前显式 `_imageStore?.Dispose()` 释放旧 watcher（热更不泄漏句柄）；
+  - `FormClosing` 关闭流程补 `_imageStore?.Dispose()`（此前由协调器代关，现所有权归一后主窗体负责）。
+
+### 为什么这么改
+- **死代码复活**：`AddMonitor`/`FtpFileArrived` 只能配合"等图流程用信号唤醒"才有意义，原实现没有订阅方，
+  AGENTS.md 里"事件加速"的描述名存实亡；本次把文档承诺落回真实代号。
+- **所有权单点**：ImageStore 带独立 watcher 生命周期，只应被创建它的 MainForm 释放；协调器切型号重建
+  （SwitchModel）复用同一 ImageStore，若由协调器 Dispose 会导致切型号后监听全关、信号加速失效。
+- **失图兜底不受影响**：信号只做"提前唤醒"，即使事件完全失效，原有 200ms 轮询 + `ImageWaitMs` 超时重扫
+  仍能取到图，双保险语义与 V2.13.6 前一致。
+
+### 优化点
+- 相机推图 → 等图醒来的时延从"最长 200ms 轮询"降到"事件即至"，生产节拍更稳；
+- 修复"热更/切型号后 watcher 泄漏或失效"两个隐患（旧 watcher 句柄释放 + 新协调器重新订阅）；
+- 无配置/行为变化，启动日志新增 `相机[N]开始监听 FTP 目录：…` 便于现场核对该相机监听的是否正确目录。
+
 ## V2.13.5（2026-08-14）相机ID落实为唯一关联键 + 相机PLC通道地址显式化（废除"按列表位置自动分配"）
 
 > 承接 V2.13.4（cameraId 新增字段）。本次把 cameraId 从"显示用编号"彻底落实为**运行时唯一关联键**，

@@ -112,6 +112,17 @@ namespace CommandCenter.Views
             LogHelper.Info($"BuildServices：共创建 {_cameras.Count} 台相机：{string.Join(" / ", _cameras.ConvertAll(x => x.IpLabel))}");
 
             _imageStore = new ImageStore(_config.Image);
+            // V2.13.6：为每台相机启动其 FTP 取图目录的 FileSystemWatcher（AddMonitor 幂等去重，
+            // 目录不存在自动建）。相机一推图事件就置位协调器里的信号，等图流程立即唤醒（信号加速）。
+            // 目录取相机配置 FtpUploadDir，留空回退全局 FtpRootDir（与协调器 FtpDirFor 同规则）；
+            // 监听线程只发事件，不做取图/归档（那些在协调器后台 Task 里），不违反"UI 禁 IO"红线。
+            for (int ci = 0; ci < cams.Count; ci++)
+            {
+                string dir = string.IsNullOrWhiteSpace(cams[ci]?.FtpUploadDir)
+                    ? _imageStore.DefaultFtpDir
+                    : cams[ci].FtpUploadDir.Trim();
+                _imageStore.AddMonitor(dir, ci);
+            }
             _coordinator = new ProductionCoordinator(_plc, _cameras, cams, _imageStore,
                 _config.Display.WindowEnabled, _config.ProductModel, _config.Display.WindowPointMaps);
 
@@ -920,6 +931,9 @@ namespace CommandCenter.Views
                     try { cam?.Dispose(); }
                     catch (Exception ex) { LogHelper.Warn("关闭：相机释放异常 " + ex.Message); }
                 }
+                // V2.13.6：ImageStore 归主窗体所有，关闭时显式释放（协调器不再代关）。
+                try { _imageStore?.Dispose(); }
+                catch (Exception ex) { LogHelper.Warn("关闭：图像存储释放异常 " + ex.Message); }
                 LogHelper.Info("程序关闭，服务已释放");
             };
         }
@@ -1249,6 +1263,10 @@ namespace CommandCenter.Views
             { try { sc?.Dispose(); } catch (Exception ex) { LogHelper.Warn("热更：扫码枪释放异常 " + ex.Message); } }
             foreach (var cam in _cameras ?? new List<KeyenceIV4Camera>())
             { try { cam?.Dispose(); } catch (Exception ex) { LogHelper.Warn("热更：相机释放异常 " + ex.Message); } }
+            // V2.13.6：ImageStore 归主窗体所有（协调器不再代关），热更重建前必须显式释放旧的，
+            // 否则旧 FileSystemWatcher 会一直监听旧目录（句柄泄漏 + 事件发给已废弃的信号）。
+            try { _imageStore?.Dispose(); }
+            catch (Exception ex) { LogHelper.Warn("热更：图像存储释放异常 " + ex.Message); }
 
             // ③ 用新配置重建服务层（BuildServices 内部全部读取 _config 的最新值）
             BuildServices();

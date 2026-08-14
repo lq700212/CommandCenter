@@ -477,10 +477,11 @@ IV4 系列内置以太网，支持：EtherNet/IP、PROFINET CC-B、**TCP/IP 无�
      **双文件约定（V1.12.18；V1.12.24 起取图改"扫目录取最新"）**：基恩士每次拍照必然生成两个文件——
      jpeg（显示/归档主体）+ iv4p（基恩士私有复盘格式，上位机不解析、**原样复制归档**）。
      **文件名不保证恒为 `0000`**（现场实测可能推 `0084.jpeg`/`0084.iv4p` 等任意编号），程序**不写死
-     文件名**：`OnFtpFileArrived` 按扩展名配对（`FtpJpegPath`/`FtpIvpPath`）作信号加速（两个都到齐
-     才算 `IsSnapped` 提前收尾），归档时 `FinishAll` 经 `TryResolveFtpSources` **重扫相机 FTP 目录取
-     修改时间最新的一对**（`ImageStore.FindLatestPair`），扫描失败才回退事件路径；归档成功后删除
-     **实际归档的那对** FTP 源文件（中转暂存区逻辑，处理即删，防同点位重复触发时新旧图混淆）。
+     文件名**：`MainForm.BuildServices` 为每台相机 `ImageStore.AddMonitor` 各建一个 `FileSystemWatcher`，
+     相机一推图触发 `FtpFileArrived` → 置位该相机 `ManualResetEventSlim`（V2.13.6 信号加速，事件只作
+     "提前唤醒等图"，不承载归档路径）；等图流程 `WaitForFtpImage` 醒来后**重扫相机 FTP 目录取修改时间
+     最新的一对**（`ImageStore.FindLatestPair`），无论文件名如何都能拿到；归档成功后删除**实际归档的
+     那对** FTP 源文件（中转暂存区逻辑，处理即删，防同点位重复触发时新旧图混淆）。
 9. 断线处理：TCP 连接 `BeginConnect+WaitOne` 强制超时，失败自动重连；
    **KeepAlive 探活（V2.10.5）**：连接启用 TCP KeepAlive（空闲 5s 探测、间隔 5s）——
    **拔网线/相机断电这类静默断连（无 FIN/RST）** 之前靠 2s 心跳 `Poll` 测不出（相机空闲
@@ -493,7 +494,8 @@ IV4 系列内置以太网，支持：EtherNet/IP、PROFINET CC-B、**TCP/IP 无�
 
 > 本节是"文档与代码一致"的校验结果。改相机代码/配置时先对照这里，别把语义改漂了。
 > 涉及方法：`ProductionCoordinator.TriggerOneCamera`（触发编排）、`KeyenceIV4Camera.SwitchProgram/
-> SetOutputFormat`（指令）、`ImageStore.SaveImageFilePair`（归档）、`OnFtpFileArrived`（配对）。
+> SetOutputFormat`（指令）、`ImageStore.SaveImageFilePair`（归档）、`ProductionCoordinator.WaitForFtpImage`
+> （取图）、`ImageStore.FindLatestPair`（扫目录取最新对）、`ImageStore.AddMonitor`（监听启动）。
 
 **① 触发前的指令顺序（固定）**：`OF`（设输出格式）→ `PW`（切程序）→ `T2`（触发+读判定）。
 三步任一失败立即中止该相机（`FailReason`），**宁可不拍也不拍错**（程序没切对，判定/取图都对应错点位）。
@@ -513,19 +515,21 @@ IV4 系列内置以太网，支持：EtherNet/IP、PROFINET CC-B、**TCP/IP 无�
 0~127（如配 200 → 实际切到 127）。想验证配置是否真的切对程序，用 `ReadProgramNo()`（PR 指令）读回核对。
 
 **⑤ FTP 双文件到达顺序不保证**：`FileSystemWatcher` 对 jpeg/iv4p 各触发一次 Created/Renamed，
-谁先到不一定。`OnFtpFileArrived` 按扩展名分派槽位，**两个都填满才算 `IsSnapped`**（事件只作"图到→
-提前收尾"的信号加速）；只来一个文件时继续等，最终由 `ImageWaitMs`（默认 10s）超时兜底。
-**V1.12.24 放错机制**：即使事件漏报/文件名非 0000（如 0084），收尾归档时 `FinishAll` 也会**重扫相机
+谁先到不一定。事件只做"有文件来了 → 提前唤醒等图"的**信号加速**（`WaitForFtpImage` 里
+`ManualResetEventSlim.Wait(200)` 立即醒来重扫，替代固定 `Thread.Sleep(200)` 轮询），**不按扩展名配对、
+不承载归档路径**；真正取哪一对以"重扫目录取修改时间最新"为准。只来一个文件时照常扫目录（拿到半对则
+继续等下一拍），最终由 `ImageWaitMs`（默认 10s）超时兜底。
+**V1.12.24 放错机制（V2.13.6 不变）**：即使事件漏报/文件名非 0000（如 0084），等图时也会**重扫相机
 FTP 目录取修改时间最新的一对**（`ImageStore.FindLatestPair`），目录里有图照样归档——超时兜底不再
 "有图不存"。
 
-**⑥ 归档与删除顺序硬约束**：`FinishAll` 里**先** `SaveImageFilePair` 复制归档、**成功后才**
-`DeleteFtpSource` 删 FTP 源文件。删除的是**实际归档的那对**（`TryResolveFtpSources` 扫目录取到的
-最新对，事件路径仅兜底）。若归档失败（返回 null），**不删源文件**，回退用 FTP 源 jpeg 路径当
+**⑥ 归档与删除顺序硬约束**：`DoCameraShot` 里**先** `SaveImageFilePair` 复制归档、**成功后才**
+`DeleteSourceFile` 删 FTP 源文件。删除的是**实际归档的那对**（`WaitForFtpImage`/`FindLatestPair`
+扫目录取到的最新对）。若归档失败（返回 null），**不删源文件**，回退用 FTP 源 jpeg 路径当
 显示结果（图至少能看）；删除失败只记 Warn 日志不阻断（文件不存在=已删，正常）。
 删除必须在归档成功之后——否则复制失败时源文件没了，图就真丢了。
 
-**⑦ `SaveImageFilePair` 只复制不删除**：方法本身不碰 FTP 源文件，删除职责在协调器 `FinishAll`，
+**⑦ `SaveImageFilePair` 只复制不删除**：方法本身不碰 FTP 源文件，删除职责在协调器 `DoCameraShot`，
 两者解耦，避免单点删错。
 
 **⑧ iv4p 文件"原样复制"**：上位机不解析 iv4p 内容（基恩士私有复盘格式），`File.Copy` 原样搬运。
@@ -535,7 +539,7 @@ FTP 目录取修改时间最新的一对**（`ImageStore.FindLatestPair`），�
 **⑨ 归档失败时 Tcp/BR 分支提示**：`archived==null` 且 `ImageBytes==null`（Tcp 模式）时明确报错
 "图像归档失败（TCP 取图，内存解码失败）"；FTP 模式则回退用源文件，行为不同、别混。
 
-**⑩ 判定成功≠图到手**：`TriggerOk`（触发/判定成功）与 `IsSnapped`（图到齐）是两个独立标志。
+**⑩ 判定成功≠图到手**：触发/判定成功与图真正归档是两个独立环节（`DoCameraShot` 里分别判定）。
 触发成功但图没到 → 超时记失败（`Done=2`）；图到但判定为 NG → 图照样归档（`Done=1`，含NG）。
 
 ## 4.4 多相机配置（V1.1.0）
@@ -613,9 +617,9 @@ FTP 目录取修改时间最新的一对**（`ImageStore.FindLatestPair`），�
        （FileSystemWatcher）。⚠️ 若图永远不到（等图超时记取像失败），先核对相机侧推图目标
        目录与程序 `cameras[i].ftpUploadDir` 是否一致。**双文件约定（V1.12.18；V1.12.24 起取图
        扫目录取最新文件，不写死 0000）**：基恩士每次拍照生成 jpeg+iv4p 两个文件（文件名可能是
-       0084 等任意编号），程序按扩展名配对、两个都到齐才算到位（事件只作信号加速，收尾重扫目录
-       兜底），归档后删除实际归档的那对 FTP 源文件——联调时确认相机确实生成这两个文件（若相机侧
-       只推 jpeg，也可归档、iv4p 可缺）。
+       0084 等任意编号），程序 `WaitForFtpImage` 重扫目录取修改时间最新的一对，事件（V2.13.6 信号
+       加速）只作提前唤醒、不依赖文件内容，归档后删除实际归档的那对 FTP 源文件——联调时确认相机
+       确实生成这两个文件（若相机侧只推 jpeg，也可归档、iv4p 可缺）。
 - [ ] **程序号切换（V1.12.18；V1.12.25 起按相机分表）**：用调试工具发 `PW,000`~`PW,127` 确认相机
        响应 `PW[CR]`、无效号响应 `ER,PW,03`；发 `PR` 读回当前程序号核对；在设置窗体"窗口/点位配置…"
        的下半区"相机程序映射"按相机填好后，触发时日志应先见 `切换程序→PW,nnn` 再 `T2`。
@@ -1185,6 +1189,17 @@ string model = Encoding.ASCII.GetString(bytes, 0, end);
 
 > 本部分保留原 `通讯接入.md` 的版本演进记录，最新在前。
 
+- V2.13.6（2026-08-14，FTP 取图信号加速恢复 + ImageStore 所有权修正）：排查发现事件加速实际是
+  **死代码**——`ImageStore.AddMonitor`/`FtpFileArrived` 无任何调用方（取图链路早已重构为
+  `WaitForFtpImage` 主动轮询，功能无 bug、200ms 轮询 + `ImageWaitMs` 超时兜底仍可靠），且
+  `ProductionCoordinator.Dispose()` 原本代关 `_imageStore`，一旦补上 watcher，`SwitchModel` 切型号时
+  只重建协调器、复用同一 ImageStore 会把监听误关。本次：① `MainForm.BuildServices` 为每台相机
+  `AddMonitor` 启动 FileSystemWatcher，相机一推图触发 `FtpFileArrived` → 置位该相机
+  `ManualResetEventSlim` → `WaitForFtpImage` 用 `Wait(200)` 替代 `Thread.Sleep(200)`（每拍行首 Reset），
+  事件唤醒立即重扫目录，消除纯轮询最长 200ms 被动延迟；② 协调器 `Dispose` 改为退订事件、不再
+  Dispose ImageStore（所有权归 MainForm），热更/关窗由 MainForm 显式 `_imageStore?.Dispose()`。
+  事件只作"提前唤醒"，不承载归档路径，取哪一对始终以"扫目录取修改时间最新"为准，语义不受影响。
+  涉及：`Services/ProductionCoordinator.cs`、`Views/MainForm.cs`。无配置/协议变化。
 - V2.13.5（2026-08-14，相机ID落实为运行时唯一关联键 + 相机 PLC 通道地址显式化）：承接 V2.13.4，
   把最后两处"相机身份=列表下标"的隐式约定彻底移除：
   ① `WindowPointItem` 的 `cameraIndex`（列表下标）字段改名 **`CameraId`**（真编号），窗口↔点位
