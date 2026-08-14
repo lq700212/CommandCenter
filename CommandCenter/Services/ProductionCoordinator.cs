@@ -116,8 +116,12 @@ namespace CommandCenter.Services
         /// 残留。现场若"过枪→PLC 请求"间隔明显大于 2s，请调大此值并同步注释。</summary>
         private const int ScanCodeKeepMs = 2000;
 
-        /// <summary>到位轮询周期（毫秒）：连上 PLC 时用</summary>
-        private const int PollMs = 200;
+        /// <summary>到位轮询周期（毫秒）：连上 PLC 时用。
+        /// 【V2.14.19 节拍优化】200→100：PLC 从站请求写进 DataStore 后，上位机最多要等一个轮询周期
+        /// 才读到。这是"机器人到位→触发拍照"链路的固定量化延迟（平均半个周期），缩到 100ms 平均省
+        /// 50ms/拍、最多省 100ms/拍，且轮询体是本地内存读（NModbus 从站，非网络往返），负载无压力。
+        /// 如现场仍需更紧节拍可再调小，但不建议 <50（量化延迟收益递减、占用 CPU 增加）。</summary>
+        private const int PollMs = 100;
 
         /// <summary>连接失败后的重试用期（毫秒）：放慢节奏，避免高频无效尝试刷爆日志</summary>
         private const int SlowPollMs = 1000;
@@ -212,7 +216,7 @@ namespace CommandCenter.Services
         {
             _running = true;
             HookScannerEvents();
-            SafeChange(_positionTimer, 0, PollMs); // 立即首轮，之后每 200ms
+            SafeChange(_positionTimer, 0, PollMs); // 立即首轮，之后每 100ms（V2.14.19 由 200ms 缩短）
             SetState("等待 PLC 请求");
         }
 

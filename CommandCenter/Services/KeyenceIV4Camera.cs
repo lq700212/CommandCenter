@@ -88,6 +88,19 @@ namespace CommandCenter.Services
         private bool _lastFailed; // 上一次连接是否失败（日志降噪）
 
         /// <summary>
+        /// 上次成功切到相机上的程序号缓存（V2.14.19 节拍优化专用）。
+        /// -1 = 未知：从未切过，或连接已重建（相机可能因断电/断开恢复默认程序，缓存不可信）。
+        /// 值只在 _lock 锁内读写（与连接状态同一把锁），见 SwitchProgram / EnsureConnected。
+        /// 【为什么需要它】现场每个点位触发前都切程序（PW,nnn），但相邻点位常是同一程序
+        /// （U171 上相 点3~6→P002、点14/15→P010、点18/19→P010），旧实现每次拍照都重发 PW，
+        /// 一次 PW 往返 + 相机切换实测 200~390ms（比 T2 判定还久），纯浪费、吃节拍。
+        /// 缓存命中（目标 == 缓存）直接跳过重发，一轮 20 点最多省 ~1.5~2s。
+        /// 【正确性防线】连接重建（断电/断线/超时重建）必然重置为 -1 → 下一拍必重发 PW，
+        /// 绝不让"相机已回默认程序"的点位错拍；DevTest 手动切程序走同一实例也会刷新缓存。
+        /// </summary>
+        private int _lastProgramNo = -1;
+
+        /// <summary>
         /// 触发＋读取判定结果（T2）。
         /// 返回 TriggerReadOutcome：Succeeded=true 表示通讯成功并拿到判定；
         /// IsOk=true 表示判 OK（全部判定位为合格位）。
@@ -127,6 +140,20 @@ namespace CommandCenter.Services
                 if (!EnsureConnected()) return false;
                 // 夹到合法区间：IV4 程序编号 000~127
                 programNo = Math.Max(0, Math.Min(127, programNo));
+
+                // 【V2.14.19 节拍优化】目标程序与上次成功切到的一致 → 相机已在该程序，
+                // 直接跳过 PW 不重发（省一次 TCP 往返 + 相机切换，实测 200~390ms）。
+                // 语义与"发 PW 成功"等价：返回 true = 已确保相机在目标程序。
+                // 缓存不可信时（_lastProgramNo==-1，连接刚重建）不命中、照常重发，正确性不受影响。
+                lock (_lock)
+                {
+                    if (_lastProgramNo == programNo)
+                    {
+                        LogHelper.Info($"相机已在程序 {programNo:D3}，跳过切程序指令（V2.14.19 节拍优化）");
+                        return true;
+                    }
+                }
+
                 string cmd = "PW," + programNo.ToString("D3");
                 string raw = SendCommandAndReadLine(cmd, _cfg.ResponseTimeoutMs);
                 if (raw == null) return false;
@@ -138,9 +165,17 @@ namespace CommandCenter.Services
                 // 成功响应是回显 "PW"（或带后续）；ER 已在上面拦掉，这里按前缀 PW 判断
                 bool ok = raw.StartsWith("PW", StringComparison.OrdinalIgnoreCase);
                 if (ok)
+                {
                     LogHelper.Info($"相机已切换程序 → {cmd}（响应：{raw}）");
+                    lock (_lock)
+                    {
+                        _lastProgramNo = programNo;   // 记录本次成功切到的程序，供下拍判断是否可跳过
+                    }
+                }
                 else
+                {
                     LogHelper.Warn($"相机切程序响应异常 {_cfg.IpAddress}:{_cfg.CommandPort}：{raw}");
+                }
                 return ok;
             }
             catch (Exception ex)
@@ -505,6 +540,9 @@ namespace CommandCenter.Services
                     TcpKeepAlive.Configure(_tcp);
                     _stream = _tcp.GetStream();
                     _lastFailed = false;
+                    // V2.14.19：连接（重建）成功即重置程序缓存——相机可能因断电/断开恢复默认程序，
+                    // 缓存不可信了。置 -1 后下一个点位必然重发 PW 确保程序正确，绝不错拍。
+                    _lastProgramNo = -1;
                     SetConnected(true);
                     LogHelper.Info($"相机连接成功 {_cfg.IpAddress}:{_cfg.CommandPort}");
                     return true;
