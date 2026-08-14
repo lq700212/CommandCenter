@@ -61,6 +61,23 @@ namespace CommandCenter.Views
         // 与标题栏所见型号不一致。故本字段优先级最高：MainForm 当前选中值 > 配置 ProductModel > 首个候选。
         private readonly string _titleBarModel;
 
+        /// <summary>
+        /// 相机表行 Tag（V2.13.8 排序解耦）：绑定"来源配置对象 + 原始配置下标"。
+        /// 【为什么需要原始下标】相机表在展示时按 CameraId 升序排序（LoadCameraRows），但
+        /// "前上相机后下相机"默认铺排（DefaultWindowPointMap / AutoFitCameraStarts）依赖相机
+        /// 【列表顺序】——若把排序后的表格行序直接回写 _cfg.Cameras，列表就变成 [下,上]，
+        /// 任何重新生成默认铺排的路径（恢复默认/点位表长度变化重置）都会得到"先下后上"的翻转铺排，
+        /// 窗口编号语义与 WindowEnabled 禁用错位。故保存时（CollectCamerasFromGrid）按本字段恢复
+        /// 原始配置顺序，排序只影响"展示顺序"、不影响"持久化顺序"，两处彻底解耦。
+        /// - Config：来源 CameraConfig 引用（复用保留 WindowPointForm 配好的 StationPrograms 映射表）；
+        /// - OriginalIndex：该相机在 _cfg.Cameras 里的原始下标；-1 = 本次新增行（无原始下标，保存时排最后）。
+        /// </summary>
+        private class CameraRowTag
+        {
+            public CameraConfig Config;
+            public int OriginalIndex = -1;
+        }
+
         public SettingsForm(AppConfig cfg, string titleBarModel = null)
         {
             _cfg = cfg;
@@ -273,16 +290,21 @@ namespace CommandCenter.Views
                 string src = string.IsNullOrWhiteSpace(c.ImageSource) ? "Ftp" : c.ImageSource;
                 var row = gridCameras.Rows[gridCameras.Rows.Add(camId, c.Name, c.IpAddress, c.CommandPort, c.FtpUploadDir, src,
                     c.PlcRequestAddress, c.PlcResultAddress)];
-                row.Tag = c;   // 记下来源配置，保存时保留它配好的 StationPrograms 映射表
+                // V2.13.8：Tag 绑"来源配置 + 原始下标"（排序只改展示，保存按原始顺序落盘，见 CameraRowTag 注释）
+                row.Tag = new CameraRowTag { Config = c, OriginalIndex = idx };
             }
             // 至少留一行可见，别让表格空着无从下手
             if (gridCameras.Rows.Count == 0)
-                foreach (var c in CameraConfig.DefaultCameras())
+            {
+                var defaults = CameraConfig.DefaultCameras();
+                for (int i = 0; i < defaults.Count; i++)
                 {
+                    var c = defaults[i];
                     var row = gridCameras.Rows[gridCameras.Rows.Add(c.CameraId > 0 ? c.CameraId : ++seq, c.Name, c.IpAddress, c.CommandPort,
                         c.FtpUploadDir, "Ftp", c.PlcRequestAddress, c.PlcResultAddress)];
-                    row.Tag = c;
+                    row.Tag = new CameraRowTag { Config = c, OriginalIndex = i };
                 }
+            }
         }
 
         /// <summary>
@@ -297,7 +319,7 @@ namespace CommandCenter.Views
             {
                 if (r.Cells["CameraId"].Value == null) continue; // 末尾"新行"占位行跳过
                 seq++;
-                var cam = r.Tag as CameraConfig;
+                var cam = (r.Tag as CameraRowTag)?.Config; // V2.13.8：Tag 升级为 CameraRowTag
                 // 真编号>0 保留；0 或行 Tag 都没有（全新行）→ 补行序，保证列里有数可看
                 if (cam == null || cam.CameraId <= 0)
                     r.Cells["CameraId"].Value = seq;
@@ -310,12 +332,17 @@ namespace CommandCenter.Views
         /// CameraConfig（LoadCameraRows 时绑定，新增行 Tag=null），优先复用该对象并直接改字段，
         /// 从而完整保留 WindowPointForm 写回的 StationPrograms（点位→程序号映射表）不丢失；
         /// ② 打开映射页时也要传"含未保存新增相机"的列表，让新相机立刻能配它自己的映射表。
+        /// 【V2.13.8 顺序恢复】收集后按 CameraRowTag.OriginalIndex 恢复【原始配置顺序】回写：
+        ///   表格展示按 CameraId 升序排（LoadCameraRows），但默认铺排（DefaultWindowPointMap 等）
+        ///   依赖相机列表顺序，若把排序后的行序写回 _cfg.Cameras 会翻转"前上相机后下相机"铺排。
+        ///   故保存顺序恒为原始顺序（新增行排最后），排序只影响展示、不影响持久化与运行逻辑。
         /// 【约束】IP 空的行视为未填写自动剔除；复用对象时注意"废弃的 ProgramNo 不写回"。
         /// </summary>
-        /// <returns>相机列表（与表格行一一对应，顺序=行序）</returns>
+        /// <returns>相机列表（与配置原始顺序一致，新增行排最后）</returns>
         private List<CameraConfig> CollectCamerasFromGrid()
         {
-            var cams = new List<CameraConfig>();
+            // (相机, 原始配置下标；-1=本次新增行)
+            var collected = new List<Tuple<CameraConfig, int>>();
             foreach (DataGridViewRow r in gridCameras.Rows)
             {
                 string ip = r.Cells["IpAddress"].Value != null ? r.Cells["IpAddress"].Value.ToString().Trim() : "";
@@ -328,13 +355,16 @@ namespace CommandCenter.Views
                 string imgSrc = r.Cells["ImageSource"].Value == null ? "Ftp" : r.Cells["ImageSource"].Value.ToString();
 
                 // 复用行 Tag 上的原配置对象（保留它身上配好的 StationPrograms 映射表）；
-                // 新增行（Tag=null）才新建对象（默认空映射表，正好符合"新相机有自己的表"）。
-                var cam = r.Tag as CameraConfig;
+                // 新增行（Tag=null/无 Config）才新建对象（默认空映射表，正好符合"新相机有自己的表"）。
+                var tag = r.Tag as CameraRowTag;
+                var cam = tag != null ? tag.Config : null;
+                int origIdx = tag != null ? tag.OriginalIndex : -1;
                 if (cam == null)
                 {
                     cam = new CameraConfig();
-                    r.Tag = cam;   // 关键：回绑到行 Tag，之后映射页配好的映射写回此对象，
-                                   // 保存时再走本方法复用同一对象，映射才不丢
+                    // 关键：回绑到行 Tag，之后映射页配好的映射写回此对象，
+                    // 保存时再走本方法复用同一对象，映射才不丢；新增行无原始下标 → -1（排最后）。
+                    r.Tag = new CameraRowTag { Config = cam, OriginalIndex = -1 };
                 }
                 // V2.13.4：相机ID（基恩士真编号）从表格第一列读回；非法/空按 0（运行时回退行序）
                 int camId = 0;
@@ -357,9 +387,17 @@ namespace CommandCenter.Views
                 cam.PlcResultAddress = resAddr;
                 // 注意：不再写回废弃的 ProgramNo（V1.12.25 起点位→程序号由 StationPrograms 表驱动，
                 // 在"窗口/点位配置…"里配；此处不赋值则按默认 -1，保证旧值不残留误导现场）
-                cams.Add(cam);
+                collected.Add(Tuple.Create(cam, origIdx));
             }
-            return cams;
+
+            // 恢复持久化顺序：原始下标升序（OrderBy 稳定），新增行（-1→int.MaxValue）排最后、
+            // 多条新增行保持表格相对顺序。返回的列表顺序 = 下次运行 BuildServices/默认铺排看到的顺序。
+            return collected
+                .Select((t, i) => new { Cam = t.Item1, Orig = t.Item2 >= 0 ? t.Item2 : int.MaxValue, Seq = i })
+                .OrderBy(x => x.Orig)
+                .ThenBy(x => x.Seq)
+                .Select(x => x.Cam)
+                .ToList();
         }
 
         /// <summary>给两个扫码枪表格建好列结构（V1.12.8 起拆分为 TCP 表 + 串口表）。

@@ -102,6 +102,8 @@ namespace CommandCenter.Utils
             // （旧配置 plcRequestAddress=0 曾是"按相机序号自动"，V2.13.4 起改为显式配置，这里把
             // 前两台按现场默认补齐 2/3、5/6，保证旧配置文件升级后相机仍参与轮询，行为不变）
             EnsureCameraIdentity(cfg);
+            // V2.13.9：恢复现场默认相机顺序（修复 V2.13.8 排序保存的历史配置，见方法注释）
+            EnsureDefaultCameraOrder(cfg);
 
             // 保证窗口→存图点位映射长度与窗口总数一致（缺的补默认、多的截断）
             EnsureStationMap(cfg);
@@ -161,17 +163,60 @@ namespace CommandCenter.Utils
         }
 
         /// <summary>
+        /// 恢复现场默认相机顺序（V2.13.9，修复 V2.13.8 排序保存的历史配置）：
+        /// 上相机（defaults[0]，IP 19.87.6.213）与 下相机（defaults[1]，IP 19.87.6.212）若恰好
+        /// 位置颠倒（下相机在下标 0、上相机在下标 1），加载时自动换回 [上, 下]。
+        /// 【为什么需要】默认铺排（DisplayConfig.DefaultWindowPointMap / AutoFitCameraStarts 的
+        ///   "前上相机后下相机"）依赖相机【列表顺序】；V2.13.8 设置页按 CameraId 升序排序并
+        ///   按表格行序保存，会把列表写成 [下(1), 上(2)]。本修复（V2.13.9）让设置页保存时恢复
+        ///   原始顺序，但【已受影响的存量 json】（V2.13.8 期间保存过的配置）里 cameras 已经是
+        ///   [下,上]——仅靠"保存恢复"救不了它们，必须在加载时迁移一次，否则任何重新生成默认铺排
+        ///   的路径（恢复默认/点位表长度变化重置）仍会得到"先下后上"的翻转铺排。
+        /// 【安全性】只重排"两台默认相机恰好颠倒且各恰出现一次"的情形；自定义相机/单独一台默认
+        ///   相机/已正确顺序的列表都不干预。WindowPointMaps/PLC 通道地址/存图目录全以 CameraId 或
+        ///   配置对象为键，重排列表顺序无任何副作用（主界面相机灯/DevTestForm 按下标与配置对齐，
+        ///   按新顺序重建即可）。
+        /// </summary>
+        private static void EnsureDefaultCameraOrder(Models.AppConfig cfg)
+        {
+            var cams = cfg.Cameras;
+            if (cams == null || cams.Count < 2) return;
+            var defaults = Models.CameraConfig.DefaultCameras();
+            if (defaults == null || defaults.Count < 2 || defaults[0] == null || defaults[1] == null) return;
+
+            int upIdx = -1, downIdx = -1;   // up=上相机(defaults[0])、down=下相机(defaults[1])
+            string upIp = (defaults[0].IpAddress ?? "").Trim();
+            string downIp = (defaults[1].IpAddress ?? "").Trim();
+            for (int i = 0; i < cams.Count; i++)
+            {
+                if (cams[i] == null) continue;
+                string ip = cams[i].IpAddress?.Trim() ?? "";
+                if (ip.Equals(upIp, StringComparison.OrdinalIgnoreCase)) upIdx = i;
+                else if (ip.Equals(downIp, StringComparison.OrdinalIgnoreCase)) downIdx = i;
+            }
+            // 两台默认相机都存在、且顺序颠倒（下相机在 0、上相机在 1）→ 换回现场默认
+            if (upIdx >= 0 && downIdx >= 0 && downIdx < upIdx)
+            {
+                var tmp = cams[downIdx];
+                cams[downIdx] = cams[upIdx];
+                cams[upIdx] = tmp;
+                LogHelper.Info("相机配置升级：检测到默认相机顺序颠倒（下相机在前），已恢复现场顺序 [上相机, 下相机]（V2.13.9）");
+            }
+        }
+
+        /// <summary>
         /// 相机配置升级（V2.13.4）：旧配置文件缺 CameraId / PLC 通道地址（都是 0）时自动补齐，
         /// 保证升级后相机仍参与轮询、点位/通道仍按相机ID定位，行为与旧版一致。
         /// 【为什么需要】V2.13.4 起：
         ///   - 相机身份键 = CameraId（真编号，上=2/下=1），旧 json 没存该字段=0；
         ///   - PLC 通道地址 = 每台相机显式配置（PlcRequestAddress/PlcResultAddress），旧 json 存的
         ///     0 曾是"按相机序号自动"（第1台=2/5、第2台=3/6），若保持 0 会被当成"未配置通道"而不参与轮询。
-        /// 【补法】
-        ///   - CameraId<=0 → 先按 IP 匹配现场默认两台相机（DefaultCameras）取真编号（213→2、212→1），
+        /// 【补法】（一律按 IP 匹配默认相机，不依赖列表下标——V2.13.8 起设置页相机表排序展示、
+        ///   保存恢复原始顺序，且 json 可能被手改顺序，用下标匹配 defaults[i] 会张冠李戴）
+        ///   - CameraId<=0 → 按 IP 匹配现场默认两台相机（DefaultCameras）取真编号（213→2、212→1），
         ///     匹配不上（新增自定义相机）才按行序兜底；
-        ///   - PlcRequestAddress<=0 且该相机是列表第 1/2 台 → 按现场默认补 2/3（协议 40002/40003）；
-        ///     PlcResultAddress<=0 且第 1/2 台 → 补 5/6（协议 40005/40006）。第 3 台起保留 0
+        ///   - PlcRequestAddress/PlcResultAddress<=0 → 按 IP 匹配默认相机取默认通道地址
+        ///     （上相机 2/5 协议 40002/40005、下相机 3/6）；匹配不上（第 3 台起自定义相机）保留 0
         ///     （未配置通道，需现场/PLC 协商地址后在设置页填写）。
         /// </summary>
         private static void EnsureCameraIdentity(Models.AppConfig cfg)
@@ -182,27 +227,27 @@ namespace CommandCenter.Utils
             {
                 var cam = cfg.Cameras[i];
                 if (cam == null) continue;
+                string ip = cam.IpAddress?.Trim() ?? "";
+                // 按 IP 匹配现场默认相机（V2.13.8 起统一走这里，替代"按下标 defaults[i]"）：
+                // 列表顺序可能被设置页排序/手改 json 打乱，只有 IP 是相机的稳定身份。
+                Models.CameraConfig byIp = null;
+                foreach (var d in defaults)
+                {
+                    if (d != null && (d.IpAddress ?? "").Trim().Equals(ip, StringComparison.OrdinalIgnoreCase))
+                    { byIp = d; break; }
+                }
 
                 // ① 补 CameraId：按 IP 匹配默认相机取真编号，匹配不上按行序
                 if (cam.CameraId <= 0)
-                {
-                    int byIp = 0;
-                    string ip = cam.IpAddress?.Trim() ?? "";
-                    foreach (var d in defaults)
-                    {
-                        if (d != null && (d.IpAddress ?? "").Trim().Equals(ip, StringComparison.OrdinalIgnoreCase))
-                        { byIp = d.CameraId; break; }
-                    }
-                    cam.CameraId = byIp > 0 ? byIp : i + 1;
-                }
+                    cam.CameraId = byIp != null && byIp.CameraId > 0 ? byIp.CameraId : i + 1;
 
-                // ② 补 PLC 通道地址：仅前两台且为 0 时补现场默认（第3台起保持 0=未配置）
-                if (i < defaults.Count && defaults[i] != null)
+                // ② 补 PLC 通道地址：按 IP 匹配默认相机取默认通道地址（匹配不上=新增相机，保持 0=未配置）
+                if (byIp != null)
                 {
-                    if (cam.PlcRequestAddress <= 0 && defaults[i].PlcRequestAddress > 0)
-                        cam.PlcRequestAddress = defaults[i].PlcRequestAddress;
-                    if (cam.PlcResultAddress <= 0 && defaults[i].PlcResultAddress > 0)
-                        cam.PlcResultAddress = defaults[i].PlcResultAddress;
+                    if (cam.PlcRequestAddress <= 0 && byIp.PlcRequestAddress > 0)
+                        cam.PlcRequestAddress = byIp.PlcRequestAddress;
+                    if (cam.PlcResultAddress <= 0 && byIp.PlcResultAddress > 0)
+                        cam.PlcResultAddress = byIp.PlcResultAddress;
                 }
             }
         }
