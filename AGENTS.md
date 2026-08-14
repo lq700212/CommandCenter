@@ -102,7 +102,15 @@ ProductModelAddress/ProductModelLen`）+ 顶层 `ProductModel`（**两处可改�
    "_" + 时间戳**，如 FTP 里的 `0084.jpeg/iv4p` → 归档 `0084_20260814_164022_461.jpeg` + 同名 `.iv4p`，
    **不再用 FileNameTemplate 模板渲染**，模板仅旧版 TCP/BR 取图兼容）后 **`DeleteSourceFile` 删除"实际归档的那对"
    FTP 源文件**（处理即删防同点位重复触发新旧图混淆；**超时兜底时只要目录里有图照样归档**，不再
-   "有图不存"）。⚠️ **ImageStore 归 MainForm 所有，协调器 Dispose【不得】关它**（V2.13.6 修复：
+   "有图不存"）。**存图定期清理（V2.14.12）**：`ImageConfig.KeepDays`（默认 30，0=不自动清理，
+   在 DirTreeEditForm"存图保留天数"处可调）控制存图目录保留天数，`MainForm.BuildServices` 建完
+   ImageStore 即调 `StartPeriodicCleanup()` 起后台定时器（启动 30 秒后首次、每天一次，线程池线程不卡 UI）；
+   `RunCleanupOnce` 只扫 `SaveRootDir` 顶层目录：**快速路径**第一层目录名是标准日期
+   （`{年月日}` 渲染的"2026年08月11日"或"20260811"）按目录名直接判定过期即整棵删；
+   **通用路径**目录名非日期时递归查整棵子树**所有文件**都早于阈值才删、还有新图保留（防误删）；
+   单目录失败记日志跳过；**存图根目录是盘符根（如 `E:\`）直接放弃清理并告警，绝不删盘根子目录**。
+   清理只动保存根目录过期目录、绝不动相机 FTP 取图目录；`Dispose` 停定时器（热更/关窗自动停）。
+   改动存图清理逻辑必须同步本段与 docs/CommandCenter.md（§4.3 ⑨/第六部分）。⚠️ **ImageStore 归 MainForm 所有，协调器 Dispose【不得】关它**（V2.13.6 修复：
    此前协调器 Dispose 调 `_imageStore.Dispose()`，SwitchModel 只重建协调器、复用同一 ImageStore，
    切型号后监听就被关掉、信号加速失效）；热更（ApplyRuntimeConfig）与关窗（FormClosing）由 MainForm
    显式 Dispose，旧 watcher 不泄漏。**现场相机映射（V1.12.22 定稿；V2.13.3 修正 FTP 目录；V2.13.4 相机编号=独立 cameraId 字段）**：列表第1台=**上相机**=`19.87.6.213`→FTP 取图目录 `D:\IV存图\2`（**真编号 `cameraId`=2**）；列表第2台=**下相机**=`19.87.6.212`→`D:\IV存图\1`（**真编号=1**）——编号=存图目录号（上→\2=相机2、下→\1=相机1）。⚠️ **相机真编号独立存 `CameraConfig.CameraId`，不能靠交换列表顺序实现**（V2.13.5 起 PLC 通道地址
@@ -139,7 +147,7 @@ ProductModelAddress/ProductModelLen`）+ 顶层 `ProductModel`（**两处可改�
 | `CommandCenter/Views/DevTestForm.cs` | 功能测试窗体（开发者专用：相机 T1/T2 触发（T2 取图闪图存图，V1.12.24）+ PLC 寄存器交互 + 扫码枪读码展示/发触发指令，复用主窗体连接，V1.12.0） |
 | `CommandCenter/Views/SerialInputForm.cs` | 手动输入序列号对话框（V2.14.6 恢复；V2.14.7 外观改到 Designer 分部文件 SerialInputForm.Designer.cs，可用 VS 设计器拖拽微调 UI，本类只留业务：预填全选/回车确定/Esc取消/空提交拦截）：外观对齐 LoginForm（顶部蓝色横幅+白面板+蓝主按钮），点标题栏"人工补录"按钮弹出（V2.14.7 起双击序列号框入口已取消） |
 | `CommandCenter/Controls/CameraDisplayControl.cs` | 相机显示窗 + 右下角自绘 OK/NG 徽标（主界面不显示点位标识，点位只走设置界面查询）；左上角窗口编号显隐由配置 `DisplayConfig.WindowIndexVisible` 控制（V2.10.6） |
-| `CommandCenter/Views/DirTreeEditForm.cs` | 图片存储目录结构可视化配置（逐级目录 + 文件名规则 + 实时预览） |
+| `CommandCenter/Views/DirTreeEditForm.cs` | 图片存储目录结构可视化配置（逐级目录 + 文件名规则 + 实时预览 + 时间戳后缀开关 + 存图保留天数，V2.14.12） |
 | `CommandCenter/Views/WindowPointForm.cs` | 窗口↔存图点位 + 点位↔相机程序号 可视化配置（格子矩阵编辑点位/交换/恢复默认，V2.13 恢复编辑并按型号存 WindowPointMaps + 相机下拉点位程序表，V1.12.25 同页混排、V1.12.26 两列改下拉选择、V2.12.0 自适应下按相机表铺排矩阵/格子标"相机名·点位号"；**相机↔型号单向联动（V2.14.5）**：cmbCamera 恒列所有相机、选定后 cmbModel 只列该相机有点位的型号、切型号不再反过滤相机——见 `ModelCandidatesFor`/`SyncModelForCamera`/`ApplySelections`） |
 | `docs/CommandCenter.md` | **项目文档（V2.10 合并版）**：① 用户使用说明（操作手册）② 系统总览与设备清单 ③ 扫码枪对接 ④ 相机对接 ⑤ PLC 通讯对接与对外协议定义（§5.5）⑥ 计数与结果流转 ⑦ IP/参数速查 ⑧ 版本演进 |
 | `docs/上位机通讯封装范式.md` | 通讯架构技术总结（连接/心跳/重连/UI 解耦范式，跨项目可复用，独立保留） |

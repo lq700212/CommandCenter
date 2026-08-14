@@ -29,12 +29,28 @@ namespace CommandCenter.Services
     ///   两家各存各的目录、互不覆盖，文件名看起来/归档上都符合"该相机点位N"的现场语义。
     ///
     /// 【线程安全】FileSystemWatcher 回调运行在监听线程，事件一定要跨线程同步到 UI（Invoke）。
+    ///
+    /// 【存图定期清理（V2.14.12）】
+    ///   存图目录只保留最近 KeepDays 天的内容（默认 30 天，0 = 不自动清理）。
+    ///   上位机启动后由 MainForm 调 StartPeriodicCleanup() 启动后台定时器（启动后 30 秒跑第一次，
+    ///   之后每 24 小时一次），在【线程池线程】上扫描 SaveRootDir 的【顶层子目录】：
+    ///     - 快速路径：目录名是标准日期（{年月日} 渲染的 "2026年08月11日" 或 "20260811"），
+    ///       日期早于保留阈值 → 整棵目录连同子目录一起删除（默认结构第一层就是日期目录）；
+    ///     - 通用路径：目录名不是日期（现场自定义了层级结构）→ 递归扫描整棵子树，
+    ///       只要子树里【所有文件】的修改时间都早于阈值才删除，否则保留（防误删仍有新图）。
+    ///   删除全程后台执行、不占 UI 线程；且只动 SaveRootDir 下顶层目录，绝不动相机 FTP 取图目录。
     /// </summary>
     public class ImageStore : IDisposable
     {
         private readonly ImageConfig _cfg;
         private readonly List<FileSystemWatcher> _watchers = new List<FileSystemWatcher>();
         private readonly List<string> _watchedDirs = new List<string>();
+
+        /// <summary>存图定期清理后台定时器（V2.14.12，每天一次；null = 未启动）。</summary>
+        private System.Threading.Timer _cleanupTimer;
+
+        /// <summary>清理任务是否正在执行（防重入：删除大目录较耗时，上次没跑完不能再起下一次）。</summary>
+        private volatile bool _cleanupRunning;
 
         /// <summary>
         /// 相机 FTP 上传新图事件。参数：相机索引（对应配置 Cameras 下标）、文件完整路径。
@@ -300,6 +316,160 @@ namespace CommandCenter.Services
             }
         }
 
+        /// <summary>
+        /// 启动"存图目录定期清理"后台任务（V2.14.12）。MainForm 在 BuildServices 创建本服务后调用；
+        /// 热更/关窗时本服务 Dispose 会自动停掉定时器（见 StopCleanup），不会残留后台任务。
+        /// 定时器回调跑在【线程池线程】，删除大目录不阻塞任何 UI/协调器线程。
+        /// 清理规则见类注释"存图定期清理（V2.14.12）"。
+        /// </summary>
+        public void StartPeriodicCleanup()
+        {
+            StopCleanup();
+            _cleanupTimer = new System.Threading.Timer(
+                _ => RunCleanupOnce(),
+                null,
+                TimeSpan.FromSeconds(30),   // 启动后 30 秒先跑第一次（给取图/归档留余量，不影响开机流程）
+                TimeSpan.FromHours(24));    // 之后每天执行一次
+            LogHelper.Info($"存图定期清理已启动：根目录 {_cfg.SaveRootDir}，保留 {_cfg.KeepDays} 天"
+                + (_cfg.KeepDays <= 0 ? "（0 = 不自动清理）" : "，每天后台执行一次"));
+        }
+
+        /// <summary>
+        /// 执行一次清理：扫描 SaveRootDir 顶层子目录，把"整棵子树都已过期"的目录连子目录一起删除。
+        /// 全程 try-catch：任何单个目录失败只记日志跳过，绝不让清理异常影响程序其它部分。
+        /// </summary>
+        private void RunCleanupOnce()
+        {
+            // 防重入：上一次清理还没跑完（删除几十 GB 目录可能耗时数分钟），直接跳过本次
+            if (_cleanupRunning) return;
+            _cleanupRunning = true;
+            try
+            {
+                int keepDays = _cfg.KeepDays;
+                if (keepDays <= 0) return;   // 0 = 不自动清理
+                string root = _cfg.SaveRootDir;
+                if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) return;
+
+                // 安全护栏：存图根目录绝不能是盘符根目录（如 "D:\"），否则枚举出的顶层目录就是
+                // 整个盘的直接子目录，误删会毁掉整盘内容。发现是盘根直接放弃本轮清理并告警。
+                if (string.Equals(Path.GetPathRoot(root).TrimEnd('\\', '/'),
+                                  root.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
+                {
+                    LogHelper.Warn("存图定期清理：根目录是盘符根目录，已跳过清理（防止误删整盘）→ " + root);
+                    return;
+                }
+
+                // 保留阈值：只保留最近 keepDays 天的目录（本地时间，与 File.GetLastWriteTime 同基准）
+                DateTime cutoff = DateTime.Now.AddDays(-keepDays);
+                int deleted = 0, skipped = 0;
+                foreach (string dir in Directory.EnumerateDirectories(root))
+                {
+                    try
+                    {
+                        if (IsDirExpired(dir, cutoff))
+                        {
+                            Directory.Delete(dir, true);   // 递归删除整棵（目录 + 所有子目录 + 文件）
+                            deleted++;
+                            LogHelper.Info($"存图定期清理：已删除过期目录（早于 {cutoff:yyyy-MM-dd}，保留 {keepDays} 天）{dir}");
+                        }
+                        else skipped++;
+                    }
+                    catch (Exception ex)
+                    {
+                        // 单个目录删除失败（被占用/权限/正在写入）只记日志跳过，不影响其它目录
+                        LogHelper.Warn($"存图定期清理：跳过目录 {dir} → {ex.Message}");
+                    }
+                }
+                LogHelper.Info($"存图定期清理完成：共扫描 {deleted + skipped} 个顶层目录，删除 {deleted} 个，保留 {skipped} 个");
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Warn("存图定期清理异常：" + ex.Message);
+            }
+            finally
+            {
+                _cleanupRunning = false;
+            }
+        }
+
+        /// <summary>
+        /// 判断一个目录是否"整棵子树都已过期"（即可以整体删除）。
+        /// 【快速路径】目录名是标准日期（默认结构第一层就是 {年月日} 渲染的 "2026年08月11日"
+        ///   或紧凑 "20260811"）：日期目录里的图都是当天拍的，目录名即最后写入日期，
+        ///   日期早于保留阈值直接判定过期——O(1) 判定，不用遍历几千个文件。
+        /// 【通用路径】目录名不是日期（现场自定义了层级，如顶层是 {SN} 或 {相机}）：
+        ///   递归扫描整棵子树找【所有文件】的最新修改时间，最新文件都早于阈值才算过期。
+        ///   只要子树里还有一个"保留期内"的文件就不删——保证只删真正过期的整棵目录。
+        /// </summary>
+        /// <param name="dir">要判断的目录完整路径（SaveRootDir 的直接子目录）</param>
+        /// <param name="cutoff">保留阈值时间（本地时间）；早于它的文件视为过期</param>
+        /// <returns>true = 整棵目录都可删除</returns>
+        private static bool IsDirExpired(string dir, DateTime cutoff)
+        {
+            string name = Path.GetFileName(dir);
+            if (TryParseDirDate(name, out DateTime dirDate) && dirDate < cutoff)
+                return true;   // 日期目录：目录名即最后写入日期，直接过期
+            return IsDirTreeOlderThan(dir, cutoff);   // 非日期目录：递归查最新文件时间
+        }
+
+        /// <summary>
+        /// 解析标准日期目录名："{年月日}" 渲染的 "2026年08月11日"，或紧凑 "20260811"。
+        /// 解析失败返回 false（目录名不是日期，交由通用路径判定）。
+        /// </summary>
+        private static bool TryParseDirDate(string name, out DateTime date)
+        {
+            date = default;
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            // 格式1：2026年08月11日（ImageStore.RenderTemplate 的 {年月日} 默认渲染）
+            var m = System.Text.RegularExpressions.Regex.Match(
+                name, @"^(\d{4})年(\d{2})月(\d{2})日$");
+            if (m.Success)
+                return DateTime.TryParse(string.Format("{0}-{1}-{2}",
+                    m.Groups[1].Value, m.Groups[2].Value, m.Groups[3].Value), out date);
+            // 格式2：20260811（紧凑日期）
+            if (name.Length == 8 && int.TryParse(name, out int v) && v > 19000000)
+                return DateTime.TryParseExact(name, "yyyyMMdd",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out date);
+            return false;
+        }
+
+        /// <summary>
+        /// 递归判断目录子树内【所有文件】的修改时间是否都早于保留阈值（都老=可删）。
+        /// 本目录直接含的文件逐个比较；任一文件比阈值新 → 子树未过期，立即返回 false 剪枝。
+        /// 子目录逐级递归：任一子目录未过期 → 整棵未过期。
+        /// 遍历/读时间失败（被占用/权限）一律视为"未过期"返回 false——保守不误删。
+        /// </summary>
+        private static bool IsDirTreeOlderThan(string dir, DateTime cutoff)
+        {
+            try
+            {
+                foreach (string f in Directory.EnumerateFiles(dir))
+                {
+                    try
+                    {
+                        // 本地时间比较（与 cutoff 同基准）；读不到时间的文件视为"新"保守保留
+                        if (File.GetLastWriteTime(f) >= cutoff) return false;
+                    }
+                    catch { return false; }
+                }
+                foreach (string d in Directory.EnumerateDirectories(dir))
+                {
+                    if (!IsDirTreeOlderThan(d, cutoff)) return false;
+                }
+                return true;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>停掉清理定时器（Dispose/热更重建时调用，避免后台任务残留）。</summary>
+        private void StopCleanup()
+        {
+            try { _cleanupTimer?.Dispose(); }
+            catch { }
+            _cleanupTimer = null;
+        }
+
         /// <summary>复制文件并带重试（FTP 源文件可能正在被相机写/事件早于写完到达）。
         /// 复用 V1.8.3 的 FileShare.ReadWrite 思路：源文件正在写也能复制；失败短延迟重试最多 3 次。</summary>
         private static void CopyWithRetry(string src, string dst, string tag)
@@ -391,6 +561,7 @@ namespace CommandCenter.Services
 
         public void Dispose()
         {
+            StopCleanup();   // V2.14.12：先停后台清理定时器，再关 FTP 监听
             foreach (var w in _watchers)
             {
                 try { w.EnableRaisingEvents = false; } catch { }

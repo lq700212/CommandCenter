@@ -28,6 +28,7 @@ namespace CommandCenter.Views
     /// │ ── 文件名规则 ────────────────────────────────────────────    │
     /// │ 文件名: [txtFileNameTpl                          ]            │
     /// │        （点位号默认进文件名，如 {点位} → 1.png）               │
+    /// │ 存图保留天数: [nudKeepDays]      [chkTimestampSuffix 时间戳后缀]│
     /// │ ── 预览 ────────────────────────────────────────────────     │
     /// │ lblPreview（实时显示 OK/NG 两条完整路径）                      │
     /// │                                           [btnOk] [btnCancel] │
@@ -76,7 +77,7 @@ namespace CommandCenter.Views
         RefreshPreview();               // 初始预览
     }
 
-        /// <summary>把配置填进界面：根目录、目录层级列表、文件名规则。</summary>
+        /// <summary>把配置填进界面：根目录、目录层级列表、文件名规则、时间戳后缀、保留天数。</summary>
         private void LoadFromConfig()
         {
             txtSaveRootDir.Text = _cfg.SaveRootDir;
@@ -87,6 +88,14 @@ namespace CommandCenter.Views
                 lstLevels.Items.Add(lvl);
 
             txtFileNameTpl.Text = _cfg.FileNameTemplate;
+
+            // V2.14.12：时间戳后缀开关与存图保留天数（KeepDays，0 = 不自动清理）
+            chkTimestampSuffix.Checked = _cfg.FileTimestampSuffix;
+            nudKeepDays.Value = _cfg.KeepDays;
+
+            // 时间戳后缀勾选框是 AutoSize（宽度由字体渲染决定），右缘要与文件名模板框右缘对齐——
+            // AutoSize 宽度只有运行时才知道，故在载入时按 txtFileNameTpl 右缘反向校正 Left。
+            chkTimestampSuffix.Left = txtFileNameTpl.Right - chkTimestampSuffix.Width;
         }
 
         /// <summary>挂事件：选择层级、编辑名字、占位符插入、增删移、预览刷新。</summary>
@@ -126,6 +135,10 @@ namespace CommandCenter.Views
             txtLevelName.TextChanged += (s, e) => { UpdateSelectedLevel(); SchedulePreview(); };
             txtFileNameTpl.TextChanged += (s, e) => SchedulePreview();
             txtSaveRootDir.TextChanged += (s, e) => SchedulePreview();
+
+            // V2.14.12：时间戳后缀勾选状态变化 → 刷新预览（文件名是否带时间戳可见即所得）；
+            // 保留天数不参与预览（那是后台清理用的），无需刷新。
+            chkTimestampSuffix.CheckedChanged += (s, e) => SchedulePreview();
 
             btnBrowse.Click += (s, e) => PickRootDir();
             btnAddLevel.Click += (s, e) => AddLevel("");
@@ -268,10 +281,14 @@ namespace CommandCenter.Views
         {
             if (levelIndex >= levels.Count)
             {
-                // 目录层级已到底：追加图片文件叶子（按文件名规则渲染，默认 {点位}.jpeg）
+                // 目录层级已到底：追加图片文件叶子（按文件名规则渲染，默认 {点位}.png）
                 string fname = ImageStore.RenderTemplate(fileRule, now, sn, true, station, "上相机");
                 if (string.IsNullOrWhiteSpace(fname))
-                    fname = "IMG_" + now.ToString("yyyyMMdd_HHmmss_fff") + "_1.png";
+                    fname = "IMG_" + now.ToString("yyyyMMdd_HHmmss_fff") + "_1";
+                // V2.14.12：勾选"时间戳后缀"时预览也追加 _时间戳，与真实归档命名一致
+                // （真实归档 = 相机源文件名 + "_" + 时间戳，见 ImageStore.SaveImageFilePair 注释）
+                else if (chkTimestampSuffix.Checked)
+                    fname = fname + "_" + now.ToString("yyyyMMdd_HHmmss_fff");
                 parent.Nodes.Add(fname + ".png");
                 return;
             }
@@ -310,6 +327,10 @@ namespace CommandCenter.Views
             _cfg.SaveRootDir = txtSaveRootDir.Text.Trim();
             _cfg.SubDirs = levels;
             _cfg.FileNameTemplate = txtFileNameTpl.Text.Trim();
+
+            // V2.14.12：时间戳后缀开关 + 存图保留天数（后台定期清理用，0 = 不自动清理）
+            _cfg.FileTimestampSuffix = chkTimestampSuffix.Checked;
+            _cfg.KeepDays = (int)nudKeepDays.Value;
 
             DialogResult = DialogResult.OK;
         }

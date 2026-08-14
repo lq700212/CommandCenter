@@ -8,7 +8,7 @@ namespace CommandCenter.Views
     ///   根目录输入框 + 浏览按钮
     ///   目录层级 ListBox（可增删移）
     ///   层级名字/规则编辑框 + 占位符下拉插入
-    ///   文件名规则编辑框
+    ///   文件名规则编辑框 + 存图保留天数输入 + 时间戳后缀勾选（V2.14.12）
     ///   实时预览 Label
     ///   确定/取消按钮
     /// </summary>
@@ -47,6 +47,9 @@ namespace CommandCenter.Views
             this.btnDown = new System.Windows.Forms.Button();
             this.lblFileRule = new System.Windows.Forms.Label();
             this.txtFileNameTpl = new System.Windows.Forms.TextBox();
+            this.lblKeepDays = new System.Windows.Forms.Label();
+            this.nudKeepDays = new System.Windows.Forms.NumericUpDown();
+            this.chkTimestampSuffix = new System.Windows.Forms.CheckBox();
             this.gbPreview = new System.Windows.Forms.GroupBox();
             this.tvPreview = new System.Windows.Forms.TreeView();
             this.btnOk = new System.Windows.Forms.Button();
@@ -219,13 +222,47 @@ namespace CommandCenter.Views
             this.txtFileNameTpl.TabIndex = 16;
             this.txtFileNameTpl.Text = "{点位}";
             //
+            // lblKeepDays
+            // 存图保留天数：只保留最近 N 天的存图目录，更早的由后台定期清理删除（0 = 不自动清理）。
+            // 与"时间戳后缀"同一行，左对齐 txtFileNameTpl 起点；说明进悬停 ToolTip。
+            //
+            this.lblKeepDays.AutoSize = true;
+            this.lblKeepDays.Location = new System.Drawing.Point(130, 417);
+            this.lblKeepDays.Name = "lblKeepDays";
+            this.lblKeepDays.Size = new System.Drawing.Size(116, 19);
+            this.lblKeepDays.TabIndex = 17;
+            this.lblKeepDays.Text = "存图保留天数:";
+            //
+            // nudKeepDays
+            //
+            this.nudKeepDays.Location = new System.Drawing.Point(254, 414);
+            this.nudKeepDays.Maximum = new decimal(new int[] { 3650, 0, 0, 0 });
+            this.nudKeepDays.Name = "nudKeepDays";
+            this.nudKeepDays.Size = new System.Drawing.Size(70, 25);
+            this.nudKeepDays.TabIndex = 18;
+            this.nudKeepDays.Value = new decimal(new int[] { 30, 0, 0, 0 });
+            //
+            // chkTimestampSuffix
+            // 存图文件名是否追加时间戳后缀：勾选 = 开启（默认开，防止同点位重复拍照覆盖旧图）。
+            // 右边缘与 txtFileNameTpl 右边缘对齐（同列右侧），与"存图保留天数"并排。
+            //
+            this.chkTimestampSuffix.AutoSize = true;
+            this.chkTimestampSuffix.Checked = true;
+            this.chkTimestampSuffix.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.chkTimestampSuffix.Location = new System.Drawing.Point(487, 414);
+            this.chkTimestampSuffix.Name = "chkTimestampSuffix";
+            this.chkTimestampSuffix.Size = new System.Drawing.Size(113, 23);
+            this.chkTimestampSuffix.TabIndex = 19;
+            this.chkTimestampSuffix.Text = "时间戳后缀";
+            this.chkTimestampSuffix.UseVisualStyleBackColor = true;
+            //
             // gbPreview
             // 实时目录结构预览：按当前层级规则用示例数据展开成"文件夹树"，
             // 让现场一眼看到将来落盘的完整目录长什么样（OK/NG 两种分支各展示一棵子树）。
             // 占位符说明不再用常驻标签（原 lblNote 已删），改为悬停在输入框/按钮上显示的 ToolTip。
             //
             this.gbPreview.Controls.Add(this.tvPreview);
-            this.gbPreview.Location = new System.Drawing.Point(20, 420);
+            this.gbPreview.Location = new System.Drawing.Point(20, 458);
             this.gbPreview.Name = "gbPreview";
             this.gbPreview.Size = new System.Drawing.Size(584, 150);
             this.gbPreview.TabIndex = 18;
@@ -247,7 +284,7 @@ namespace CommandCenter.Views
             // btnOk
             //
             this.btnOk.DialogResult = System.Windows.Forms.DialogResult.OK;
-            this.btnOk.Location = new System.Drawing.Point(420, 578);
+            this.btnOk.Location = new System.Drawing.Point(420, 616);
             this.btnOk.Name = "btnOk";
             this.btnOk.Size = new System.Drawing.Size(90, 32);
             this.btnOk.TabIndex = 18;
@@ -257,7 +294,7 @@ namespace CommandCenter.Views
             // btnCancel
             //
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(520, 578);
+            this.btnCancel.Location = new System.Drawing.Point(520, 616);
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(90, 32);
             this.btnCancel.TabIndex = 19;
@@ -306,6 +343,14 @@ namespace CommandCenter.Views
                 "下移选中的层级，调整目录顺序（顺序即建目录顺序）。");
             this.tip.SetToolTip(this.txtFileNameTpl,
                 "图片文件名规则（默认 {点位}，如 1.png）。\r\n占位符：{点位}点位号、{SN}序列号、{OKNG}→OK 或 NG、{年}/{月}/{日}日期、{时间}毫秒时间戳；\r\n其余文字原样保留。");
+            // 存图保留天数：后台每天自动清理一次，只保留最近 N 天的存图目录（0 = 不自动清理）
+            this.tip.SetToolTip(this.lblKeepDays,
+                "存图目录只保留最近 N 天，更早的由后台定期清理删除（默认 30 天）。\r\n0 = 不自动清理。\r\n清理只动\"保存根目录\"下的过期日期目录，不影响相机 FTP 取图目录。");
+            this.tip.SetToolTip(this.nudKeepDays,
+                "存图目录只保留最近 N 天，更早的由后台定期清理删除（默认 30 天）。\r\n0 = 不自动清理。\r\n清理只动\"保存根目录\"下的过期日期目录，不影响相机 FTP 取图目录。");
+            // 时间戳后缀：勾选后在归档文件名上追加 _yyyyMMdd_HHmmss_fff（防止同点位重复拍照覆盖旧图）
+            this.tip.SetToolTip(this.chkTimestampSuffix,
+                "勾选后，存图文件名追加时间戳后缀（如 0084_20260814_164022_461.jpeg），\r\n防止同点位重复拍照/重复触发时覆盖旧图（默认开启）。\r\n取消勾选则保持相机源文件名原样（如 0084.jpeg）。");
             // 预览说明同时挂在 GroupBox 上：悬停预览区（含标题）即显示说明
             this.tip.SetToolTip(this.gbPreview,
                 "实时预览：按当前规则用示例数据（今天日期 / SN-0001 / 点位1）\r\n渲染出将来落盘的完整目录树，OK 和 NG 各展示一棵。");
@@ -318,10 +363,13 @@ namespace CommandCenter.Views
             this.CancelButton = this.btnCancel;
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 17F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(624, 628);
+            this.ClientSize = new System.Drawing.Size(624, 666);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnOk);
             this.Controls.Add(this.gbPreview);
+            this.Controls.Add(this.chkTimestampSuffix);
+            this.Controls.Add(this.nudKeepDays);
+            this.Controls.Add(this.lblKeepDays);
             this.Controls.Add(this.txtFileNameTpl);
             this.Controls.Add(this.lblFileRule);
             this.Controls.Add(this.btnDown);
@@ -373,6 +421,9 @@ namespace CommandCenter.Views
         private Button btnDown;
         private Label lblFileRule;
         private TextBox txtFileNameTpl;
+        private Label lblKeepDays;
+        private NumericUpDown nudKeepDays;
+        private CheckBox chkTimestampSuffix;
         private GroupBox gbPreview;
         private TreeView tvPreview;
         private Button btnOk;

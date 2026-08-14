@@ -134,6 +134,11 @@ namespace CommandCenter.Views
                     : cams[ci].FtpUploadDir.Trim();
                 _imageStore.AddMonitor(dir, ci);
             }
+
+            // V2.14.12：启动"存图目录定期清理"后台任务（默认保留 30 天，每天在后台线程清理
+            // 过期日期目录；启动后 30 秒跑第一次、之后每 24 小时一次，见 ImageStore.StartPeriodicCleanup）。
+            // 热更/关窗时旧 ImageStore Dispose 会自行停掉定时器，这里只对当前新实例启动。
+            _imageStore.StartPeriodicCleanup();
             _coordinator = new ProductionCoordinator(_plc, _cameras, cams, _imageStore,
                 _config.Display.WindowEnabled, _config.ProductModel, _config.Display.WindowPointMaps);
 
