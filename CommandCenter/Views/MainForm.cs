@@ -109,6 +109,9 @@ namespace CommandCenter.Views
             if (cams.Count == 0) cams.AddRange(CameraConfig.DefaultCameras());
             foreach (var c in cams)
                 _cameras.Add(new KeyenceIV4Camera(c));
+            // V2.13.8：把各相机结果寄存器地址注册给 PLC 服务——从站就绪时统一清 0
+            // （上电/断电重启后结果寄存器不残留旧值，见 PlcService.ResetResultRegisters）
+            _plc.SetCameraResultAddresses(cams);
             LogHelper.Info($"BuildServices：共创建 {_cameras.Count} 台相机：{string.Join(" / ", _cameras.ConvertAll(x => x.IpLabel))}");
 
             _imageStore = new ImageStore(_config.Image);

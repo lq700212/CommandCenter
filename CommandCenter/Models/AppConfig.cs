@@ -864,11 +864,14 @@ namespace CommandCenter.Models
 
         /// <summary>
         /// 通讯方式（大小写不敏感）：
-        ///   "Serial"：串口 RS-232 扫码枪（默认，扫完发一行条码+CR/LF）；
-        ///   "Tcp"   ：基恩士 SR 系列扫码枪以太网 TCP/IP 无协议通讯——上位机作 TCP 客户端连扫码枪，
-        ///              扫码枪读到条码后主动推送文本行，本程序按行切分（与串口行为一致）。
+        ///   "Tcp"   ：基恩士 SR 系列扫码枪以太网 TCP/IP 无协议通讯（默认，现场实测）——上位机作
+        ///              TCP 客户端连扫码枪，扫码枪读到条码后主动推送文本行，本程序按行切分；
+        ///   "Serial"：串口 RS-232 扫码枪（扫完发一行条码+CR/LF，需在设置页显式选串口表配置）。
+        /// 【V2.13.8 默认值由 "Serial" 改为 "Tcp"】现场扫码枪就是 TCP/IP 协议；旧配置/新建的
+        ///   ScanConfig 缺 mode 字段时，反序列化用本默认值决定走哪个实现——改前缺字段会误走串口
+        ///   （连 COM3，表现为"网络可达却连不上"），改后缺字段走 TCP 收码，贴合现场。
         /// </summary>
-        public string Mode { get; set; } = "Serial";
+        public string Mode { get; set; } = "Tcp";
 
         /// <summary>串口名，如 COM3（仅 Mode=Serial 使用）</summary>
         public string PortName { get; set; } = "COM3";

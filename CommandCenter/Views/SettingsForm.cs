@@ -240,8 +240,32 @@ namespace CommandCenter.Views
         private void LoadCameraRows()
         {
             int seq = 0; // 行序兜底编号：CameraId 为 0 时按行序显示
-            foreach (var c in _cfg.Cameras ?? new List<CameraConfig>())
+            // V2.13.8：相机列表按 CameraId 升序展示/保存（1,2,3,…）。
+            // 【为什么安全】点位映射（WindowPointMaps）、PLC 通道地址（PlcRequestAddress/
+            //   PlcResultAddress）、存图目录（{相机} 层按 Name/CameraId）全部以 CameraId（或配置
+            //   对象本身）为关联键，与列表顺序无关（V2.13.4/2.13.5 已彻底解耦）——这里排序只整理
+            //   "显示顺序 + 保存顺序"，不改任何相机字段；排序后点保存，CollectCamerasFromGrid 按
+            //   表格行序收集，cameras 配置也随之升序落盘。
+            // 排序键：CameraId>0 用真编号升序；0（旧配置/未填编号）视为"无编号"排最后
+            //   （按原相对顺序稳定，用原始下标打破相等）。
+            var cams = new List<CameraConfig>(_cfg.Cameras ?? new List<CameraConfig>());
+            int[] order = new int[cams.Count];
+            var key = new List<int>(cams.Count);
+            for (int i = 0; i < cams.Count; i++)
             {
+                order[i] = i;
+                key.Add(cams[i] != null && cams[i].CameraId > 0 ? cams[i].CameraId : 1000000 + i);
+            }
+            Array.Sort(order, (a, b) =>
+            {
+                int ka = key[a], kb = key[b];
+                if (ka != kb) return ka.CompareTo(kb);
+                return a.CompareTo(b); // 同编号（含未编号行）：按原顺序稳定
+            });
+
+            foreach (int idx in order)
+            {
+                var c = cams[idx];
                 seq++;
                 // V2.13.4：优先显示 CameraId（>0），0 时回退行序（旧配置/未填编号的新相机）
                 int camId = c.CameraId > 0 ? c.CameraId : seq;

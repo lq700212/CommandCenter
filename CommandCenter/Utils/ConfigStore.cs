@@ -73,7 +73,23 @@ namespace CommandCenter.Utils
             // 初始化器已改为空列表（避免 Newtonsoft 反序列化时向已存在实例 Add 而叠成 4 台），
             // json 没写相机时必须在此补上默认两台现场相机。
             if (cfg.Cameras == null || cfg.Cameras.Count == 0) cfg.Cameras = Models.CameraConfig.DefaultCameras();
-            if (cfg.Scanners == null) cfg.Scanners = new List<Models.ScanConfig>();
+            // V2.13.8：扫码枪空列表也兜底一台现场默认 TCP 扫码枪（此前只兜底 null、空列表时
+            // 主界面/测试窗体【完全没有扫码枪】——表现为"扫码枪状态未连接/测试页找不到选项"，
+            // 即使扫码枪网络可达（Test-NetConnection 通）也不会接入）。与 Cameras 空列表兜底
+            // 默认相机同一逻辑；默认值对齐现场基恩士 SR 以太网无协议枪（19.87.6.100:9004/LON，
+            // 与 SettingsForm TCP 模板行/OnSave 兜底一致）。
+            if (cfg.Scanners == null || cfg.Scanners.Count == 0)
+                cfg.Scanners = new List<Models.ScanConfig>
+                {
+                    new Models.ScanConfig
+                    {
+                        Enabled = true,
+                        Mode = "Tcp",
+                        IpAddress = "19.87.6.100",
+                        Port = 9004,
+                        TriggerCommand = "LON"
+                    }
+                };
             // 产品型号候选列表（V2.8）：null/空时用现场默认三型号（U171/U172/Z121），
             // 保证设置窗体"产品型号"下拉与"窗口/点位配置"的型号下拉有候选可点。
             if (cfg.ProductModels == null || cfg.ProductModels.Count == 0)

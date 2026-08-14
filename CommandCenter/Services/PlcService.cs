@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -90,6 +91,25 @@ namespace CommandCenter.Services
 
         private bool _lastFailed; // 上一次监听启动是否失败（日志降噪）
 
+        // V2.13.8：各相机"结果寄存器"地址（DataStore 索引）缓存，供上电/从站重建初始化时统一清 0。
+        // 地址来自各相机配置 PlcResultAddress（0=未配置跳过），由 MainForm.BuildServices 注册。
+        private readonly List<ushort> _cameraResultAddrs = new List<ushort>();
+
+        /// <summary>
+        /// 注册各相机结果寄存器地址（V2.13.8，MainForm.BuildServices 建好相机后调用）：
+        /// 供"上电/从站重建初始化"把上位机自己的相机结果寄存器清零（见 ResetResultRegisters）。
+        /// 只收集 PlcResultAddress &gt; 0 的（0=未配置结果通道，跳过该台）。
+        /// 热更时 PlcService 整体重建并重新注册（ApplyRuntimeConfig → BuildServices），地址不残留。
+        /// </summary>
+        public void SetCameraResultAddresses(IEnumerable<CameraConfig> cameras)
+        {
+            _cameraResultAddrs.Clear();
+            if (cameras == null) return;
+            foreach (var cam in cameras)
+                if (cam != null && cam.PlcResultAddress > 0)
+                    _cameraResultAddrs.Add((ushort)cam.PlcResultAddress);
+        }
+
         /// <summary>
         /// 确保从站监听已启动（语义等价于原来的"确保连上 PLC"）。
         /// 监听已启动返回 true；监听启动失败(端口占用/权限等)返回 false，后台会重试。
@@ -148,6 +168,12 @@ namespace CommandCenter.Services
                     _lastFailed = false;
                     SetConnected(true);
                     StartMasterPoll();   // 启动"主站连入"轮询（界面三态灯的数据源）
+                    // V2.13.8：上电/从站重建初始化——把自己的结果寄存器先写 0。
+                    // 现场需求：PLC 与上位机断电重启后，结果寄存器不能残留上次的 1/2/3 被误当新结果。
+                    // 从站 DataStore 虽是新创建的（默认 0），但为防御"监听重建/异常残留"等场景，
+                    // 显式把扫码结果（40004）与各相机结果（40005/40006…）清 0，PLC 主站上电读到
+                    // 的一定是复位态。DataStore 已就绪（建站成功），写 0 一定有效。
+                    ResetResultRegisters();
                     LogHelper.Info($"PLC 从站监听已启动 {ip}:{_cfg.Port}（UnitId={_cfg.UnitId}），等待汇川主站连入");
                     return true;
                 }
@@ -429,6 +455,25 @@ namespace CommandCenter.Services
             {
                 LogHelper.Warn($"写本地寄存器 D{address} 失败：{ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// 上电/从站重建初始化：把自己（上位机）的结果寄存器全部先写 0（V2.13.8）。
+        /// 【背景】现场要求"PLC 与上位机都把自己的结果寄存器先写 0，防止断电重启后残留旧值
+        ///   （上次的 1/2/3）被误当成新结果"。PLC 侧由 PLC 梯形图上电清 0；上位机侧就是本方法：
+        ///   从站监听一就绪，把扫码结果（ScanResultAddress，协议 40004）与各相机结果
+        ///   （PlcResultAddress，协议 40005/40006…）清 0，PLC 主站连入后读到的一定是复位态。
+        /// 【调用时机】EnsureConnected 每次成功重建从站后调用（覆盖软件启动、断线重建、热更重建）；
+        ///   正常监听期间不重复调用（幂等写 0，无害）。DataStore 未就绪时 WriteLocalSafe 静默忽略。
+        /// </summary>
+        private void ResetResultRegisters()
+        {
+            if (_cfg != null && _cfg.ScanResultAddress > 0)
+                WriteLocalSafe(_cfg.ScanResultAddress, 0);
+            foreach (var addr in _cameraResultAddrs)
+                WriteLocalSafe(addr, 0);
+            LogHelper.Info("上电初始化：上位机结果寄存器已全部复位为 0（扫码结果 + " +
+                _cameraResultAddrs.Count + " 个相机通道）");
         }
 
         /// <summary>
