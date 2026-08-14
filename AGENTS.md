@@ -69,18 +69,19 @@
    无文件分支直接 new AppConfig() 连相机列表也是空的，窗口=0→兜底 1 个的回归根因）；`ConfigStore.Load`
    把"空段兜底+数组对齐"抽成 `ApplyDefaults`，有/无配置文件统一走。
 - **PLC 握手协议（V2.7 定稿，从站模式）**：现场 PLC(汇川)做主站、上位机做从站监听本机 502；
-  **"请求-结果-复位"三拍握手**，寄存器固定 40001~40011（完整协议见 `docs/CommandCenter.md` §5.5）：
+  **"请求-结果-复位"三拍握手**，寄存器固定 40001~40012（完整协议见 `docs/CommandCenter.md` §5.5）：
   请求区（PLC只写）：`40001 扫码请求`(0/1)、`40002 上相机拍照请求`(1~255=点位)、`40003 下相机拍照请求`；
   结果区（PLC只读，上位机写）：`40004 扫码结果`(0/1/2)、`40005 上相机`、`40006 下相机`(0/1/2，相机结果
-  另支持 **3=点位禁用跳过**）；型号区：`40007~40011`（上位机写固定产品型号，每寄存器 2 字符 ASCII、高字节
-  在前、不足补 0x00、最多 10 字符，超长从 40012 向后扩展）。**三拍流程**：PLC 写请求≠0 → 上位机处理完
+  另支持 **3=点位禁用跳过**）；型号区：**`40007`=型号序号（V2.14.13，查 `PlcConfig.ModelIndexes`
+  映射，默认 Z121=1、U171=2）+ `40008~40012`=型号 ASCII 字符串**（每寄存器 2 字符 ASCII、高字节
+  在前、不足补 0x00、最多 10 字符，超长从 40013 向后扩展；PLC 优先用 40007 序号区分型号）。**三拍流程**：PLC 写请求≠0 → 上位机处理完
   写结果≠0 → PLC 读走并复位请求=0 → 上位机看请求清零再复位结果=0 → 进入下一拍。**新一轮清窗（V2.14.11）**：`ProductionCoordinator.BeginScanChannel`（收到 40001=1 扫码请求、本轮生产启动）触发 `RoundStarted` 事件，MainForm 订阅后清空各窗口图片（`SetImage(null)` 回深灰空态）——新的一轮第一个动作就是扫码，上一轮图片已过时，提前清掉避免与新结果混淆；事件在轮询后台线程触发、UI 侧 BeginInvoke 回 UI 线程再遍历 `_windowControls` 清空。**上电/开机初始化复位（V2.13.8）**：PLC 与上位机各把各的结果寄存器先写 0，防断电重启残留旧值（上次 1/2/3）被误当新结果——PLC 侧由梯形图上电清 0；上位机侧 `PlcService.EnsureConnected` 每次成功建站（软件启动/断线重建/热更重建）都自动调 `ResetResultRegisters()` 把扫码结果（`ScanResultAddress`）+ 各相机结果（`PlcResultAddress`，MainForm.BuildServices 经 `SetCameraResultAddresses` 注册，0=未配置跳过）清 0，日志见"上电初始化：上位机结果寄存器已全部复位为 0"。**相机结果"判定即写"（V2.13.7 定稿，重要）**：相机 OK/NG 判定在 T2 触发+读判定返回时就已知，`DoCameraShot` 判定一返回**立即** `WriteCameraResult` 落 PLC 结果（1/2），**不等 FTP 取图+归档**（那会让 PLC 陪跑数百 ms~2s 图传输）——取图/归档/显示降级为纯异步补充，图中途没到/归档失败只记日志+报警、**结果不回退**（以相机判定为准，图缺失只影响显示/存图）；同时通道释放必须等"PLC 已复位请求 **且** `_taskDone`（拍照 Task 完全结束）"（`StepCameraChannel` step2 闸门），否则判定即写让 PLC 提前复位请求、通道过早释放，下一拍请求进来会开新 Task 造成**同相机并发取图/删源混图**——改动握手流程必须同步本段与 `docs/CommandCenter.md` §5.3/5.4。**地址约定（V2.12.3 定稿）**：配置里统一存** DataStore 索引**（PLC 协议号 = 索引 + 40000，如协议 40002 上相机请求 → 索引 2，就是汇川 D2/D3/D5 这类数字，填 2 就是 2）；现场实测 PLC 写 40002 → 从站 DataStore[2]（曾误以为"零偏移直接用协议号"导致读 DataStore[40002] 永远读不到请求；V2.12.2 曾做"协议号-40000 换算"中间方案，V2.12.3 起按"改就改干净"删掉 `ProtocolToIndex`，业务层【零换算】）；地址全部收进 `PlcConfig`（`ScanRequestAddress/ScanResultAddress/
-ProductModelAddress/ProductModelLen`）+ 顶层 `ProductModel`（**两处可改，同一个值**：① 设置窗体 PLC 区
+ProductModelIndexAddress/ProductModelAddress/ProductModelLen/ModelIndexes`）+ 顶层 `ProductModel`（**两处可改，同一个值**：① 设置窗体 PLC 区
    "产品型号" **cmbModel 可编辑下拉**（候选=预置三型号 ∪ 顶层 `ProductModels`，手输新型号保存自动加入）；
    ② **主界面标题栏型号下拉 `cmbModel`（V2.8，操作员日常切型号用，候选恒预置 U171/Z121 不依赖配置
    文件）：`SwitchModel` 更新 ProductModel + 写盘 + 只重建协调器**（PLC/相机/扫码枪复用、设备不断连，
    新型号随下次扫码写 PLC、按新型号查 `modelStationPrograms` 切程序）），
-   每次扫码 `ProductionCoordinator` 调 `PlcService.WriteProductModel` 写 40007~40011）。版本化流程：
+   每次扫码 `ProductionCoordinator` 调 `PlcService.WriteProductModel` 写 40007=型号序号 + 40008~40012=型号字符串）。版本化流程：
 `ProductionCoordinator` 是**三通道状态机**（通道①扫码 40001/40004、通道②第1台相机 40002/40005、
    通道③第2台相机 40003/40006），**V2.13.5 起活跃通道=相机 ID**：`_activeCh = cameraId`，
    `PollNewRequest` 按相机表顺序轮询每台相机显式配置的请求通道，读到请求即 `BeginCameraChannel(cameraId,…)`

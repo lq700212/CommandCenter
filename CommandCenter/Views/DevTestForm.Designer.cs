@@ -588,8 +588,8 @@ namespace CommandCenter.Views
             this.lblMoveVal.Text = "？未读";
             // 
             // btnWriteModel
-            // 写产品型号（V2.7，写 40007~40011）：把 txtModel 输入的内容（最多 10 字符）写入型号区，
-            // 供 PLC 主站读取（型号行）
+            // 写产品型号（V2.14.13，写 40007=型号序号 + 40008~40012=型号 ASCII）：把 txtModel 输入的
+            // 内容（最多 10 字符）写入型号区供 PLC 主站读取（型号行）
             // 
             this.btnWriteModel.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
             this.btnWriteModel.FlatAppearance.BorderSize = 0;
@@ -605,7 +605,7 @@ namespace CommandCenter.Views
             this.btnWriteModel.Click += new System.EventHandler(this.BtnWriteModel_Click);
             // 
             // txtModel
-            // 产品型号输入框：写型号按钮写入 PLC 40007~40011 的内容（最多 10 字符）。行中心=232+17=249 → 顶245
+            // 产品型号输入框：写型号按钮写入 PLC 40008~40012 的内容（最多 10 字符，40007=型号序号自动带出）。行中心=232+17=249 → 顶245
             // 
             this.txtModel.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
             this.txtModel.Location = new System.Drawing.Point(154, 245);

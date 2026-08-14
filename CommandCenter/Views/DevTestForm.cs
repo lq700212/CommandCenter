@@ -43,7 +43,7 @@ namespace CommandCenter.Views
     /// │   PLC 协议号=索引+40000，填 2 就是 D2，零换算；第3台起每台相机地址在相机表填）  │
     /// │  请求:[btnReadScanReq 读扫码请求] [btnReadCamReq 读相机请求]    │
     /// │        值:[lblMoveVal]                                          │
-    /// │  型号:[btnWriteModel 写产品型号] [txtModel] (→PLC 40007~40011) │
+    /// │  型号:[btnWriteModel 写产品型号] [txtModel] (→40007=序号+40008~40012=型号) │
     /// │  结果:[btnResScan0 复位0] [btnResScan1 OK1] [btnResScan2 NG2]   │
     /// │  相机:[btnResCamUp 相机OK1] [btnResCamDown 相机NG2]            │
     /// │       [btnResCamReset 相机复位0]（写全部相机通道）               │
@@ -681,19 +681,21 @@ namespace CommandCenter.Views
             });
         }
 
-        /// <summary>写产品型号（V2.7，写 40007~40011）：把 txtModel 内容（≤10 字符）写入型号区供 PLC 主站读取。</summary>
+        /// <summary>写产品型号（V2.14.13，写 40007=型号序号 + 40008~40012=型号 ASCII）：把 txtModel
+        /// 内容（≤10 字符）写入型号区供 PLC 主站读取；序号按 plc.modelIndexes 映射自动带出（默认
+        /// Z121=1、U171=2，型号没配序号写 0）。</summary>
         private void BtnWriteModel_Click(object sender, EventArgs e)
         {
             if (!EnsurePlc()) return;
             SetBusy(true);
             string model = txtModel.Text.Trim();
-            AppendLog($"→ 写产品型号 [{model}]（40007~40011）…");
+            AppendLog($"→ 写产品型号 [{model}]（40007=序号 + 40008~40012=型号 ASCII）…");
             Task.Run(() =>
             {
                 bool ok = _plc.WriteProductModel(model);
                 SafeInvoke(() =>
                 {
-                    AppendLog(ok ? "← 型号已写入" : "← 型号写入失败（从站未就绪）");
+                    AppendLog(ok ? "← 型号与序号已写入" : "← 型号写入失败（从站未就绪）");
                     FinishOp();
                 });
             });

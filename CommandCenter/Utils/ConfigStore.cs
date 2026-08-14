@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
@@ -94,6 +95,12 @@ namespace CommandCenter.Utils
             // 保证设置窗体"产品型号"下拉与"窗口/点位配置"的型号下拉有候选可点。
             if (cfg.ProductModels == null || cfg.ProductModels.Count == 0)
                 cfg.ProductModels = Models.AppConfig.DefaultProductModels();
+            // V2.14.13：型号→PLC 序号映射兜底（默认 Z121=1、U171=2），
+            // 保证 40007 型号序号寄存器有值可写；同时把候选型号/当前型号里"没配序号"的补一份
+            // 默认映射（避免新增型号后 40007 恒写 0 现场排查困难）。补的序号从当前最大序号+1 递增。
+            if (cfg.Plc.ModelIndexes == null || cfg.Plc.ModelIndexes.Count == 0)
+                cfg.Plc.ModelIndexes = Models.PlcConfig.DefaultModelIndexes();
+            EnsureModelIndexes(cfg);
             if (cfg.Display == null) cfg.Display = new Models.DisplayConfig();
             if (cfg.Image == null) cfg.Image = new Models.ImageConfig();
             if (cfg.Security == null) cfg.Security = new Models.SecurityConfig();
@@ -117,6 +124,36 @@ namespace CommandCenter.Utils
         }
 
         /// <summary>
+        /// V2.14.13：把"型号→PLC 序号"映射表补齐到覆盖所有候选型号与当前型号。
+        /// 背景：PLC 40007 传的是型号序号（不是型号字符串），WriteProductModel 按型号名查
+        /// `PlcConfig.ModelIndexes`；若某型号（尤其用户在设置页手输的新型号）没配序号，
+        /// 40007 会恒写 0、PLC 分不清型号。故加载/保存时自动把候选型号（ProductModels ∪ 当前
+        /// ProductModel）里缺失的补一条默认映射，序号取"当前最大序号 + 1"（保证不冲突）。
+        /// 已配置的映射保持用户值，只补缺失项，不覆盖。
+        /// </summary>
+        private static void EnsureModelIndexes(Models.AppConfig cfg)
+        {
+            var map = cfg.Plc?.ModelIndexes ?? (cfg.Plc.ModelIndexes = new List<Models.ModelIndexItem>());
+            // 收集所有候选型号：预置（DefaultProductModels）∪ 配置候选 ∪ 当前型号，去重、忽略空
+            var allModels = new List<string>();
+            foreach (var m in Models.AppConfig.DefaultProductModels())
+                if (!string.IsNullOrWhiteSpace(m)) allModels.Add(m.Trim());
+            foreach (var m in cfg.ProductModels ?? new List<string>())
+                if (!string.IsNullOrWhiteSpace(m) && !allModels.Contains(m.Trim())) allModels.Add(m.Trim());
+            if (!string.IsNullOrWhiteSpace(cfg.ProductModel) && !allModels.Contains(cfg.ProductModel.Trim()))
+                allModels.Add(cfg.ProductModel.Trim());
+
+            // 每个缺失型号补一条：序号 = 当前最大序号 + 1（空表从 1 起）
+            int maxIndex = map.Count > 0 ? map.Max(x => x?.ModelIndex ?? 0) : 0;
+            foreach (var m in allModels)
+            {
+                if (map.Any(x => x != null && string.Equals(x.ModelName, m, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+                map.Add(new Models.ModelIndexItem { ModelName = m, ModelIndex = ++maxIndex });
+            }
+        }
+
+        /// <summary>
         /// 保存配置到 json 文件；目录不存在会自动创建。
         /// </summary>
         public static void Save(Models.AppConfig config)
@@ -131,6 +168,7 @@ namespace CommandCenter.Utils
                 EnsureStationMap(config);   // 保存前把点位映射对齐到窗口总数，避免写盘出越界/缺项
                 EnsureWindowPointMaps(config); // V2.13：窗口↔点位独立映射对齐（缺型号表补默认）
                 EnsureCameraSubDir(config); // 保存前保证归档目录含 {相机} 层（见类注释第 4 点）
+                EnsureModelIndexes(config); // V2.14.13：型号→PLC 序号映射补齐（新增型号自动配序号）
                 string json = JsonConvert.SerializeObject(config, new JsonSerializerSettings
                 {
                     Formatting = Formatting.Indented,

@@ -6,12 +6,12 @@ namespace CommandCenter.Views
     /// <summary>
     /// SettingsForm 的 Visual Studio 窗体设计器分部文件（自动生成风格，可手动维护）。
     /// 把"静态、数量与位置固定"的控件全部放进设计器，便于可视化拖拽：
-    ///   PLC IP/端口、显示窗口行列、图片保存相关三个输入框、相机列表 DataGridView、
+    ///   PLC IP/端口/型号序号、显示窗口行列、图片保存相关三个输入框、相机列表 DataGridView、
     ///   添加/删除相机、扫码枪列表 DataGridView（V1.8.1）、添加/删除扫码枪、保存/取消 按钮。
     /// 这些控件都是固定布局（无运行时紧凑重排需求），设计器坐标即最终坐标。
     /// 【重要】整体顺序请参考 SettingsForm.cs 类注释里的 ASCII 布局图。
     ///   ┌──────────────────────────────────────────────────────────┐
-    ///   │ PLC IP:   [txtPlcIp]   端口:[nudPlcPort]                 │
+    ///   │ PLC IP: [txtPlcIp] 端口:[nudPlcPort] 产品型号:[cmbModel] 型号序号:[nudModelIndex] │
     ///   │ 显示窗口行:[nudRows] 列:[nudCols]                         │
     ///   │ 图片保存根目录: [txtSaveDir]                               │
     ///   │ 目录结构: [btnEditDirs 配置目录结构…]                     │
@@ -41,6 +41,8 @@ namespace CommandCenter.Views
     /// 说明：
     ///   - V1.12.8 起扫码枪列表拆分为 TCP 表 + 串口表两张 DataGridView，
     ///     解决"同一张表行间切换 Tcp/Serial 方式导致列显隐混乱"的 bug（整列显隐无法逐行控制）。
+    ///   - V2.14.13 型号序号（nudModelIndex）与"产品型号"cmbModel 联动：切型号自动带出该型号在
+    ///     PLC 40007 里对应的序号（来自 plc.modelIndexes 映射），可改，保存写回。
     ///   - 控件说明不占界面：原常驻灰字标签已删除，统一改为 ToolTip 气泡。
     ///   - 控件的"显示内容"（IP/端口/行列/目录模板/相机行/扫码枪行）由 SettingsForm.cs 运行时
     ///     从 AppConfig 填充（LoadFromConfig），设计器里的值只是可视化参照。
@@ -76,6 +78,8 @@ namespace CommandCenter.Views
             this.nudPlcPort = new System.Windows.Forms.NumericUpDown();
             this.lblModel = new System.Windows.Forms.Label();
             this.cmbModel = new System.Windows.Forms.ComboBox();
+            this.lblModelIndex = new System.Windows.Forms.Label();
+            this.nudModelIndex = new System.Windows.Forms.NumericUpDown();
             this.lblRows = new System.Windows.Forms.Label();
             this.nudRows = new System.Windows.Forms.NumericUpDown();
             this.lblCols = new System.Windows.Forms.Label();
@@ -111,6 +115,7 @@ namespace CommandCenter.Views
             this.pnlBottom = new System.Windows.Forms.Panel();
             this.tip = new System.Windows.Forms.ToolTip(this.components);
             ((System.ComponentModel.ISupportInitialize)(this.nudPlcPort)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.nudModelIndex)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.nudRows)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.nudCols)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.gridCameras)).BeginInit();
@@ -180,6 +185,26 @@ namespace CommandCenter.Views
             this.cmbModel.Size = new System.Drawing.Size(170, 25);
             this.cmbModel.TabIndex = 32;
             this.cmbModel.Text = "";
+            //
+            // lblModelIndex
+            //
+            this.lblModelIndex.AutoSize = true;
+            this.lblModelIndex.Location = new System.Drawing.Point(707, 21);
+            this.lblModelIndex.Name = "lblModelIndex";
+            this.lblModelIndex.Size = new System.Drawing.Size(76, 19);
+            this.lblModelIndex.TabIndex = 33;
+            this.lblModelIndex.Text = "型号序号:";
+            //
+            // nudModelIndex
+            // 型号→PLC 序号（V2.14.13）：该型号在 PLC 40007 里对应的序号（Z121=1、U171=2）。
+            // 与 cmbModel 联动：切型号自动带出该型号序号，可改，保存时写回 plc.modelIndexes 映射。
+            //
+            this.nudModelIndex.Location = new System.Drawing.Point(787, 18);
+            this.nudModelIndex.Maximum = new decimal(new int[] { 65535, 0, 0, 0 });
+            this.nudModelIndex.Name = "nudModelIndex";
+            this.nudModelIndex.Size = new System.Drawing.Size(80, 25);
+            this.nudModelIndex.TabIndex = 34;
+            this.nudModelIndex.Value = new decimal(new int[] { 1, 0, 0, 0 });
             //
             // lblRows
             //
@@ -561,6 +586,8 @@ namespace CommandCenter.Views
             this.pnlScroll.Controls.Add(this.lblRows);
             this.pnlScroll.Controls.Add(this.nudPlcPort);
             this.pnlScroll.Controls.Add(this.lblPlcPort);
+            this.pnlScroll.Controls.Add(this.nudModelIndex);
+            this.pnlScroll.Controls.Add(this.lblModelIndex);
             this.pnlScroll.Controls.Add(this.cmbModel);
             this.pnlScroll.Controls.Add(this.lblModel);
             this.pnlScroll.Controls.Add(this.txtPlcIp);
@@ -638,6 +665,10 @@ namespace CommandCenter.Views
                 "上位机从站监听绑定 IP（V1.12.11 起 PLC 做主站、上位机做从站）。\r\n填 0.0.0.0 监听所有网卡，或填本机指定 IP（如 19.87.6.230）；\r\n保存后即时生效（自动重启从站监听）。");
             this.tip.SetToolTip(this.nudPlcPort,
                 "上位机从站监听端口（Modbus TCP 标准 502，需与汇川主站通讯指令里的端口一致）。\r\n保存后即时生效（自动重启从站监听）。");
+            this.tip.SetToolTip(this.lblModelIndex,
+                "该产品型号在 PLC 40007 寄存器里对应的【型号序号】（V2.14.13）。\r\n与左侧\"产品型号\"下拉联动：切换型号自动带出该型号序号，可直接改，保存后写回 `plc.modelIndexes` 映射。\r\n现场默认 Z121=1、U171=2；每次扫码上位机先写 40007=本序号，再写 40008~40012=型号 ASCII 字符串。");
+            this.tip.SetToolTip(this.nudModelIndex,
+                "该产品型号在 PLC 40007 寄存器里对应的【型号序号】（V2.14.13），与左侧\"产品型号\"下拉联动。\r\n现场默认 Z121=1、U171=2；改完点【保存】生效。0=该型号不写序号。");
             this.tip.SetToolTip(this.nudRows,
                 "主界面显示窗口的行数。窗口总数=行×列；保存后即时生效。\r\n新增窗口的存图点位默认=窗口编号，可在下方\"窗口/点位配置...\"里改。\r\n勾选\"自适应\"后本框自动置灰（行数由相机点位表自动计算）。");
             this.tip.SetToolTip(this.nudCols,
@@ -681,6 +712,7 @@ namespace CommandCenter.Views
             this.tip.SetToolTip(this.btnCancel,
                 "放弃本次修改并关闭，不写盘。");
             ((System.ComponentModel.ISupportInitialize)(this.nudPlcPort)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.nudModelIndex)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.nudRows)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.nudCols)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.gridCameras)).EndInit();
@@ -701,6 +733,8 @@ namespace CommandCenter.Views
         private NumericUpDown nudPlcPort;
         private Label lblModel;
         private ComboBox cmbModel;
+        private Label lblModelIndex;
+        private NumericUpDown nudModelIndex;
         private Label lblRows;
         private NumericUpDown nudRows;
         private Label lblCols;

@@ -1,5 +1,41 @@
 # 版本改动记录
 
+## V2.14.13（2026-08-14）PLC 型号区升级：型号序号 + 型号字符串
+
+> 产品型号写入从"40007~40011 全存字符串"改为 **`40007`=型号序号 + `40008~40012`=型号 ASCII 字符串**
+> （字符串整体后移一位）。PLC 读取型号**优先用 40007 的序号**区分型号（数值比较最快最稳、不受型号名
+> 长度影响），字符串作冗余展示/校验；序号与型号名对照表由上位机设置窗体维护。
+> ⚠️ **PLC 梯形图需同步调整**：型号读取改为 40007 取序号 + 40008~40012 取字符串（原 40007~40011
+> 整体后移一位），扩展预留从 40013 起。
+
+### 改动范围
+- `Models/AppConfig.cs`：
+  - `PlcConfig` 新增 `ProductModelIndexAddress`（型号序号地址，默认索引 7 = 协议 40007）。
+  - `PlcConfig` 新增 `ModelIndexes`（`List<ModelIndexItem>`，JSON `modelIndexes`）：型号→PLC 序号
+    映射表，`ModelIndexItem{ModelName,ModelIndex}`，默认 `Z121=1`、`U171=2`（`DefaultModelIndexes()`）。
+- `Services/PlcService.cs`：`WriteProductModel` 改为两段写——① 先写 40007=型号序号（`ResolveModelIndex`
+  按型号名忽略大小写查 `ModelIndexes`，未配序号写 0）；② 再写 40008~40012=型号 ASCII 字符串。
+  两段地址分别受 `ProductModelIndexAddress`/`ProductModelAddress` 配置控制（>0 才写）。
+- `Views/SettingsForm.cs` + `.Designer.cs`：PLC 区新增**型号序号**框（`nudModelIndex`，0~65535），
+  与"产品型号"下拉联动（切型号自动带出该型号在映射里的序号，可改）；保存时把当前型号序号写回
+  `plc.modelIndexes`（更新或新增该型号项；序号=0 表示该型号不写序号）。窗体头部布局图同步更新。
+- `Utils/ConfigStore.cs`：加载时 `ModelIndexes` 为空/没有则补 `DefaultModelIndexes()`，并对
+  `productModels` 里所有型号补齐序号（新增型号自动配"当前最大序号+1"，`EnsureModelIndexes`）。
+- `Views/DevTestForm.cs`：写产品型号按新格式（40007=序号 + 40008~40012=字符串）。
+
+### 为什么这么改
+- **现场 PLC 用型号做分型控制**：字符串跨 5 个寄存器、PLC 侧解析麻烦还容易错；给每个型号配一个
+  **序号**（40007 一个寄存器数值），PLC 直接比较整数即可分型，可靠且省梯形图。
+- **序号映射由上位机维护**：设置窗体"型号序号"与型号下拉联动、新增型号自动补号，现场不用手改 json；
+  序号=0 保留"不写序号"语义（可手删 json 映射实现，兼容只写字符串的旧用法）。
+
+### 验证
+- 构建通过（MSBuild Debug/AnyCPU）。
+- 反射实测 `WriteProductModel("Z121", 1)`：40007=1、40008=0x5A31、40009=0x3231、40010=0x0000
+  （'Z121' + '\0'），超 10 字符截断、不足补 0x00 行为与旧版一致。
+- 反射实测 `EnsureModelIndexes`：空映射补默认 Z121=1/U171=2；已有映射+新增型号自动配下一序号。
+- 冒烟：exe 启动存活。
+
 ## V2.14.12（2026-08-14）存图定期清理 + 时间戳后缀开关可视化
 
 > ① 新增"存图定期清理"：存图目录只保留最近 `KeepDays` 天（默认 30，0 = 不自动清理），

@@ -495,11 +495,52 @@ namespace CommandCenter.Models
         /// <summary>上位机→PLC：扫码结果（V2.7）。0=默认/复位，1=扫码OK，2=扫码NG（超时）。配置=索引 4（协议 40004）。</summary>
         public ushort ScanResultAddress { get; set; } = 4;
 
-        /// <summary>上位机→PLC：产品型号起始地址（V2.7，连续写 ProductModelLen 个寄存器，最多 10 字符）。配置=索引 7（协议 40007）。</summary>
-        public ushort ProductModelAddress { get; set; } = 7;
+        /// <summary>上位机→PLC：产品型号序号地址（V2.14.13，协议 40007）。每次写型号时先把"该型号对应的序号"
+        /// 写入本寄存器（型号序号来自 ModelIndexes 映射，见下方字段与 docs/CommandCenter.md §5.5）；
+        /// PLC 拿 40007 的序号即可快速区分型号（如 Z121=1、U171=2），不必解析型号字符串。</summary>
+        public ushort ProductModelIndexAddress { get; set; } = 7;
 
-        /// <summary>产品型号寄存器数（V2.7，每个寄存器 2 字符，默认 5 个=10 字符；超 10 字符按文档从索引 12（协议 40012）扩展地址后调整本值）。</summary>
+        /// <summary>上位机→PLC：产品型号起始地址（V2.14.13，连续写 ProductModelLen 个寄存器，最多 10 字符）。
+        /// 配置=索引 8（协议 40008）——40007 已让给型号序号，型号字符串整体后移一位从 40008 起写。</summary>
+        public ushort ProductModelAddress { get; set; } = 8;
+
+        /// <summary>产品型号寄存器数（V2.14.13，每个寄存器 2 字符，默认 5 个=10 字符；超 10 字符按文档
+        /// 从索引 13（协议 40013）扩展地址后调整本值，40007 序号位不受影响）。</summary>
         public int ProductModelLen { get; set; } = 5;
+
+        /// <summary>
+        /// 产品型号 → PLC 型号序号 映射表（V2.14.13，JSON `modelIndexes`）：
+        /// 每个产品型号对应一个 PLC 序号（写 40007），现场默认 Z121=1、U171=2（见 DefaultModelIndexes）。
+        /// 设置窗体 PLC 区"型号→PLC序号"表格里维护（可增删行、改序号），运行时
+        /// `PlcService.WriteProductModel` 按型号名（忽略大小写）查本表得序号写 40007；
+        /// 型号没配序号时写 0（PLC 端视为未配置）。
+        /// 【为什么放在 PlcConfig】序号是"型号在 PLC 通讯里的编码"，只被 PLC 写型号流程使用，
+        /// 放 PLC 配置里与 40007 地址语义内聚；设置页 PLC 区同时展示地址与映射，一站式配置。
+        /// </summary>
+        public List<ModelIndexItem> ModelIndexes { get; set; } = new List<ModelIndexItem>();
+
+        /// <summary>现场默认"产品型号 → PLC 序号"映射（V2.14.13，见 ModelIndexes）：
+        /// Z121=1、U171=2。返回全新列表实例，调用方可直接修改/复制，不共享引用。</summary>
+        public static List<ModelIndexItem> DefaultModelIndexes() =>
+            new List<ModelIndexItem>
+            {
+                new ModelIndexItem { ModelName = "Z121", ModelIndex = 1 },
+                new ModelIndexItem { ModelName = "U171", ModelIndex = 2 },
+            };
+    }
+
+    /// <summary>
+    /// 型号→PLC 序号映射项（V2.14.13，JSON 数组元素 `modelIndexes`）：一个产品型号对应一个 PLC 序号。
+    /// - ModelName：产品型号名（与 AppConfig.ProductModel/ProductModels 对应，如 "Z121"，匹配忽略大小写）；
+    /// - ModelIndex：该型号在 PLC 40007 寄存器里的序号（&gt;0 有效，0=未配置/不写序号）。
+    /// </summary>
+    public class ModelIndexItem
+    {
+        /// <summary>产品型号名（与 ProductModel/ProductModels 对应，如 "Z121"）</summary>
+        public string ModelName { get; set; } = "";
+
+        /// <summary>该型号的 PLC 型号序号（写 40007，&gt;0 有效，0=未配置）</summary>
+        public int ModelIndex { get; set; }
     }
 
     /// <summary>

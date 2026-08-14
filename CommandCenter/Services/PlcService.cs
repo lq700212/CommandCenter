@@ -331,18 +331,28 @@ namespace CommandCenter.Services
         }
 
         /// <summary>
-        /// 写产品型号字符串（V2.7，上位机写索引 7~11 = 协议 40007~40011，PLC 来读）。
-        /// 编码：每寄存器存 2 个 ASCII 字符，高字节=前字符、低字节=后字符；最多写
-        /// ProductModelLen×2 个字符，不足的尾部补 0x00（PLC 以 0x00 作字符串结束符）。
-        /// 型号为空时整段写 0（PLC 读到空型号），不崩。
+        /// 写产品型号（V2.14.13 协议升级）：
+        ///   ① 型号序号 → `ProductModelIndexAddress`（默认索引 7 = 协议 40007）：按型号名查
+        ///      `_cfg.ModelIndexes` 映射表得序号（默认 Z121=1、U171=2），型号没配序号写 0；
+        ///   ② 型号 ASCII 字符串 → `ProductModelAddress` 起（默认索引 8 = 协议 40008，连续
+        ///      ProductModelLen 个寄存器），每寄存器存 2 个 ASCII 字符（高字节=前字符、低字节=后字符），
+        ///      最多写 ProductModelLen×2 个字符、不足的尾部补 0x00（PLC 以 0x00 作字符串结束符）。
+        /// 型号为空时序号与型号区都写 0（PLC 读到空型号），不崩。
         /// </summary>
-        /// <param name="model">产品型号（如 "Z1212"），超长自动截断</param>
+        /// <param name="model">产品型号（如 "Z121"），超长自动截断</param>
         /// <returns>从站就绪(true)/未就绪(false)</returns>
         public bool WriteProductModel(string model)
         {
             lock (_lock)
             {
                 if (_dataStore?.HoldingRegisters == null) return false;
+
+                // ① 型号序号（协议 40007）：查"型号→序号"映射，命中写序号、未命中写 0
+                int modelIndex = ResolveModelIndex(model);
+                if (_cfg.ProductModelIndexAddress > 0)
+                    WriteLocal(_cfg.ProductModelIndexAddress, (ushort)modelIndex);
+
+                // ② 型号 ASCII（协议 40008 起）
                 int len = Math.Max(1, Math.Min(20, _cfg.ProductModelLen)); // 寄存器数 1~20，防异常配置
                 ushort[] regs = new ushort[len];
                 byte[] bytes = Encoding.ASCII.GetBytes(model ?? "");       // 空型号→全 0
@@ -358,6 +368,18 @@ namespace CommandCenter.Services
                 WriteLocalMulti(_cfg.ProductModelAddress, regs);
                 return true;
             }
+        }
+
+        /// <summary>
+        /// 按型号名查"型号→PLC 序号"映射（V2.14.13）：在 `_cfg.ModelIndexes` 里忽略大小写匹配
+        /// 型号名，命中返回该型号序号（&gt;0）；型号为空/没配序号返回 0（PLC 端视为未配置）。
+        /// </summary>
+        private int ResolveModelIndex(string model)
+        {
+            if (string.IsNullOrWhiteSpace(model)) return 0;
+            var item = _cfg?.ModelIndexes?.FirstOrDefault(m =>
+                m != null && string.Equals(m.ModelName, model.Trim(), StringComparison.OrdinalIgnoreCase));
+            return item != null && item.ModelIndex > 0 ? item.ModelIndex : 0;
         }
 
         // ──────────────── 通用 D 地址读写（DevTestForm 功能测试用）────────────────
