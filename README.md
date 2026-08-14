@@ -25,7 +25,8 @@
 CommandCenter/
 ├── Views/           界面（MainForm + MainForm.Designer / SettingsForm + SettingsForm.Designer /
 │                    DirTreeEditForm 目录结构可视化配置 / WindowPointForm 窗口点位+相机程序映射配置 /
-│                    LoginForm 账号登录（管理员+开发者） / DevTestForm 功能测试（开发者专用））
+│                    LoginForm 账号登录（管理员+开发者） / DevTestForm 功能测试（开发者专用） /
+│                    SerialInputForm 手动输入序列号对话框（点标题栏"人工补录"按钮弹出））
 │                    ※ MainForm/SettingsForm 静态布局（标题栏、状态栏、矩阵容器、设置表控件）
 │                      在对应 .Designer.cs 里可视化维护；动态部分（相机灯、窗口矩阵内容）
 │                      在业务文件里运行时生成
@@ -173,6 +174,9 @@ CommandCenter/
    串口枪须在串口表显式配）；`scanners` 段缺失/为空数组时程序启动自动补一台启用 TCP 枪
    （`19.87.6.100:9004/LON`）——排查"Test-NetConnection 通但程序不连扫码枪/测试页无选项"先看配置里
    `scanners` 是否为空。
+   **手动补录（V2.14.6；V2.14.7 起仅按钮入口）**：扫码枪漏读/无枪时，点标题栏序列号框右侧
+   【人工补录】按钮（双击序列号框弹窗已取消）弹 `SerialInputForm` 录入对话框，回车=确定（非空才提交）
+   → 与扫码枪收码等效推进"等 SN"阶段；序列号框保持只读、扫码枪收码仍自动覆盖，两条通道互不干扰。
 - 管理员：**登录开关**（`Security.AdminEnabled`，默认 true）、用户名（`AdminUser`，默认
   `admin`）、密码 **SHA-256 哈希**（`AdminPasswordHash`，不存明文；默认出厂密码 `admin123`）。
   启用后点"系统设置"每次都要登录管理员账号才放行；改密码在**登录对话框**里完成（登录界面

@@ -63,7 +63,7 @@
     <Compile Include="Views\MainForm.cs">
       <SubType>Form</SubType>
     </Compile>
-<!-- MainForm 的 Designer 分部文件：静态控件（标题栏/产品型号下拉/设置按钮/连接灯/状态栏/窗口矩阵）
+    <!-- MainForm 的 Designer 分部文件：静态控件（标题栏/产品型号下拉/设置按钮/连接灯/状态栏/窗口矩阵）
          由 Visual Studio 窗体设计器可视化维护；动态控件（相机灯/窗口矩阵内容）仍在 MainForm.cs 运行时生成 -->
     <Compile Include="Views\MainForm.Designer.cs">
       <DependentUpon>MainForm.cs</DependentUpon>
@@ -103,6 +103,13 @@
     </Compile>
     <Compile Include="Views\DevTestForm.Designer.cs">
       <DependentUpon>DevTestForm.cs</DependentUpon>
+    </Compile>
+    <!-- SerialInputForm：手动输入序列号对话框（V2.14.6 恢复；V2.14.7 改 Designer 分部文件，可用设计器微调 UI） -->
+    <Compile Include="Views\SerialInputForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Views\SerialInputForm.Designer.cs">
+      <DependentUpon>SerialInputForm.cs</DependentUpon>
     </Compile>
     <Compile Include="Controls\CameraDisplayControl.cs">
       <SubType>UserControl</SubType>

@@ -124,7 +124,7 @@ ProductModelAddress/ProductModelLen`）+ 顶层 `ProductModel`（**两处可改�
 
 | 文件 | 作用 |
 | --- | --- |
-| `CommandCenter/Views/MainForm.cs` | 主窗体：标题栏 + 窗口矩阵 + 事件接线；**标题栏型号下拉 cmbModel（V2.8，操作员直接切型号，见 SwitchModel/InitModelCombo；配置对话框内切型号只同步设置页型号下拉、不实时切主界面——保存后 ApplyRuntimeConfig 统一刷新，延迟生效）**；序列号框 txtSerial 点击直录（Enter 提交/Esc 还原/失焦非空提交，V1.12.19，见 SetupSerialEditor） |
+| `CommandCenter/Views/MainForm.cs` | 主窗体：标题栏 + 窗口矩阵 + 事件接线；**标题栏型号下拉 cmbModel（V2.8，操作员直接切型号，见 SwitchModel/InitModelCombo；配置对话框内切型号只同步设置页型号下拉、不实时切主界面——保存后 ApplyRuntimeConfig 统一刷新，延迟生效）**；序列号框 **lblSerial 只读展示（V2.14.7 由 TextBox 换回历史 Label 框）** + 右侧"人工补录"按钮 btnManualSerial（V2.14.6 恢复 V1.12.17 弹窗交互，替代 V1.12.19 框内直录，见 SetupSerialEditor/PromptManualSerial；**V2.14.7 起取消 txtSerial 双击弹窗与悬停 ToolTip**，手动补录仅靠 btnManualSerial 按钮入口，扫码枪收码 OnSerialScanned 仍直接覆盖只读框文本，两条通道隔离不互抢） |
 | `CommandCenter/Services/ProductionCoordinator.cs` | 生产流程编排（两阶段状态机：扫码到位→扫SN→相机到位→拍到图→上报→循环），业务核心 |
 | `CommandCenter/Services/ConnectionMonitor.cs` | 连接健康监控：后台心跳 + 断连自动重连 + 边沿日志（对齐 AgingTestSystem） |
 | `CommandCenter/Services/PlcService.cs` | 汇川 PLC Modbus TCP 读写（NModbus 3.0.83） |
@@ -135,6 +135,7 @@ ProductModelAddress/ProductModelLen`）+ 顶层 `ProductModel`（**两处可改�
 | `CommandCenter/Utils/SecurityUtil.cs` | 管理员密码 SHA-256 哈希 + 记住密码 DPAPI 加解密（登录/改密码/回填共用） |
 | `CommandCenter/Views/LoginForm.cs` | 账号登录对话框（管理员 admin / 开发者 dev 双账号，按角色分流进设置或功能测试，V1.9.0/V1.12.0） |
 | `CommandCenter/Views/DevTestForm.cs` | 功能测试窗体（开发者专用：相机 T1/T2 触发（T2 取图闪图存图，V1.12.24）+ PLC 寄存器交互 + 扫码枪读码展示/发触发指令，复用主窗体连接，V1.12.0） |
+| `CommandCenter/Views/SerialInputForm.cs` | 手动输入序列号对话框（V2.14.6 恢复；V2.14.7 外观改到 Designer 分部文件 SerialInputForm.Designer.cs，可用 VS 设计器拖拽微调 UI，本类只留业务：预填全选/回车确定/Esc取消/空提交拦截）：外观对齐 LoginForm（顶部蓝色横幅+白面板+蓝主按钮），点标题栏"人工补录"按钮弹出（V2.14.7 起双击序列号框入口已取消） |
 | `CommandCenter/Controls/CameraDisplayControl.cs` | 相机显示窗 + 右下角自绘 OK/NG 徽标（主界面不显示点位标识，点位只走设置界面查询）；左上角窗口编号显隐由配置 `DisplayConfig.WindowIndexVisible` 控制（V2.10.6） |
 | `CommandCenter/Views/DirTreeEditForm.cs` | 图片存储目录结构可视化配置（逐级目录 + 文件名规则 + 实时预览） |
 | `CommandCenter/Views/WindowPointForm.cs` | 窗口↔存图点位 + 点位↔相机程序号 可视化配置（格子矩阵编辑点位/交换/恢复默认，V2.13 恢复编辑并按型号存 WindowPointMaps + 相机下拉点位程序表，V1.12.25 同页混排、V1.12.26 两列改下拉选择、V2.12.0 自适应下按相机表铺排矩阵/格子标"相机名·点位号"；**相机↔型号单向联动（V2.14.5）**：cmbCamera 恒列所有相机、选定后 cmbModel 只列该相机有点位的型号、切型号不再反过滤相机——见 `ModelCandidatesFor`/`SyncModelForCamera`/`ApplySelections`） |

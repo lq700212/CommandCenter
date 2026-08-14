@@ -1,6 +1,113 @@
 # 版本改动记录
 
-## V2.14.5（2026-08-14）WindowPointForm 相机/型号下拉改"单向联动"
+## V2.14.8（2026-08-14）SerialInputForm 界面改到 Designer 分部文件（可设计器微调）
+
+> 用户要求：SerialInputForm 的控件不要再用代码动态构造，改成 Designer（设计器）分部文件，
+> 这样界面可以在 Visual Studio 设计器里直接拖拽微调，不需要改代码逻辑。
+
+### 改动范围
+- **`Views/SerialInputForm.Designer.cs`（新增）**：窗体外观全部移入设计器分部文件——横幅
+  `pnlHeader`/标题 `lblBanner`/标签 `lblSerialTitle`/输入框 `txtValue`/确定 `btnOk`/取消
+  `btnCancel` 的创建与属性（布局/颜色/字体/AcceptButton 逻辑由本类接）声明为分部类字段，
+  含标准 `components`/`Dispose`/`InitializeComponent` 结构与 ASCII 布局图；用 VS 打开
+  "视图→设计器"即可拖拽微调，保存自动回写。
+- **`Views/SerialInputForm.cs`**：类改为 `public partial class SerialInputForm : Form`；
+  删除全部手工 `new` 控件代码，只保留业务交互——构造调 `InitializeComponent()` 后
+  预填当前 SN + `SelectAll()` + `Focus()`、`AcceptButton/CancelButton` 回车/Esc、
+  【确定】空输入拦截（非空才 `DialogResult.OK`）。`SerialNumber` 属性不变。
+- **`CommandCenter.csproj`**：登记 `SerialInputForm.Designer.cs`（`<DependentUpon>` 挂到
+  SerialInputForm.cs）。
+- 文档同步：`AGENTS.md` 文件导航改为"外观改到 Designer 分部文件（V2.14.7）"；`CHANGELOG.md`。
+
+### 为什么这么改
+- **界面可设计器微调**：用户要自己调 UI（改位置/字号/配色/按钮尺寸），纯代码构造每次都要
+  改代码重新编译；Designer 分部文件可直接在 VS 设计器里拖拽、保存即生效，零代码门槛。
+- **业务/外观职责分离**：与 MainForm/LoginForm 等项目其它窗体同构，维护一致。
+
+### 验证
+- 构建通过（MSBuild Debug/AnyCPU）；弹窗预填全选、回车/Esc、空提交拦截业务逻辑未变。
+
+## V2.14.7（2026-08-14）序列号框换回历史 Label 只读框 + 取消双击弹窗与 ToolTip
+
+> 用户要求（两步）：① 序列号框不再响应双击弹窗、去掉悬停 ToolTip 提示——现场手持扫码枪/测头
+> 作业时悬停常误触发气泡、双击框也容易误弹录入窗口打扰节奏，手动补录改由右侧【人工补录】按钮
+> （btnManualSerial）作为唯一入口；② 检查 git 历史发现序列号框最早是 **Label（lblSerial）只读
+> 显示框**，V1.12.19 为"框内直录"才换成 TextBox（txtSerial），直录功能早已废弃（V2.14.6 恢复
+> 弹窗），TextBox 反而带来可聚焦/可编辑等潜在交互噪音——**换回历史 Label 只读框**，外观与行为
+> 与早期稳定版本一致。
+
+### 改动范围
+- **`Views/MainForm.Designer.cs`**：
+  - `txtSerial`（TextBox）→ `lblSerial`（Label）：声明、`new`、`pnlTitleBar.Controls.Add` 全改；
+  - 恢复历史 Label 属性（AutoSize=false、BorderStyle=FixedSingle、TextAlign=MiddleLeft、
+    白底、FixedSingle 边框、同字号同色、固定 220×24），外观与原 Label 版本一致；
+  - 字段声明 `private TextBox txtSerial` → `private Label lblSerial`；ASCII 布局图同步。
+- **`Views/MainForm.cs`**：
+  - 全部 `txtSerial` 引用改 `lblSerial`（显示、显隐、重排宽度分支、OnSerialScanned 覆盖）；
+  - `SetupSerialEditor`：删除 `txtSerial.ReadOnly = true`（Label 天然只读不可聚焦，无需该行）、
+    删除双击订阅与 `tip.SetToolTip(txtSerial, …)`；仅保留按钮点击弹窗 + 按钮 ToolTip；
+  - `PromptManualSerial`/类注释/`InitTitleBarFields`/`ApplyConfigVisibility`/`RelayoutTitleBar` 同步。
+- 文档同步：`docs/CommandCenter.md` §3.2 与"第五部分 扫码通道"措辞（Label 只读框、
+  仅按钮入口、无气泡提示）；`AGENTS.md` 文件导航描述更新；`CHANGELOG.md`。
+
+### 为什么这么改
+- **回归稳定旧版交互**：Label 只读框是项目早期验证过的形态，纯展示、不可聚焦、无输入光标，
+  扫码枪收码照样直接覆盖文本；TextBox 是为已废弃的"框内直录"引入的，现在反而是多余的交互面。
+- **避免误触发**：取消双击弹窗与框上 ToolTip 后，鼠标在序列号框上任何常规操作都不打扰作业。
+- **收敛入口**：手动补录统一走明确的【人工补录】按钮，语义清晰且功能不缺失。
+
+### 验证
+- 构建通过（MSBuild Debug/AnyCPU）；扫码收码覆盖 `lblSerial.Text` 与按钮补录路径不受影响
+  （仅删除双击/ToolTip 接线、控件类型 TextBox→Label，无逻辑改动）。
+
+## V2.14.6（2026-08-14）序列号手动输入恢复"双击弹窗"（替代框内直录）
+
+> 用户要求：① 目前"序列号框点击直录"（V1.12.19 引入）与扫码枪自动收码共用同一个 TextBox，
+> 扫码枪一推码就把人工输入顶掉，且现场对"输入完没有确认按钮、后续怎么走"有疑问；② 恢复到
+> V1.12.17 的"双击序列号框 → 弹录入对话框 → 点确定提交"交互。git 全历史检索确认 V1.12.17 的
+> `SerialInputForm.cs` 与 `PromptManualSerial` 无快照可还原（该版本引入与 V1.12.19 删除在同一次
+> 提交 1ffac9f 内完成，git 不保留中间态），故按 CHANGELOG V1.12.17 记录的逻辑重建。
+> ③ 用户进一步要求：在序列号框右侧新增**"人工补录"按钮**（btnManualSerial）作为主入口，
+> 总数/OK/NG/系统设置按钮随之右移；按钮风格参考 btnSettings；SerialInputForm 美观化参考
+> LoginForm 风格（顶部蓝色横幅 + 白色面板 + 蓝色主按钮）。
+
+### 改动范围
+- **`Views/SerialInputForm.cs`（新增，V2.14.6 美化）**：手动输入序列号对话框（纯代码构造，
+  无 Designer）。**外观对齐 LoginForm**：顶部蓝色横幅（52,152,219 主蓝 + 白色粗体标题居中）、
+  白色窗体/浅灰蓝次按钮、蓝底白字主按钮"确定"。打开即预填当前 SN 并全选（方便直接覆盖修改）、
+  **回车=确定 / Esc=取消**；【确定】时输入 trim 后为空 → 弹提示留在窗体（防误清空导致存图目录
+  归档错乱），【取消】/关闭不生效保留原 SN；非空确定后经 `SerialNumber` 属性交给调用方。
+- **`Views/MainForm.Designer.cs`**：新增 **`btnManualSerial`（"人工补录"，蓝底白字 Flat 无边框，
+  尺寸 88×30 与 btnSettings 一致）**，Add 在 txtSerial 之后；字段声明、ASCII 布局图同步。
+- **`Views/MainForm.cs`**：
+  - `SetupSerialEditor` 接线：`txtSerial.ReadOnly = true`（只读展示——扫码枪收码
+    `OnSerialScanned` 仍直接覆盖框内文本，两条通道彻底隔离）+ **双击框**或**点【人工补录】按钮**
+    → `PromptManualSerial`；ToolTip 提示两入口；
+  - 新增 `PromptManualSerial()`：`ShowDialog` 确定且非空才 `SetManualSerial`（与扫码枪收码
+    等效、可推进"等 SN"阶段）+ 同步标题栏显示；删除 `CommitSerialEdit/RestoreSerialDisplay`；
+  - `RelayoutTitleBar` 排布数组加入 `btnManualSerial`（位于 txtSerial 与 | 之间，按钮走既有
+    Button 分支宽度=Width+12、`(barHeight - c.Height)/2` 垂直居中，同行控件整体右移）；
+  - `ApplyConfigVisibility`：btnManualSerial 可见性跟随 txtSerial（ShowSerialNumber 开关）；
+  - 类注释、ASCII 布局图同步"只读展示 + 人工补录按钮/双击弹窗"（V2.14.6）。
+- **`CommandCenter.csproj`**：登记新窗体 `Views\SerialInputForm.cs`。
+- 文档同步：`docs/CommandCenter.md` §3.2 手动输入改"按钮/双击弹窗"、"第一部分 主界面速览"、
+  "第五部分 扫码通道"措辞；`README.md` 序列号说明；`CHANGELOG.md`。
+
+### 为什么这么改
+- **避免扫码/手动两通道冲突**：框内直录时 txtSerial 即 TextBox，点击即编辑；扫码枪收码自动写
+   `txtSerial.Text`，与操作员手打字互相覆盖。改为只读展示后，扫码自动填充唯一作用于只读框，
+   手动输入走独立模态对话框，输入内容在弹出层完成、确认后才写入，杜绝"被打断/被顶掉"。
+- **给"输入完怎么生效"一个明确答案**：客户疑问正是"没有确认按钮、后续步骤如何"。弹窗提供显式
+  【确定】/【取消】，确定后 SetManualSerial 置 `_serialReceived=true`——若 PLC 已发扫码请求
+  （上位机处于"等 SN"阶段）下一拍即上报扫码 OK(1) 并进入后续相机拍照，产线节奏由 PLC 主导不变，
+  无需 PLC 触摸屏做任何"跳过扫码"操作。
+- **"人工补录"按钮让入口更明显**：双击框对操作员不直观，独立按钮一眼可见、随手可点，
+  且避免误双击显示窗口的歧义；计数/系统设置等同行字段右移由 RelayoutTitleBar 统一重排自动完成。
+- 空输入拦截保留原 SN：防误清空导致本件图片归档进"无 SN"目录而错乱。
+
+### 验证
+- Debug 构建通过（无 error，MSBuild 输出 `CommandCenter.exe`）；冒烟启动进程存活、无崩溃；
+  SetupSerialEditor 仅构造时订阅一次（InitTitleBarRuntime 只构造调用，热更不重复订阅）。
 
 > 用户要求：程序映射区"相机↔型号"原先是双向过滤（选型号会反过来过滤相机、甚至把相机跳走），体验乱；
 > 改为单向——**cmbCamera 先选、恒列所有相机，选定后再由该相机决定 cmbModel 有哪些可选型号**。

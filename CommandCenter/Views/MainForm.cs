@@ -16,7 +16,7 @@ namespace CommandCenter.Views
     /// 控制中心主窗体。
     /// 【界面布局】
     /// ┌───────────────────────────────────────────────────────────────────┐
-    /// │ 产品型号:[cmbModel▾] 序列号:[框] | 总数:0 | [OK] | [NG] | [系统设置] │
+    /// │ 产品型号:[cmbModel▾] 序列号:[框][人工补录] | 总数:0 | [OK] | [NG] | [系统设置] │
     /// │                                        ●PLC ●扫码枪 ●上相机 ●下相机 │
     /// │（相机灯/下拉显示配置名称：有名称显名称，无名称回退"相机N"即序号）       │
     /// ├───────────────────────────────────────────────────────────────────┤
@@ -31,9 +31,16 @@ namespace CommandCenter.Views
     /// └───────────────────────────────────────────────────────────────────┘
     /// 窗口放大/还原（V1.12.15）：鼠标左键双击任一显示窗口 → 该窗口全屏放大（整屏含任务栏），
     ///   再次双击 / 按 Esc → 还原回窗口矩阵原位置；全屏时画面仍随检测实时刷新（移动的是同一控件）。
-    /// 序列号手动输入（V1.12.17 弹窗 / V1.12.19 框内直录）：点击标题栏"序列号"框（txtSerial，TextBox）
-    ///   即可出现输入光标直接录入当前产品 SN（无扫码枪/扫码枪未读到时手动补录）；
-    ///   Enter 提交 / Esc 还原 / 失焦非空提交（SetManualSerial 与扫码枪收码等效，可推进"等 SN"阶段）。
+    /// 序列号手动输入（V1.12.17 弹窗 / V1.12.19 框内直录 / V2.14.6 恢复弹窗）：标题栏"序列号"框
+    ///   （lblSerial，V2.14.7 由 TextBox 换回历史 Label 只读框）为**只读展示 + 弹窗录入**交互——
+    ///   扫码枪收码自动覆盖框内文本；
+    ///   需要手动补录（无扫码枪 / 扫码枪没读到码 / SN 修改）时，点序列号框右侧**【人工补录】按钮**
+    ///   （btnManualSerial，V2.14.7 起唯一入口，**双击框弹窗已取消、框上无 ToolTip**），
+    ///   弹 SerialInputForm 录入对话框：预填当前 SN、点【确定】（非空才提交）/【取消】关闭。
+    ///   确定后调 SetManualSerial（与扫码枪收码等效，可推进"等 SN"阶段）并刷新标题栏。
+    ///   为什么恢复弹窗：框内直录时 txtSerial 本身可编辑，与扫码枪自动收码"抢"同一个输入框，
+    ///   扫码枪一推码就把人工输入顶掉，且"无确认按钮"让现场不清楚什么时候生效——两条通道
+    ///   应彻底隔离（扫码=自动覆盖只读框；手动=独立弹窗+确认按钮）。
 /// 标题栏：左起信息字段（按配置开关）→ 产品型号下拉（V2.8，可直接切型号）→ 系统设置按钮
 /// → 连接指示灯；
     ///   - 连接指示灯从右到左：●相机N..●相机1 → ●扫码枪 → ●PLC（Dock.Right 先 Add 靠左）。
@@ -180,61 +187,52 @@ namespace CommandCenter.Views
             // ③ 设置按钮事件（设计器只做外观，交互在这里挂线，只挂一次）
             btnSettings.Click += (s, e) => OpenSettings();
 
-            // ④ 序列号框点击直录（V1.12.19）：txtSerial 是 TextBox，点击即有输入光标，
-            //    无需弹窗即可手工录入当前产品 SN（无扫码枪 / 扫码枪没读到码时）。
-            //    Enter 提交 / Esc 还原 / 失焦非空提交，全部在 SetupSerialEditor 里接线一次。
+            // ④ 序列号框交互（V2.14.6 恢复弹窗，替代 V1.12.19 框内直录）：lblSerial 只读展示框
+            //    （扫码枪收码自动填充，OnSerialScanned 直接覆盖文本），手动补录/改 SN 用点右侧
+            //    【人工补录】按钮（btnManualSerial，V2.14.7 起取消双击框弹窗）弹 SerialInputForm
+            //    录入对话框，点【确定】（非空才提交）/【取消】关闭。
+            //    交互全部在 SetupSerialEditor 里接线一次（构造时仅调用一次，热更不重复订阅）。
             SetupSerialEditor();
         }
 
         /// <summary>
-        /// 序列号框内直录交互（V1.12.19，替代 V1.12.17 的"双击弹窗"）。
-        /// txtSerial 虽然平时看起来像"只读显示框"（白底+单线边框），但它是标准 TextBox，
-        /// 鼠标点击即进入编辑态出现输入光标，无需弹窗。交互约定：
-        ///   - Enter：trim 后非空则写协调器（SetManualSerial，推进"等 SN"阶段，同扫码枪收码），
-        ///     空输入不更新（保留原 SN）；触发后把焦点还给标题栏，避免妨害按键操作；
-        ///   - Esc：放弃本次输入，还原为协调器当前 SN 值；
-        ///   - 失焦（Leave）：非空按 Enter 同规则提交；空输入还原为上值（防误清空）。
-        /// 为什么在失焦也提交：操作员录完习惯点窗口其它区域，若只认 Enter 会丢输入。
-        /// 为什么空输入还原：扫码收到的 SN 不应被一次误编辑清掉。
+        /// 序列号框交互接线（V2.14.6 恢复"弹窗录入"，替代 V1.12.19 的"框内直录"）。
+        /// lblSerial（V2.14.7 由 TextBox 换回历史 Label 只读框）平时是**只读展示框**
+        /// （白底+单线边框，外观不变）：
+        ///   - 扫码枪收码路径不冲突：OnSerialScanned（MainForm）直接覆盖 lblSerial.Text，Label
+        ///     不会获得焦点、不可编辑，操作员也不用担心打字内容被扫码枪顶掉；
+        ///   - 手动补录：点右侧**【人工补录】按钮**（btnManualSerial，V2.14.6）→
+        ///     弹 SerialInputForm（预填当前 SN）→【确定】非空时调 SetManualSerial
+        ///     （与扫码枪收码等效：推进"等 SN"阶段）并刷新标题栏；
+        ///     【取消】/直接关闭不生效，保留原 SN。
+        ///   - V2.14.7：取消 lblSerial **双击弹窗**功能（现场误双击也会弹窗、容易误改 SN），
+        ///     只保留按钮入口；同时移除 lblSerial 的 ToolTip 提示，避免鼠标悬停弹字干扰操作。
+        /// 为什么恢复弹窗而不是框内直录：直录版 txtSerial（TextBox）本身可编辑，与扫码枪自动收码
+        /// "抢"同一个输入框，扫码枪一推码就把人工输入顶掉；弹窗用独立模态对话框接收输入，
+        /// 两条通道彻底隔离，且"明确点确定才生效"消除现场对"输入完没有确认按钮"的疑问
+        /// （历史 V1.12.17 即为弹窗交互）。
         /// </summary>
         private void SetupSerialEditor()
         {
-            txtSerial.KeyUp += (s, e) =>
-            {
-                if (e.KeyCode == Keys.Enter)
-                {
-                    CommitSerialEdit();          // Enter 提交
-                    pnlTitleBar.Focus();         // 焦点还给标题栏，避免连续 Enter 连发
-                }
-                else if (e.KeyCode == Keys.Escape)
-                {
-                    RestoreSerialDisplay();      // Esc 还原，丢弃本次输入
-                    pnlTitleBar.Focus();
-                }
-            };
-            txtSerial.Leave += (s, e) => CommitSerialEdit();
+            // Label 天然只读、不可聚焦，无需再设 ReadOnly（TextBox 时代才需要）。
+            btnManualSerial.Click += (s, e) => PromptManualSerial();        // 人工补录按钮：手动录 SN 唯一入口
+            var tip = new ToolTip();
+            tip.SetToolTip(btnManualSerial, "手动输入/修改当前序列号");
         }
 
-        /// <summary>把 txtSerial 当前内容按"非空才提交"规则写入协调器，并同步显示（V1.12.19）。</summary>
-        private void CommitSerialEdit()
+        /// <summary>点【人工补录】按钮 → 弹手动录入对话框；确定且非空则写协调器并刷新标题栏（V2.14.6 恢复）。</summary>
+        private void PromptManualSerial()
         {
             if (IsDisposed) return;
-            string code = txtSerial.Text.Trim();
-            if (string.IsNullOrEmpty(code))
+            using (var dlg = new SerialInputForm(_coordinator.LatestSerialNumber))
             {
-                RestoreSerialDisplay();  // 空输入不更新，还原显示当前 SN
-                return;
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;   // 取消/关闭：不生效，保留原 SN
+                string code = dlg.SerialNumber.Trim();
+                if (string.IsNullOrEmpty(code)) return;                // 弹窗本身已拦截空输入，双保险
+                _coordinator.SetManualSerial(code);
+                if (lblSerial != null) lblSerial.Text = code;
+                LogHelper.Info($"手动输入序列号：{code}");
             }
-            _coordinator.SetManualSerial(code);
-            txtSerial.Text = code;
-            LogHelper.Info($"手动输入序列号：{code}");
-        }
-
-        /// <summary>把 txtSerial 恢复为协调器当前 SN 值（Esc/空输入时丢弃编辑）。</summary>
-        private void RestoreSerialDisplay()
-        {
-            if (IsDisposed) return;
-            txtSerial.Text = _coordinator.LatestSerialNumber ?? "";
         }
 
         /// <summary>
@@ -251,10 +249,11 @@ namespace CommandCenter.Views
 
             // 产品型号前缀文案（V1.1.2 现场业务对应）：前缀文案走配置，开关控制整段显示
             lblProductPrefix.Text = _config.Display.ProductModelPrefix + ":";
-            // 序列号：标题"序列号:"在显示框外（lblSerialTitle），框内只放值（txtSerial，点击可直录）；
-            // 有值显示值，没有则框内留空（不写"待扫码"），标题+框整体由开关控制显隐
+            // 序列号：标题"序列号:"在显示框外（lblSerialTitle），框内只放值（lblSerial，Label 只读框、
+            // 弹窗录入，V2.14.6；V2.14.7 由 TextBox 换回 Label）；有值显示值，没有则框内留空
+            // （不写"待扫码"），标题+框整体由开关控制显隐
             lblSerialTitle.Text = "序列号:";
-            txtSerial.Text = _coordinator.LatestSerialNumber;
+            lblSerial.Text = _coordinator.LatestSerialNumber;
 
             // ② 标题栏 OK/NG 计数高亮（V1.5.0 现场反馈"彩色数字不够醒目"）：
             // 默认把 OK/NG 做成"实心彩色色块 + 白字"（绿底=OK、红底=NG，配色走 DisplayConfig），
@@ -279,7 +278,8 @@ namespace CommandCenter.Views
             lblProductPrefix.Visible = _config.Display.ShowProductModel;
             cmbModel.Visible = _config.Display.ShowProductModel; // 型号下拉与"产品型号"标签同开关（V2.8）
             lblSerialTitle.Visible = _config.Display.ShowSerialNumber;
-            txtSerial.Visible = _config.Display.ShowSerialNumber;
+            lblSerial.Visible = _config.Display.ShowSerialNumber;
+            btnManualSerial.Visible = _config.Display.ShowSerialNumber;   // 人工补录按钮随序列号区整体显隐（V2.14.6）
             lblTotal.Visible = _config.Display.ShowTotalCount;
             lblOk.Visible = _config.Display.ShowOkCount;
             lblNg.Visible = _config.Display.ShowNgCount;
@@ -606,9 +606,10 @@ namespace CommandCenter.Views
             // 按配置开关恢复字段可见性（配置说该显示的字段必须显示，不再被压缩隐藏）。
             ApplyConfigVisibility();
 
-            // 排布顺序固定：产品前缀 → 型号下拉(V2.8) → 序列号标题 → 序列号框 → | → 总数 → OK → NG → | → 系统设置按钮
-            Control[] seq = { lblProductPrefix, cmbModel, lblSerialTitle, txtSerial, lblSep1,
-                              lblTotal, lblOk, lblNg, lblSep2, btnSettings };
+            // 排布顺序固定：产品前缀 → 型号下拉(V2.8) → 序列号标题 → 序列号框 → 人工补录按钮(V2.14.6)
+            // → | → 总数 → OK → NG → | → 系统设置按钮
+            Control[] seq = { lblProductPrefix, cmbModel, lblSerialTitle, lblSerial, btnManualSerial,
+                              lblSep1, lblTotal, lblOk, lblNg, lblSep2, btnSettings };
 
             // 右侧 Dock 区（PLC 灯 + 相机聚拢容器）占用的总宽：Dock.Right 控件从右往左叠，
             // 每个控件之间留 6px 视觉间距（间距是内在间距，宽幅估算 ±几像素不影响正确性）。
@@ -627,7 +628,7 @@ namespace CommandCenter.Views
                 int w = 0;
                 if (c is Button)         w = c.Width + 12;
                 else if (c is ComboBox)  w = c.Width + 12;
-                else if (c == txtSerial) w = c.Width + 18;      // 序列号框固定宽度（TextBox），尊重设计宽度
+                else if (c == lblSerial) w = c.Width + 18;      // 序列号框固定宽度（Label），尊重设计宽度
                 else if (c is Label)     w = ((Label)c).PreferredWidth + 18;
                 if (x + w > maxX) break;                          // 越过右边界：停止排布，不隐藏
                 int y = (barHeight - c.Height) / 2;               // 垂直居中
@@ -1105,7 +1106,7 @@ namespace CommandCenter.Views
                 return;
             }
             _coordinator.LatestSerialNumber = code;
-            if (txtSerial != null) txtSerial.Text = code;
+            if (lblSerial != null) lblSerial.Text = code;
             LogHelper.Info("当前产品序列号：" + code);
         }
 

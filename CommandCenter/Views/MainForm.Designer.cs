@@ -11,9 +11,10 @@ namespace CommandCenter.Views
     /// 仍在 MainForm.cs 中生成，不放进这里。
     /// 【重要】整体顺序请参考 MainForm.cs 类注释里的 ASCII 布局图。
     ///   ┌──────────────────────────────────────────────────────────────┐
-    ///   │ 产品型号:[cmbModel▾] 序列号:[lblSerialTitle][txtSerial框]       │
-    ///   │   | 总数:[lblTotal] OK:[lblOk] NG:[lblNg]                     │
-    ///   │          | [btnSettings系统设置]    ●[lblPlcStatus] ●[lblScannerStatus]│
+    ///   │ 产品型号:[cmbModel▾] 序列号:[lblSerialTitle][lblSerial·只读框]    │
+    ///   │   [btnManualSerial人工补录] | 总数:[lblTotal] OK:[lblOk]      │
+    ///   │   NG:[lblNg] | [btnSettings系统设置]                          │
+    ///   │          ●[lblPlcStatus] ●[lblScannerStatus] ●[相机灯]        │
     ///   ├──────────────────────────────────────────────────────────────┤
     ///   │  pnlWindowScroll（AutoScroll=true，行多超高时出竖直滚动条）       │
     ///   │            └─ gridCameraWindows（TableLayoutPanel 等分）        │
@@ -58,12 +59,13 @@ namespace CommandCenter.Views
             this.lblScannerStatus = new System.Windows.Forms.Label();
             this.lblCamPlaceholder = new System.Windows.Forms.Label();
             this.btnSettings = new System.Windows.Forms.Button();
+            this.btnManualSerial = new System.Windows.Forms.Button();
             this.lblSep2 = new System.Windows.Forms.Label();
             this.lblNg = new System.Windows.Forms.Label();
             this.lblOk = new System.Windows.Forms.Label();
             this.lblTotal = new System.Windows.Forms.Label();
             this.lblSep1 = new System.Windows.Forms.Label();
-            this.txtSerial = new System.Windows.Forms.TextBox();
+            this.lblSerial = new System.Windows.Forms.Label();
             this.lblSerialTitle = new System.Windows.Forms.Label();
             this.cmbModel = new System.Windows.Forms.ComboBox();
             this.lblProductPrefix = new System.Windows.Forms.Label();
@@ -95,7 +97,8 @@ namespace CommandCenter.Views
             this.pnlTitleBar.Controls.Add(this.lblTotal);
             this.pnlTitleBar.Controls.Add(this.lblSep1);
             this.pnlTitleBar.Controls.Add(this.lblSerialTitle);
-            this.pnlTitleBar.Controls.Add(this.txtSerial);
+            this.pnlTitleBar.Controls.Add(this.lblSerial);
+            this.pnlTitleBar.Controls.Add(this.btnManualSerial);
             this.pnlTitleBar.Controls.Add(this.cmbModel);
             this.pnlTitleBar.Controls.Add(this.lblProductPrefix);
             this.pnlTitleBar.Dock = System.Windows.Forms.DockStyle.Top;
@@ -231,22 +234,44 @@ namespace CommandCenter.Views
             this.lblSerialTitle.TabIndex = 24;
             this.lblSerialTitle.Text = "序列号:";
             // 
-            // txtSerial
-            // 序列号显示框（V1.12.19 由 Label 改为 TextBox）：点击即可出现输入光标直接录入，
-            // 替代旧的"双击弹窗手动输入"。外观刻意对齐原 Label 风格（固定宽度、单线边框、
-            // 同字号同色、白底跳出标题栏背景），平时像只读框、点击后正常编辑；
-            // 提交/取消/失焦交互见 MainForm.SetupSerialEditor（Enter 提交、Esc 还原、失焦非空提交）。
+            // lblSerial
+            // 序列号显示框（V2.14.7 由 TextBox 换回 Label 只读框——TextBox 是 V1.12.19 为
+            // "框内直录"引入的，直录已废弃，Label 更纯粹、不可聚焦不可编辑，扫码枪收码照样覆盖文本；
+            // 外观延续历史 lblSerial：固定宽度（AutoSize=false）、单线边框像"空框"、MiddleLeft 文本）。
+            // 扫码枪收码（OnSerialScanned）自动覆盖框内文本；手动补录用右侧【人工补录】按钮
+            // （btnManualSerial）弹 SerialInputForm 录入对话框（预填当前 SN、点确定/取消），
+            // 交互接线见 MainForm.SetupSerialEditor（构造时一次，热更不重复订阅）。
             //
-            this.txtSerial.AutoSize = false;
-            this.txtSerial.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.txtSerial.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
-            this.txtSerial.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
-            this.txtSerial.Location = new System.Drawing.Point(341, 12);
-            this.txtSerial.Name = "txtSerial";
-            this.txtSerial.Size = new System.Drawing.Size(220, 24);
-            this.txtSerial.TabIndex = 3;
-            this.txtSerial.Text = "";
-            this.txtSerial.BackColor = System.Drawing.Color.White;
+            this.lblSerial.AutoSize = false;
+            this.lblSerial.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.lblSerial.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
+            this.lblSerial.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
+            this.lblSerial.Location = new System.Drawing.Point(341, 12);
+            this.lblSerial.Name = "lblSerial";
+            this.lblSerial.Size = new System.Drawing.Size(220, 24);
+            this.lblSerial.TabIndex = 3;
+            this.lblSerial.Text = "";
+            this.lblSerial.BackColor = System.Drawing.Color.White;
+            this.lblSerial.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            // 
+            // btnManualSerial
+            // 人工补录按钮（V2.14.6）：位于序列号框右侧，点击弹 SerialInputForm 手动录入/修改
+            // 序列号（V2.14.7 起为手动录 SN 的唯一入口，双击序列号框已取消）。
+            // 风格参考 btnSettings（蓝底白字、Flat 无边框），
+            // 高度 30 与系统设置按钮一致，RelayoutTitleBar 里与同行控件垂直居中排布。
+            // 交互接线见 MainForm.SetupSerialEditor（构造时一次）。
+            //
+            this.btnManualSerial.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
+            this.btnManualSerial.FlatAppearance.BorderSize = 0;
+            this.btnManualSerial.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnManualSerial.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.btnManualSerial.ForeColor = System.Drawing.Color.White;
+            this.btnManualSerial.Location = new System.Drawing.Point(471, 9);
+            this.btnManualSerial.Name = "btnManualSerial";
+            this.btnManualSerial.Size = new System.Drawing.Size(88, 30);
+            this.btnManualSerial.TabIndex = 25;
+            this.btnManualSerial.Text = "人工补录";
+            this.btnManualSerial.UseVisualStyleBackColor = false;
             // 
             // lblProductPrefix
             // 
@@ -368,7 +393,8 @@ namespace CommandCenter.Views
         private Label lblProductPrefix;
         private ComboBox cmbModel;
         private Label lblSerialTitle;
-        private TextBox txtSerial;
+        private Label lblSerial;
+        private Button btnManualSerial;   // 人工补录按钮（V2.14.6）：序列号框右侧，点击弹 SerialInputForm
         private Label lblSep1;
         private Label lblTotal;
         private Label lblOk;
