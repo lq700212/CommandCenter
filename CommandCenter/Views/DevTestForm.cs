@@ -96,14 +96,22 @@ namespace CommandCenter.Views
             _serialSnapshot = serialSnapshot ?? "";
             InitializeComponent();
 
-            // 填充相机下拉框：每台一行"相机N IP:端口"（V1.12.22 起带名称：上相机/下相机）
+            // 填充相机下拉框：每台一行"相机N IP:端口"（V1.12.22 起带名称：上相机/下相机；
+            // V2.13.4 无名称时优先用 CameraId 真编号、其次行序，与设置页第一列一致）
             for (int i = 0; i < _cameras.Count; i++)
             {
                 string name = _cameras[i].DisplayName;
-                string label = string.IsNullOrWhiteSpace(name)
-                    ? $"相机{i + 1}  {_cameras[i].IpLabel}"
-                    : $"{name}  {_cameras[i].IpLabel}";
-                cmbCamera.Items.Add(label);
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    int camId = (i >= 0 && i < _cameraConfigs.Count && _cameraConfigs[i] != null)
+                        ? _cameraConfigs[i].CameraId : 0;
+                    name = (camId > 0 ? $"相机{camId}" : $"相机{i + 1}") + "  " + _cameras[i].IpLabel;
+                }
+                else
+                {
+                    name = name + "  " + _cameras[i].IpLabel;
+                }
+                cmbCamera.Items.Add(name);
             }
             if (cmbCamera.Items.Count > 0) cmbCamera.SelectedIndex = 0;
 
@@ -396,19 +404,21 @@ namespace CommandCenter.Views
                     else if (_imageStore != null)
                     {
                         // V2.12.1：存图文件名 {点位}=1，目录按相机名 {相机} 层隔离（与主流程同规则），
-                        // 相机名取配置 Name，空则兜底"相机N"。
+                        // 相机名取配置 Name，空则优先 CameraId 真编号、其次"相机N"（V2.13.4）。
                         string camName = (camIndex >= 0 && camIndex < _cameraConfigs.Count
                             && !string.IsNullOrWhiteSpace(_cameraConfigs[camIndex].Name))
                             ? _cameraConfigs[camIndex].Name.Trim()
-                            : $"相机{camIndex + 1}";
+                            : ((camIndex >= 0 && camIndex < _cameraConfigs.Count
+                                && _cameraConfigs[camIndex].CameraId > 0)
+                                ? $"相机{_cameraConfigs[camIndex].CameraId}"
+                                : $"相机{camIndex + 1}");
                         archived = _imageStore.SaveImageFilePair(jpeg, iv4p, 1, r.IsOk, _serialSnapshot, camName);
                         if (archived != null)
                         {
-                            // V1.12.25：归档成功后才删 FTP 源图（删早了会把图弄丢），与主流程"处理即删"一致。
-                            // 删除在后台线程执行（UI 禁 IO），方法内部吞异常，删除失败不影响本次测试。
-                            string tag = $"功能测试 相机{camIndex + 1}";
-                            ImageStore.DeleteSourceFile(jpeg, tag);
-                            ImageStore.DeleteSourceFile(iv4p, tag);
+                        // V1.12.25：归档成功后才删 FTP 源图（删早了会把图弄丢），与主流程"处理即删"一致。
+                        // 删除在后台线程执行（UI 禁 IO），方法内部吞异常，删除失败不影响本次测试。
+                        ImageStore.DeleteSourceFile(jpeg, $"功能测试 {camName}");
+                        ImageStore.DeleteSourceFile(iv4p, $"功能测试 {camName}");
                         }
                     }
                     else
@@ -641,10 +651,12 @@ namespace CommandCenter.Views
                 bool allOk = true;
                 for (int i = 0; i < n; i++)
                 {
-                    bool ok = _plc.ReadCameraRequest(_cameraConfigs[i], i, out int station);
+                    bool ok = _plc.ReadCameraRequest(_cameraConfigs[i], out int station);
                     if (ok) anyOk = true; else allOk = false;
                     string name = string.IsNullOrWhiteSpace(_cameraConfigs[i]?.Name)
-                        ? $"相机{i + 1}" : _cameraConfigs[i].Name.Trim();
+                        ? ((_cameraConfigs[i] != null && _cameraConfigs[i].CameraId > 0)
+                            ? $"相机{_cameraConfigs[i].CameraId}" : $"相机{i + 1}")
+                        : _cameraConfigs[i].Name.Trim();
                     labels.Add($"{name}={station}");
                 }
                 string joined = string.Join("  ", labels);
@@ -719,8 +731,8 @@ namespace CommandCenter.Views
         private void BtnResCamReset_Click(object sender, EventArgs e) => WriteCamRes(0);
 
         /// <summary>写相机结果公共流程（V2.12.6 起多相机）：遍历相机表，每台相机写各自结果通道。
-        /// code：0=复位 / 1=OK / 2=NG。地址来自相机配置 PlcResultAddress（0=按相机序默认 40005/40006，
-        /// 第3台起未配置则跳过该台）。</summary>
+        /// code：0=复位 / 1=OK / 2=NG。地址来自相机配置 PlcResultAddress（V2.13.4 起显式配置，
+        /// 0=未配置则跳过该台）。</summary>
         private void WriteCamRes(int code)
         {
             if (!EnsurePlc()) return;
@@ -735,7 +747,7 @@ namespace CommandCenter.Views
             Task.Run(() =>
             {
                 for (int i = 0; i < n; i++)
-                    _plc.WriteCameraResult(_cameraConfigs[i], i, code);
+                    _plc.WriteCameraResult(_cameraConfigs[i], code);
                 SafeInvoke(() =>
                 {
                     AppendLog($"← 已写相机结果 {code}（{(code == 0 ? "复位" : code == 1 ? "OK" : "NG")}，全部 {n} 台）");

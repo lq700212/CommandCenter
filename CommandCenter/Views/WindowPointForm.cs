@@ -499,7 +499,10 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             foreach (int ci in list)
             {
                 var cam = _cameras[ci];
-                string name = string.IsNullOrWhiteSpace(cam.Name) ? $"相机{ci + 1}" : cam.Name;
+                // V2.13.4：无名称时优先 CameraId 真编号、其次行序，与设置页第一列一致
+                string name = string.IsNullOrWhiteSpace(cam.Name)
+                    ? (cam.CameraId > 0 ? $"相机{cam.CameraId}" : $"相机{ci + 1}")
+                    : cam.Name;
                 cmbCamera.Items.Add($"{name}  {cam.IpAddress}");
             }
             int idx = list.IndexOf(selectedCam);
@@ -788,12 +791,12 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
 
             // 收集候选："相机·点位"集合（当前型号相机点位表） − 已被其他窗口占用的组合
             var options = new List<Tuple<WindowPointItem, string>>();   // 值 + 显示文案
-            var used = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);   // "相机Idx:点位" → 窗口号
+            var used = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);   // "相机ID:点位" → 窗口号
             for (int j = 0; j < map.Count; j++)
             {
                 if (j == _selectedIdx || map[j] == null) continue;
                 var it = map[j];
-                used[$"{it.CameraIndex}:{it.StationNo}"] = j + 1;
+                used[$"{it.CameraId}:{it.StationNo}"] = j + 1;
             }
             for (int ci = 0; ci < _cameras.Count; ci++)
             {
@@ -801,13 +804,18 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 if (cam == null) continue;                 // 空安全
                 var table = cam.ProgramsFor(_matrixModel);
                 if (table == null) continue;
-                string camName = string.IsNullOrWhiteSpace(cam.Name) ? $"相机{ci + 1}" : cam.Name;
+                string camName = string.IsNullOrWhiteSpace(cam.Name)
+                    ? (cam.CameraId > 0 ? $"相机{cam.CameraId}" : $"相机{ci + 1}")
+                    : cam.Name;
+                // V2.13.4：关联键 = 相机ID（CameraId>0 用真编号，0 回退行序，与 ProductionCoordinator
+                // 的 CameraIdFor 兜底规则一致，保证"编辑候选"与"运行时反查"用同一把钥匙）
+                int camId = cam.CameraId > 0 ? cam.CameraId : ci + 1;
                 foreach (var it in table)
                 {
                     if (it == null) continue;
-                    if (used.ContainsKey($"{ci}:{it.StationNo}")) continue;   // 已被别的窗口占用 → 不给选
+                    if (used.ContainsKey($"{camId}:{it.StationNo}")) continue;   // 已被别的窗口占用 → 不给选
                     options.Add(Tuple.Create(
-                        new WindowPointItem { CameraIndex = ci, StationNo = it.StationNo },
+                        new WindowPointItem { CameraId = camId, StationNo = it.StationNo },
                         $"{camName}·点位{it.StationNo}"));
                 }
             }
@@ -869,12 +877,14 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         /// 交换两个窗口的点位（V2.13；V2.13.1 起放开跨相机）：**任意两窗口**（含跨相机）直接互换
         /// 它们对应的 (归属相机, 点位号)。
         /// 为什么跨相机允许（V2.13.1 修正）：窗口↔点位映射用"归属相机+点位号"**二元组**区分同名点位
-        /// （上相机·点位3 与下相机·点位3 是不同的点位），运行时反查键 = (CameraIndex, StationNo)，
+        /// （上相机·点位3 与下相机·点位3 是不同的点位），运行时反查键 = (CameraId, StationNo)，
         /// 两窗口互换只是互换映射值、值集合不变且每个值仍只占一个窗口，所以"相机+点位→窗口"反查
         /// 保持唯一、不会混乱——V2.13 曾误判"跨相机交换会让反查语义混乱"而禁止，经复核该担心不成立。
         /// 交换位置【不改变相机和点位的对应关系】（各相机点位表 / 程序映射 ModelStationPrograms 不动），
         /// 只改变【窗口和点位的对应关系】（写回 WindowPointMaps），与"编辑点位"同语义、只是快速互换。
         /// 被禁用的窗口照常参与交换（交换的是点位归属，与启用状态无关）。
+        /// 【V2.13.4】交换条目以相机ID（CameraId）为关联键，跨相机交换后反查键 (CameraId,StationNo)
+        /// 仍唯一（值集合不变）。
         /// </summary>
         private void SwapCells(int a, int b)
         {
@@ -885,8 +895,8 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             var ib = map[b];
             if (ia == null || ib == null) return;
             var tmp = map[a];
-            map[a] = new WindowPointItem { CameraIndex = ib.CameraIndex, StationNo = ib.StationNo };
-            map[b] = new WindowPointItem { CameraIndex = tmp.CameraIndex, StationNo = tmp.StationNo };
+            map[a] = new WindowPointItem { CameraId = ib.CameraId, StationNo = ib.StationNo };
+            map[b] = new WindowPointItem { CameraId = tmp.CameraId, StationNo = tmp.StationNo };
             LogHelper.Info($"交换窗口 {a + 1} ↔ {b + 1} 的点位（{ResolveWindowSource(a + 1)} / {ResolveWindowSource(b + 1)}）（点确定后生效）");
             _selectedIdx = -1;
             RefillStationColumn();
@@ -959,12 +969,13 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             if (_windowPointEdits.TryGetValue(_matrixModel, out var map)
                 && map != null && w >= 1 && w <= map.Count)
             {
-                var it = map[w - 1];                 // Points[i] = 窗口 i+1 → (相机下标,点位号)
-                if (it != null && it.CameraIndex >= 0 && it.CameraIndex < _cameras.Count)
+                var it = map[w - 1];                 // Points[i] = 窗口 i+1 → (相机ID,点位号)
+                var cam = FindCameraById(it?.CameraId ?? 0);
+                if (it != null && cam != null)
                 {
-                    var cam = _cameras[it.CameraIndex];
-                    string camName = (cam == null || string.IsNullOrWhiteSpace(cam.Name))
-                        ? $"相机{it.CameraIndex + 1}" : cam.Name;
+                    string camName = string.IsNullOrWhiteSpace(cam.Name)
+                        ? ((cam.CameraId > 0) ? $"相机{cam.CameraId}" : $"相机{IndexOfCameraById(it.CameraId) + 1}")
+                        : cam.Name;
                     return $"{camName}·点位{it.StationNo}";
                 }
                 return $"窗口{w}";
@@ -980,11 +991,43 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 {
                     var it = table[w - starts[i]];
                     string camName = string.IsNullOrWhiteSpace(_cameras[i].Name)
-                        ? $"相机{i + 1}" : _cameras[i].Name;
+                        ? ((_cameras[i].CameraId > 0) ? $"相机{_cameras[i].CameraId}" : $"相机{i + 1}")
+                        : _cameras[i].Name;
                     return $"{camName}·点位{(it == null ? w : it.StationNo)}";
                 }
             }
             return $"窗口{w}";
+        }
+
+        /// <summary>按相机ID在配置列表里找相机；找不到返回 null。兜底规则与 ProductionCoordinator
+        /// 的 CameraIdFor 一致（CameraId>0 用真编号，0 回退行序），保证编辑显示与运行时反查同钥匙。</summary>
+        private CameraConfig FindCameraById(int cameraId)
+        {
+            if (cameraId <= 0 || _cameras == null) return null;
+            for (int i = 0; i < _cameras.Count; i++)
+            {
+                if (_cameras[i] != null)
+                {
+                    int id = _cameras[i].CameraId > 0 ? _cameras[i].CameraId : i + 1;
+                    if (id == cameraId) return _cameras[i];
+                }
+            }
+            return null;
+        }
+
+        /// <summary>按相机ID反查相机列表下标（0 起）；找不到返回 -1。见 FindCameraById。</summary>
+        private int IndexOfCameraById(int cameraId)
+        {
+            if (cameraId <= 0 || _cameras == null) return -1;
+            for (int i = 0; i < _cameras.Count; i++)
+            {
+                if (_cameras[i] != null)
+                {
+                    int id = _cameras[i].CameraId > 0 ? _cameras[i].CameraId : i + 1;
+                    if (id == cameraId) return i;
+                }
+            }
+            return -1;
         }
 
         /// <summary>
@@ -1042,7 +1085,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                     {
                         // V2.10.1 空表【沿用该型号既有映射、不写空表】：防止用户删光映射行把配置
                         // 误删掉。但"删了没生效"需要明示，否则现场以为清掉了其实还在按旧表切程序。
-                        emptySlots.Add($"相机「{(string.IsNullOrWhiteSpace(cam.Name) ? "相机" + (i + 1) : cam.Name)}」型号「{kv.Key}」");
+                        emptySlots.Add($"相机「{(string.IsNullOrWhiteSpace(cam.Name) ? (cam.CameraId > 0 ? "相机" + cam.CameraId : "相机" + (i + 1)) : cam.Name)}」型号「{kv.Key}」");
                         continue;
                     }
                     var m = dest.FirstOrDefault(x =>

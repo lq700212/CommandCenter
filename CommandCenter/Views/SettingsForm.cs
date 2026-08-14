@@ -19,9 +19,9 @@ namespace CommandCenter.Views
     /// │ 窗口点位: [窗口/点位配置...] [√显示窗口编号] [√悬停提示] 点格改存图点位/可交换窗口位置 │
     /// │ OK/NG显示: [√标题栏高亮] [√窗口徽标]                        │
     /// │ 相机列表: ┌────┬────────┬────┬──────────┬────────────────────────┐ │
-    /// │            │序号│ 相机IP │端口│ 取图方式  │ FTP上传目录            │ │
+    /// │            │相机ID│ 相机IP│端口│ 取图方式  │ FTP上传目录            │ │
     /// │            ├────┼────────┼────┼──────────┼────────────────────────┤ │
-    /// │            │ 1  │ 192…   │8500│ Ftp      │ D:\…\ftp\cam1          │ │
+    /// │            │ 2  │ 192…   │8500│ Ftp      │ D:\…\ftp\cam2          │ │
     /// │            └────┴────────┴────┴──────────┴────────────────────────┘ │
     /// │            [添加一台] [删除选中]                                     │
     /// │ 扫码枪列表(TCP): ┌────┬────────┬──────┬──────────┐               │
@@ -38,8 +38,9 @@ namespace CommandCenter.Views
     /// 本文件只负责"数据 ↔ 控件"：构造时把 AppConfig 填进界面（LoadFromConfig），
     /// 点保存回写（OnSave，仅改内存对象，返回 DialogResult.OK，上层写盘并热生效 V1.6.0 免重启）。
     /// 相机行数即相机台数：多台直接加行，各配各的 IP / 触发端口 / FTP 上传目录。
-    /// 序号列=相机ID（V1.12.23）：只读展示 1 起的行序，主界面显示规则"
-    /// 有名称显名称（上相机/下相机）、无名称显相机N"中的 N 就是这一列。
+    /// 相机ID列（V2.13.4）=基恩士相机真正编号（上=2、下=1，与存图目录号一致，见
+    /// CameraConfig.CameraId），独立存字段、不随行序；0 时按行序回退展示。
+    /// 主界面显示规则"有名称显名称（上相机/下相机）、无名称显相机N"中的 N 优先用相机ID。
     /// 扫码枪行数即扫码枪台数（V1.8.1 起）：启用勾选=是否接入。
     /// V1.12.8 起 TCP 与串口拆为两张表（gridScannersTcp / gridScannersSerial），方式由所在表决定，
     /// 不再有"方式"下拉列——解决同一张表行间切 Tcp/Serial 导致整列显隐混乱的 bug。
@@ -185,15 +186,17 @@ namespace CommandCenter.Views
             // 仅在还没有"相机IP"列时初始化，保证重复调用不会越建越多
             if (gridCameras.Columns["IpAddress"] == null)
             {
-                // V1.12.23：序号列=相机ID（=列表位置 1 起的编号），只读不参与编辑，
-                // 主界面显示规则以它为准（有名称显示名称、无名称显示"相机N"=序号）
-                gridCameras.Columns.Add("SeqNo", "序号");
-                gridCameras.Columns["SeqNo"].ReadOnly = true;
+                // V2.13.4：第一列=相机ID（基恩士真编号，上=2/下=1，与存图目录号一致）。
+                // V1.12.23 曾是"序号列=相机ID=列表行序"；V2.13.4 起编号独立存 CameraConfig.CameraId，
+                // PLC 通道地址也独立存各相机 PlcRequestAddress（不再按列表位置自动分配）——列表顺序
+                // 彻底自由，点位/通道/显示都以相机ID为准，编辑/显示都用 CameraId，空值回退行序展示。
+                gridCameras.Columns.Add("CameraId", "相机ID");
+                gridCameras.Columns["CameraId"].ReadOnly = false; // 可编辑：现场相机编号可能调整
                 // Fill 模式下 Width 会被覆盖，必须用【FillWeight + MinimumWidth】控制列宽：
-                // 序号列给最小权重 1 + 下限 40px（不设 FillWeight 会用默认 100，把列宽全抢走，
+                // 相机ID 列给最小权重 1 + 下限 40px（不设 FillWeight 会用默认 100，把列宽全抢走，
                 // 这就是之前"序号列超宽"的根因）。✓ 先设 MinimumWidth 再设 FillWeight。
-                gridCameras.Columns["SeqNo"].MinimumWidth = 40;
-                gridCameras.Columns["SeqNo"].FillWeight = 1;
+                gridCameras.Columns["CameraId"].MinimumWidth = 40;
+                gridCameras.Columns["CameraId"].FillWeight = 1;
                 // Fill 模式按 FillWeight 比例分剩余宽度（窗体已加宽到 960）：
                 // FTP 目录路径最长、PLC 两列次之，给大权重；IP/端口/取图方式/相机名适中，序号最小。
                 gridCameras.Columns.Add("Name", "相机名称(上/下)");
@@ -215,32 +218,36 @@ namespace CommandCenter.Views
                 gridCameras.Columns.Add(srcCol);
                 gridCameras.Columns["ImageSource"].FillWeight = 2;
                 // V2.12.6 每台相机一路 PLC 通道：请求/结果 DataStore 索引（PLC 协议号=索引+40000）。
-                // 0=按相机序号自动（第1台=2/5 协议40002/40005、第2台=3/6 协议40003/40006）；
-                // 第 3 台起 0 表示"该相机通道未配置、不参与轮询"，新增相机必须填上现场分配的地址。
-                gridCameras.Columns.Add("PlcRequestAddress", "PLC请求索引(0=自动/第3台起必填)");
+                // V2.13.4 起【显式配置，废除"0=按相机序号自动"】：0=该相机通道未配置、不参与轮询。
+                // 现场上相机=2/5（协议40002/40005）、下相机=3/6（协议40003/40006），默认配置已预置；
+                // 新增相机必须与 PLC 梯形图协商好寄存器后在此填写，否则该相机不会收到 PLC 请求。
+                gridCameras.Columns.Add("PlcRequestAddress", "PLC请求索引(0=未配置/必填)");
                 gridCameras.Columns["PlcRequestAddress"].FillWeight = 4;
-                gridCameras.Columns.Add("PlcResultAddress", "PLC结果索引(0=自动/第3台起必填)");
+                gridCameras.Columns.Add("PlcResultAddress", "PLC结果索引(0=未配置/必填)");
                 gridCameras.Columns["PlcResultAddress"].FillWeight = 4;
             }
         }
 
         /// <summary>把现有相机配置逐行填进表格，方便现场看着改。
-        /// 序号列=ID（V1.12.23）：显示列表位置 1 起的编号（相机1=1、相机2=2…），
-        /// 主界面按"有名称显名称、无名称显相机N"对应。
-        /// 空表格时按现场默认两台相机（V1.12.22，相机1=上=19.87.6.213→D:\IV存图\1、
-        /// 相机2=下=19.87.6.212→D:\IV存图\2）填两行模板行。
+        /// 第一列=相机ID（V2.13.4）：显示 CameraConfig.CameraId（基恩士真编号，上=2/下=1）；
+        /// CameraId=0（旧配置没存这个字段）时按行序回退显示，保证老配置文件也能正常看。
+        /// 主界面按"有名称显名称、无名称显相机N"对应（N 优先 CameraId、其次行序）。
+        /// 空表格时按现场默认两台相机（V1.12.22；V2.13.3 修正 FTP 目录：上=19.87.6.213→D:\IV存图\2、
+        /// 下=19.87.6.212→D:\IV存图\1）填两行模板行。
         /// 【行 Tag=原 CameraConfig 引用（V1.12.26）】每一行把来源配置对象挂到 Tag 上，
         /// 保存时优先复用该对象（保留 WindowPointForm 配好的 StationPrograms 映射表），
         /// 新增行 Tag=null→保存时按新相机建空表。防止"配好映射→点保存→映射全丢"。</summary>
         private void LoadCameraRows()
         {
-            int seq = 0; // 相机ID：从 1 开始编号，等于列表位置（数组 index+1）
+            int seq = 0; // 行序兜底编号：CameraId 为 0 时按行序显示
             foreach (var c in _cfg.Cameras ?? new List<CameraConfig>())
             {
                 seq++;
+                // V2.13.4：优先显示 CameraId（>0），0 时回退行序（旧配置/未填编号的新相机）
+                int camId = c.CameraId > 0 ? c.CameraId : seq;
                 // ImageSource 为空（旧配置）时按 Ftp 兜底显示
                 string src = string.IsNullOrWhiteSpace(c.ImageSource) ? "Ftp" : c.ImageSource;
-                var row = gridCameras.Rows[gridCameras.Rows.Add(seq, c.Name, c.IpAddress, c.CommandPort, c.FtpUploadDir, src,
+                var row = gridCameras.Rows[gridCameras.Rows.Add(camId, c.Name, c.IpAddress, c.CommandPort, c.FtpUploadDir, src,
                     c.PlcRequestAddress, c.PlcResultAddress)];
                 row.Tag = c;   // 记下来源配置，保存时保留它配好的 StationPrograms 映射表
             }
@@ -248,24 +255,28 @@ namespace CommandCenter.Views
             if (gridCameras.Rows.Count == 0)
                 foreach (var c in CameraConfig.DefaultCameras())
                 {
-                    var row = gridCameras.Rows[gridCameras.Rows.Add(++seq, c.Name, c.IpAddress, c.CommandPort,
+                    var row = gridCameras.Rows[gridCameras.Rows.Add(c.CameraId > 0 ? c.CameraId : ++seq, c.Name, c.IpAddress, c.CommandPort,
                         c.FtpUploadDir, "Ftp", c.PlcRequestAddress, c.PlcResultAddress)];
                     row.Tag = c;
                 }
         }
 
         /// <summary>
-        /// 重排相机表"序号"列（V1.12.23）：序号=相机ID=表格行序 1 起的编号。
-        /// 新增/删除相机后调用，保证与主界面"相机N"及配置列表位置始终一致；
-        /// 保存时读配置列表顺序，序号列只作展示 ID 不落盘。
+        /// 重排相机表"相机ID"列（V2.13.4）：只把 CameraId 为 0 的行按行序补齐，
+        /// 已配置真编号（>0）的行保留不动——编号是相机真身份，新增/删除行不能把它冲掉。
+        /// 新增/删除相机后调用，保证"没填编号的行也有可读 ID、已填编号的行不被覆盖"。
         /// </summary>
         private void RenumberCameraSeq()
         {
             int seq = 0;
             foreach (DataGridViewRow r in gridCameras.Rows)
             {
-                if (r.Cells["SeqNo"].Value == null) continue; // 末尾"新行"占位行跳过
-                r.Cells["SeqNo"].Value = ++seq;
+                if (r.Cells["CameraId"].Value == null) continue; // 末尾"新行"占位行跳过
+                seq++;
+                var cam = r.Tag as CameraConfig;
+                // 真编号>0 保留；0 或行 Tag 都没有（全新行）→ 补行序，保证列里有数可看
+                if (cam == null || cam.CameraId <= 0)
+                    r.Cells["CameraId"].Value = seq;
             }
         }
 
@@ -301,12 +312,18 @@ namespace CommandCenter.Views
                     r.Tag = cam;   // 关键：回绑到行 Tag，之后映射页配好的映射写回此对象，
                                    // 保存时再走本方法复用同一对象，映射才不丢
                 }
+                // V2.13.4：相机ID（基恩士真编号）从表格第一列读回；非法/空按 0（运行时回退行序）
+                int camId = 0;
+                string camIdTxt = r.Cells["CameraId"].Value == null ? "" : r.Cells["CameraId"].Value.ToString();
+                if (!int.TryParse(camIdTxt, out camId) || camId < 0) camId = 0;
+                cam.CameraId = camId;
                 cam.Name = r.Cells["Name"].Value == null ? "" : r.Cells["Name"].Value.ToString().Trim();
                 cam.IpAddress = ip;
                 cam.CommandPort = Math.Max(1, port);
                 cam.FtpUploadDir = r.Cells["FtpUploadDir"].Value == null ? "" : r.Cells["FtpUploadDir"].Value.ToString().Trim();
                 cam.ImageSource = string.IsNullOrWhiteSpace(imgSrc) ? "Ftp" : imgSrc.Trim();
-                // V2.12.6 每台相机一路 PLC 通道：请求/结果 DataStore 索引（0~65535，非法按 0=自动）。
+                // V2.12.6 每台相机一路 PLC 通道：请求/结果 DataStore 索引（0~65535；V2.13.4 起
+                // 0=该相机通道未配置、不参与轮询，非法输入按 0 处理即"关掉该通道"，不再是"自动"）。
                 int reqAddr = 0, resAddr = 0;
                 string reqTxt = r.Cells["PlcRequestAddress"].Value == null ? "" : r.Cells["PlcRequestAddress"].Value.ToString();
                 string resTxt = r.Cells["PlcResultAddress"].Value == null ? "" : r.Cells["PlcResultAddress"].Value.ToString();
@@ -409,21 +426,24 @@ namespace CommandCenter.Views
             };
 
             // 添加一台相机：直接往表格追加一行默认值（默认取现场相机1：上相机 19.87.6.213 +
-            // FTP 目录 D:\IV存图\1，V1.12.22），现场改 IP/端口/取图方式即可
+            // FTP 目录 D:\IV存图\2，V2.13.3 修正；上/下相机 FTP 目录与安装位置相反配对），
+            // 现场改 IP/端口/取图方式即可
             btnAddCam.Click += (s, e) =>
             {
                 var def = CameraConfig.DefaultCameras()[0];
+                // 新行 CameraId 填 0（不硬编码默认相机 2）：走 RenumberCameraSeq 按行序兜底补号，
+                // 避免添加多台时每行都复制"上相机=2"导致编号重复。保存时 0 保持不写，运行回退行序。
                 gridCameras.Rows.Add(0, def.Name, def.IpAddress, 8500, def.FtpUploadDir, "Ftp");
-                RenumberCameraSeq(); // 追加后重排序号（ID=行序），删除/排序后同样调用
+                RenumberCameraSeq(); // 追加后给未填编号行补行序号，已配真编号行不动
             };
 // 删除选中：把当前选中的行整行移除；没有选中行则什么都不做
             // 【V1.8.4 修复】末尾"新行"（AllowUserToAddRows 附带的 * 占位行）不在 SelectedRows 里，
             //   用户点击该空白行再点删除，原来会误报"未选中行"——现改为：删除=放弃该占位行。
-            // V1.12.23：删除后重排序号列（序号=ID=行序）
+            // V2.13.4：删除后给未填编号行补行序号（真编号行保留）
             btnDelCam.Click += (s, e) =>
             {
                 DeleteSelectedRows(gridCameras, "相机");
-                RenumberCameraSeq(); // 删中间某台后，后续相机序号自动前移，保持连续
+                RenumberCameraSeq(); // 删中间某台后，未填编号行按行序前移补齐，真编号行不动
             };
 
             // 添加一台 TCP 扫码枪：追加一行默认配置（V1.12.8 起 TCP 独立成表；

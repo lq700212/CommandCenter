@@ -20,8 +20,10 @@ namespace CommandCenter.Models
         /// 一次"到位"信号会对列表中每台都触发一次、各取各的图（见 ProductionCoordinator）。
         /// 注意：存图点位与相机无关，由 DisplayConfig.WindowStationMap（窗口→点位映射）统一管理。
         ///
-        /// 【默认值（V1.12.22 现场定稿）】现场固定两台相机，相机1=上相机=19.87.6.213、
-        /// 相机2=下相机=19.87.6.212，FTP 取图目录为 D:\IV存图\1 / D:\IV存图\2（见
+        /// 【默认值（V1.12.22 现场定稿；V2.13.3 修正 FTP 目录）】现场固定两台相机，
+        /// 相机1=上相机=19.87.6.213、相机2=下相机=19.87.6.212，FTP 取图目录为上相机
+        /// D:\IV存图\2 / 下相机 D:\IV存图\1（注意：上/下相机的取图目录与安装位置相反配对，
+        /// 现场实测相机推图目标如此——上相机推到 \2、下相机推到 \1，见
         /// CameraConfig.DefaultCameras），无配置/空配置时用它兜底这两台。
         /// 设置窗体默认行 / 主窗体空配置兜底与这里保持一致（改现场 IP 只改这一处工厂方法即可）。
         ///
@@ -105,8 +107,21 @@ namespace CommandCenter.Models
     public class CameraConfig
     {
         /// <summary>
+        /// 相机编号/相机ID（V2.13.4）：**基恩士相机真正的编号**，与存图目录号一一对应——
+        /// 上相机=`D:\IV存图\2`→CameraId=2、下相机=`D:\IV存图\1`→CameraId=1
+        /// （V2.13.3 已确认存图地址与安装位置相反配对：上相机推到 \2、下相机推到 \1）。
+        /// 设置窗体相机表第一列显示/编辑本值（从"行序序号"升级为"真正编号"，见 SettingsForm）。
+        /// 【为什么不能直接用列表行序】PLC 通道地址按"相机列表位置"自动分配（第1台=协议40002=上相机），
+        ///   列表顺序一旦为迁就编号而交换，40002 就会从"上相机"变成"下相机"，与 PLC 主站程序冲突。
+        ///   故相机真编号独立存本字段，列表顺序保持不变；显示/日志归属用 CameraId（>0），
+        ///   CameraId=0（旧配置无此字段）时回退"相机N"（N=列表位置 1 起的行序）兼容。
+        /// 纯标识/展示字段，不参与任何通讯逻辑（PLC 通道仍按列表位置、存图点位仍按相机下标）。
+        /// </summary>
+        public int CameraId { get; set; }
+
+        /// <summary>
         /// 相机名称/位置（V1.12.22，界面与日志显示用）：如"上相机"/"下相机"。
-        /// 现场按安装位置称呼（上相机=相机1=19.87.6.213、下相机=相机2=19.87.6.212，
+        /// 现场按安装位置称呼（上相机=19.87.6.213、下相机=19.87.6.212，CameraId 分别为 2/1，
         /// 见 DefaultCameras 与 docs/CommandCenter.md §2.3/§7），显示在下拉框/状态灯文案里，
         /// 空值则界面只显示"相机N IP"。纯展示字段，不影响任何通讯逻辑。
         /// </summary>
@@ -128,16 +143,18 @@ namespace CommandCenter.Models
         /// 本相机在 PLC 从站的"拍照请求" DataStore 索引（V2.12.6 起每台相机一路 PLC 通道）。
         /// PLC 触发本相机拍照时写该地址=点位编号（1~255）、读走结果后复位写 0。
         /// 配置=DataStore 索引（PLC 协议号 = 索引 + 40000，填 2 就是协议 40002）。
-        /// 【0=自动按相机序号默认】第 1 台相机=2（协议 40002）、第 2 台=3（协议 40003，即现场既有
-        ///   上/下相机布局）；第 3 台起 0 表示"未配置该相机通道"——运行时不轮询此相机（请求恒视为
-        ///   无），需新增相机时由现场/PLC 协商新寄存器（建议请求 40008 起，避开扫码 1/型号 7~11、
-        ///   扫码结果 4、前两台 2/3）后在设置页相机表显式填写，并同步 PLC 梯形图。
+        /// 【V2.13.4 起显式配置，废除"0=按相机序号自动"】每台相机的通道地址独立存本字段：
+        ///   现场上相机=2（协议40002）、下相机=3（协议40003），默认相机已在此预置（见
+        ///   DefaultCameras）。0=未配置该相机通道——运行时不轮询此相机（请求恒视为无），
+        ///   新增相机必须与 PLC 梯形图协商好寄存器（建议请求 40008 起，避开扫码 1/型号 7~11、
+        ///   扫码结果 4、上相机 2/下相机 3）后在此显式填写。列表顺序从此不再决定通道地址。
         /// </summary>
         public int PlcRequestAddress { get; set; }
 
         /// <summary>
         /// 本相机在 PLC 从站的"拍照结果" DataStore 索引（上位机写：0=复位、1=OK、2=NG、3=点位禁用跳过）。
-        /// 【0=自动按相机序号默认】第 1 台=5（协议 40005）、第 2 台=6（协议 40006）；第 3 台起须显式配置。
+        /// 【V2.13.4 起显式配置，废除"0=按相机序号自动"】上相机=5（协议40005）、下相机=6（协议40006），
+        /// 默认相机已在此预置；0=未配置结果通道（WriteCameraResult 跳过该台不写）。
         /// </summary>
         public int PlcResultAddress { get; set; }
 
@@ -285,8 +302,13 @@ namespace CommandCenter.Models
 
         /// <summary>
         /// 现场默认的两台相机（V1.12.22 定稿：相机1=上相机、相机2=下相机）。
-        /// 相机1=上相机=19.87.6.213 → FTP 取图目录 D:\IV存图\1；
-        /// 相机2=下相机=19.87.6.212 → FTP 取图目录 D:\IV存图\2。
+        /// 相机1=上相机=19.87.6.213 → FTP 取图目录 D:\IV存图\2；
+        /// 相机2=下相机=19.87.6.212 → FTP 取图目录 D:\IV存图\1。
+        /// ⚠️【V2.13.3 目录互换修正】上/下相机的 FTP 取图目录与"安装位置"相反配对（上相机推到
+        ///   \2、下相机推到 \1）——这是现场实测相机推图目标（基恩士工程师配置如此）。
+        ///   此前版本默认写成"上相机→\1、下相机→\2"，导致：相机触发走 IP 指令【正确】，
+        ///   但取图扫 FTP 目录【拿到对面相机的图】——MainForm 窗口显示的图片与触发相机错位。
+        ///   本次互换回来；设备推图方向不变，仅是"上位机取图目录"对齐实际推图位置。
         /// 其余参数取模型默认。
         /// 【V2.8 预置型号映射】每台相机按型号预置"点位→程序号"表（ModelStationPrograms，
         ///   现场定稿，见下）：切到对应型号后触发相机前自动切程序。
@@ -306,8 +328,11 @@ namespace CommandCenter.Models
                 new CameraConfig
                 {
                     Name = "上相机",
+                    CameraId = 2,   // V2.13.4：基恩士真编号=存图目录号（上相机→D:\IV存图\2）
                     IpAddress = "19.87.6.213",
-                    FtpUploadDir = @"D:\IV存图\1",
+                    FtpUploadDir = @"D:\IV存图\2",
+                    PlcRequestAddress = 2,   // 协议 40002 上相机请求（V2.13.4 起显式配置，不再按列表序自动）
+                    PlcResultAddress = 5,    // 协议 40005 上相机结果
                     ModelStationPrograms = new List<ModelStationPrograms>
                     {
                         new ModelStationPrograms { ModelName = "U171", Programs = Table(
@@ -324,8 +349,11 @@ namespace CommandCenter.Models
                 new CameraConfig
                 {
                     Name = "下相机",
+                    CameraId = 1,   // V2.13.4：基恩士真编号=存图目录号（下相机→D:\IV存图\1）
                     IpAddress = "19.87.6.212",
-                    FtpUploadDir = @"D:\IV存图\2",
+                    FtpUploadDir = @"D:\IV存图\1",
+                    PlcRequestAddress = 3,   // 协议 40003 下相机请求（V2.13.4 起显式配置，不再按列表序自动）
+                    PlcResultAddress = 6,    // 协议 40006 下相机结果
                     ModelStationPrograms = new List<ModelStationPrograms>
                     {
                         new ModelStationPrograms { ModelName = "U171", Programs = Table(
@@ -389,18 +417,22 @@ namespace CommandCenter.Models
     }
 
     /// <summary>
-    /// 单个"窗口→(相机, 点位)"映射条目（V2.13，装在 ModelWindowPointMap.Points 列表里）。
-    /// 含义：某个显示窗口对应"相机列表第 CameraIndex 台相机的点位 StationNo"。
-    /// - CameraIndex：相机列表下标（0 起，与 AppConfig.Cameras 顺序一致；点数=窗口总数，
-    ///   "前上相机后下相机"分组，见 DisplayConfig.DefaultWindowPointMap）；
+    /// 单个"窗口→(相机, 点位)"映射条目（V2.13，装在 ModelWindowPointMap.Points 列表里；
+    /// V2.13.4 起关联键由"相机列表下标"升级为"相机ID CameraId"）。
+    /// 含义：某个显示窗口对应"相机 CameraId 的点位 StationNo"。
+    /// - CameraId：相机 ID（CameraConfig.CameraId，基恩士真编号，现场上=2/下=1）。
+    ///   【为什么不用列表下标（V2.13.4 彻底重构）】点位归属是相机的"身份"属性，必须跟相机本身走；
+    ///   若存列表下标，一旦相机增删/换序，映射就错位指向别的相机。存 CameraId 则列表顺序彻底自由
+    ///   （PLC 通道由每台相机自己的 PlcRequestAddress 决定，不再按列表位置推导）。
+    ///   旧配置（V2.13 存的 cameraIndex）反序列化后 CameraId=0，由 ConfigStore 检测后重置默认铺排。
     /// - StationNo：相机点位号（1~9999，本相机点位表里的点位号，上下相机各自从 1 起会重复）。
     /// 运行时 PLC 请求 (相机, 点位) → 反查本表定位唯一窗口（见 ProductionCoordinator
     /// TryResolveActiveWindow）；存图点位=StationNo（文件名 {点位}，靠 {相机} 目录层隔离）。
     /// </summary>
     public class WindowPointItem
     {
-        /// <summary>相机列表下标（0 起）</summary>
-        public int CameraIndex { get; set; }
+        /// <summary>相机 ID（CameraConfig.CameraId，基恩士真编号，上=2/下=1；0=旧配置回退行序）</summary>
+        public int CameraId { get; set; }
 
         /// <summary>相机点位号（1~9999，本相机点位表里的点位号）</summary>
         public int StationNo { get; set; }
@@ -581,29 +613,32 @@ namespace CommandCenter.Models
         /// 生成某型号的【默认窗口↔点位映射】（V2.13）：按"前上相机后下相机、各相机点位表
         /// 条目顺序"铺排——窗口 1 起，依次取相机 0 点位表第 1、2…条，再取相机 1 点位表第 1、2…条。
         /// 返回列表长度 = 该型号窗口总数（各相机点位表条目和，≥1，见 WindowCountFor）；
-        /// 若各相机点位表全空则兜底给一条"相机0·点位1"（防空列表，与 WindowCountFor 的 ≥1 一致）。
+        /// 若各相机点位表全空则兜底给一条"相机·点位1"（防空列表，与 WindowCountFor 的 ≥1 一致）。
+        /// 【V2.13.4 关联键升级】条目存 CameraId（CameraConfig.CameraId，真编号）；相机 ID 为 0
+        /// （旧配置）时用列表行序兜底，保证唯一可反查。
         /// 与 V2.12.1 的"窗口=相机点位表条目"隐式铺排等价——不编辑时默认映射=这个，行为零变化。
         /// </summary>
         public static List<WindowPointItem> DefaultWindowPointMap(
             IEnumerable<CameraConfig> cameras, string productModel)
         {
             var list = new List<WindowPointItem>();
-            int ci = 0;                                          // 相机列表下标（从 0 起，与相机通道号对应）
+            int ci = 0;                                          // 相机列表下标（仅铺排顺序，非关联键）
             foreach (var cam in cameras ?? new List<CameraConfig>())
             {
                 if (cam == null) { ci++; continue; }             // 空安全：跳过被手改成 null 的元素，下标照常累加
                 var table = cam.ProgramsFor(productModel);
                 if (table != null)
                 {
+                    int camId = cam.CameraId > 0 ? cam.CameraId : ci + 1;   // 相机ID（0 回退行序）
                     foreach (var it in table)
                     {
                         if (it == null) continue;                // 空安全：点位表里混入 null 条目时跳过
-                        list.Add(new WindowPointItem { CameraIndex = ci, StationNo = it.StationNo });
+                        list.Add(new WindowPointItem { CameraId = camId, StationNo = it.StationNo });
                     }
                 }
                 ci++;
             }
-            if (list.Count == 0) list.Add(new WindowPointItem { CameraIndex = 0, StationNo = 1 }); // 兜底≥1
+            if (list.Count == 0) list.Add(new WindowPointItem { CameraId = 1, StationNo = 1 }); // 兜底≥1
             return list;
         }
 

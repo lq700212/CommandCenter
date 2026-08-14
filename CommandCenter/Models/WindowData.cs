@@ -1,4 +1,5 @@
 using System;
+using System.Drawing;
 
 namespace CommandCenter.Models
 {
@@ -17,6 +18,14 @@ namespace CommandCenter.Models
 
         /// <summary>本次保存的照片完整路径</summary>
         public string ImagePath { get; set; }
+
+        /// <summary>
+        /// 显示用内存缩略图（V2.13.2 显示提速）：协调器在 FTP 源文件删除前提前加载好的
+        /// 1280 缩略图，随事件带给 UI——UI 优先直接用，免去再读盘+解码；
+        /// 为 null（无 FTP 源/加载失败/非 FTP 取图）时 UI 回退按 ImagePath 后台加载缩略图。
+        /// 本字段不参与序列化/持久化，仅单次事件内传递；UI 端负责 Dispose。
+        /// </summary>
+        public Image PreviewImage { get; set; }
 
         /// <summary>检测完成时间</summary>
         public DateTime CapturedAt { get; set; } = DateTime.Now;

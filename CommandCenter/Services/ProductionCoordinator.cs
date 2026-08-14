@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -29,14 +30,14 @@ namespace CommandCenter.Services
     ///   所有通道互斥串行（一次只处理一个，_activeCh），符合 PLC 串行时序；
     ///   请求只有被"认领"的通道处理，其余通道的请求在活动通道完成前不抢占。
     ///
-    /// 【相机通道 ↔ 相机下标（重要，V2.12.6 定稿）】：相机通道号 = 相机下标 + 1
-    ///   （_activeCh=1 即相机 0、=2 即相机 1、=3 即相机 2…），换算 `camIdx = _activeCh - 1`。
-    ///   曾把"协议通道号 1/2"当相机下标用导致错位/越界（V2.12.5 已修、V2.12.6 根治）。
-    ///   每台相机的 PLC 请求/结果地址配在该相机自己的配置里（0=按相机序号默认前两台 40002/03、
-    ///   40005/06；第 3 台起必须现场分配并填写，否则该相机通道不参与轮询）。
+    ///     【相机通道 ↔ 相机（V2.13.4 定稿，取代 V2.12.6 的"通道号=下标+1"）】：每个相机通道的
+    ///     PLC 请求/结果地址显式配在该相机自己的配置里（PlcRequestAddress/PlcResultAddress，不再按
+    ///     列表序号自动推导），_activeCh 直接存相机 ID（CameraId，上=2/下=1）；无相机ID的旧配置
+    ///     回退"列表位置+1"保证唯一。曾把"协议通道号 1/2"当相机下标用导致错位/越界（V2.12.5 已修、
+    ///     V2.12.6 根治、V2.13.4 再彻底改为相机ID，列表顺序从此与 PLC 通道无关）。
     ///
     /// 【点位与窗口】PLC 请求里带点位编号，该点位是【相机局部点位号】
-    ///   （相机各自从 1 起、会重复），上位机按"该相机通道 + 这台相机的点位表"定位窗口
+    ///   （相机各自从 1 起、会重复），上位机按"该相机 ID + 这台相机的点位表"定位窗口
     ///   （见 TryResolveActiveWindow，窗口=相机点位表条目，前上相机后下相机分组）；
     ///   该窗口被禁用（WindowEnabled=false）时视为"该点位跳过"，直接写结果 3。
     ///   存图点位 = 相机点位号（文件名 {点位}），按相机的 {相机} 目录层隔离（见 ImageStore）。
@@ -54,7 +55,7 @@ namespace CommandCenter.Services
         private readonly List<bool> _windowEnabled;         // 窗口→是否启用（V1.12.28）
         private readonly string _productModel;              // 固定产品型号（V2.7，每次扫码写入 PLC）
         /// <summary>窗口↔点位独立映射（V2.13，当前型号解析结果）：Points[i] = 窗口 i+1 对应的
-        /// (相机下标, 点位号)。PLC 请求点位据此反查唯一窗口（见 TryResolveActiveWindow）。</summary>
+        /// (相机ID CameraId, 点位号)。PLC 请求点位据此反查唯一窗口（见 TryResolveActiveWindow）。</summary>
         private readonly List<WindowPointItem> _windowPointMap;
 
         private readonly System.Threading.Timer _positionTimer;  // 请求轮询（后台线程）
@@ -67,11 +68,10 @@ namespace CommandCenter.Services
         // 轮询线程读取后落 PLC 结果寄存器，因此 _chStep/_activeCh 无需加锁。
         private const int ChNone = -1;    // 无活动通道（空闲，等新请求）
         private const int ChScan = 0;     // 通道① 扫码（40001/40004）
-        // ★ 相机通道（V2.12.6，多相机）：【每台相机一路 PLC 通道】= 相机下标 + 1。
-        //   忙时 _activeCh = 1+相机下标（1=相机0、2=相机1、3=相机2…），换算唯一：
-        //   camIdx = _activeCh - 1。曾把"协议通道号 1/2"直接当相机下标（0/1）用导致
-        //   错位/越界（V2.12.5 修复后 V2.12.6 根治为"通道号=下标+1"统一模型）。
-        private volatile int _activeCh = ChNone; // 当前活动通道（ChScan=扫码、≥1=相机通道）
+        // ★ 相机通道（V2.13.4 起 _activeCh 直接存【相机ID CameraId】，上=2/下=1；见类头注释）。
+        //   曾存"相机下标+1"（V2.12.6），点位反查再按 camIdx-1 换算——列表顺序绑定通道；
+        //   V2.13.4 彻底改为相机ID：PLC 地址由相机配置显式给出，列表顺序自由。
+        private volatile int _activeCh = ChNone; // 当前活动通道（ChScan=扫码、>0=相机ID）
         private volatile int _chStep;     // 通道内步骤：见各通道推进逻辑
         private volatile int _chanResult = -1;   // 相机拍照结果：-1=未出，1=OK，2=NG，3=跳过
         private int _pendStation;         // 相机通道当前点位（轮询线程读写）
@@ -247,15 +247,15 @@ namespace CommandCenter.Services
                 BeginScanChannel();
                 return;
             }
-            // 各相机通道（V2.12.6）：按相机列表顺序轮询每台相机的 PLC 请求寄存器（地址配在
-            // 相机表，第3台起未配置则恒无请求）。只认领第一张被触发的相机（互斥串行）。
+            // 各相机通道（V2.12.6 每相机一路；V2.13.4 起地址全部显式配在相机表，未配置则恒无请求）。
+            // 只认领第一张被触发的相机（互斥串行）。列表顺序仅决定轮询先后，不再决定通道地址。
             for (int i = 0; i < _cameraCfgs.Count; i++)
             {
                 if (_cameraCfgs[i] == null) continue;   // 空安全：配置被手改成 null 元素时跳过
-                ok = _plc.ReadCameraRequest(_cameraCfgs[i], i, out int stationNo);
+                ok = _plc.ReadCameraRequest(_cameraCfgs[i], out int stationNo);
                 if (ok && stationNo > 0)
                 {
-                    BeginCameraChannel(i, stationNo);
+                    BeginCameraChannel(CameraIdFor(_cameraCfgs[i], i), stationNo);
                     return;
                 }
             }
@@ -331,16 +331,23 @@ namespace CommandCenter.Services
         /// 受理某台相机的拍照请求：解析点位→窗口，判断是否跳过（无相机/点位禁用）；
         /// 正常则启动后台 Task 触发拍照，轮询线程在 Task 出结果后写 PLC。
         /// </summary>
-        /// <param name="camIdx">相机列表下标（0 起；通道号 = camIdx + 1，见 _activeCh 注释）</param>
+        /// <param name="cameraId">相机 ID（CameraConfig.CameraId，上=2/下=1；见 CameraIdFor）</param>
         /// <param name="stationNo">PLC 请求里的点位编号（1~255）</param>
-        private void BeginCameraChannel(int camIdx, int stationNo)
+        private void BeginCameraChannel(int cameraId, int stationNo)
         {
-            // 跳过判定：请求点位无对应启用窗口（禁用/未配）或该相机不存在
-            bool skip = !TryResolveActiveWindow(camIdx, stationNo, out int windowIndex);
-            if (!skip && (camIdx >= _cameras.Count || camIdx >= _cameraCfgs.Count))
-                skip = true;
+            // 按相机ID反查该相机在列表里的位置（取配置/服务实例）；找不到=该ID未配置相机 → 跳过
+            int camIdx = IndexOfCamera(cameraId);
+            if (camIdx < 0)
+            {
+                _activeCh = ChNone;
+                LogHelper.Warn($"收到相机ID={cameraId} 的拍照请求，但配置里没有该相机，忽略");
+                return;
+            }
 
-            _activeCh = camIdx + 1;   // 相机通道号 = 相机下标 + 1（通道换算唯一定义，见类头注释）
+            // 跳过判定：请求点位无对应启用窗口（禁用/未配）或该相机不存在
+            bool skip = !TryResolveActiveWindow(cameraId, stationNo, out int windowIndex);
+
+            _activeCh = cameraId;   // 相机通道标识 = 相机ID（V2.13.4，见类头注释）
             _pendStation = stationNo;
 
             string camLabel = CameraLabel(camIdx);
@@ -349,7 +356,7 @@ namespace CommandCenter.Services
                 // 点位禁用/无相机：不拍照、不显示、不计数，直接写结果 3（跳过）告诉 PLC 走下一工位
                 _chanResult = 3;
                 _chStep = 1;
-                LogHelper.Info($"点位{stationNo} 已禁用或无相机，上报跳过(3)（相机{camIdx + 1}/{camLabel}）");
+                LogHelper.Info($"点位{stationNo} 已禁用或无相机，上报跳过(3)（{camLabel}）");
                 SetState($"点位{stationNo} 已禁用，跳过拍照");
                 return;
             }
@@ -357,29 +364,64 @@ namespace CommandCenter.Services
             _chanResult = -1;
             _chStep = 1;    // 步骤1：拍照进行中（Task 出结果后写 PLC）
             SetState($"点位{stationNo} 触发 {camLabel} 拍照");
-            LogHelper.Info($"收到 PLC 拍照请求：相机{camIdx + 1}({camLabel})，点位{stationNo}（窗口{windowIndex}）");
+            LogHelper.Info($"收到 PLC 拍照请求：{camLabel}，点位{stationNo}（窗口{windowIndex}）");
 
             // 触发+取图+归档+显示 全部在后台线程，完成后只回传 _chanResult 给轮询线程
             System.Threading.Tasks.Task.Run(() => DoCameraShot(camIdx, stationNo, windowIndex));
         }
 
-        /// <summary>相机显示名（日志/状态用）：有名称显名称、无名称显"相机N"；index 越界兜底"相机N"。</summary>
+        /// <summary>相机显示名（日志/状态用）：有名称显名称、无名称优先 CameraId 真编号、
+        /// 其次"相机N"（V2.13.4）；index 越界兜底"相机N"。</summary>
         private string CameraLabel(int camIdx)
         {
             if (camIdx >= 0 && camIdx < _cameraCfgs.Count && _cameraCfgs[camIdx] != null)
             {
-                string name = _cameraCfgs[camIdx].Name;
-                if (!string.IsNullOrWhiteSpace(name)) return name.Trim();
+                var cfg = _cameraCfgs[camIdx];
+                if (!string.IsNullOrWhiteSpace(cfg.Name)) return cfg.Name.Trim();
+                if (cfg.CameraId > 0) return $"相机{cfg.CameraId}";
             }
             return $"相机{camIdx + 1}";
         }
 
+        /// <summary>取某台相机的"身份ID"（V2.13.4 统一）：有 CameraId（>0）用真编号，
+        /// 否则回退"列表位置+1"（旧配置/新相机未填编号时保证唯一可反查）。所有按相机定位
+        /// 的键（_activeCh、窗口映射反查、编辑点位候选）都必须走这里，保证两端一致。</summary>
+        private int CameraIdFor(CameraConfig cfg, int camIdx)
+        {
+            if (cfg != null && cfg.CameraId > 0) return cfg.CameraId;
+            return camIdx + 1;
+        }
+
+        /// <summary>按相机ID反查相机在列表里的下标（0 起）；找不到返回 -1。
+        /// 【V2.13.4】相机ID是身份键，列表顺序自由；PLC 请求/窗口映射都按相机ID定位相机，
+        /// 只有"取配置/服务实例"才需要这个下标。</summary>
+        private int IndexOfCamera(int cameraId)
+        {
+            if (cameraId <= 0 || _cameraCfgs == null) return -1;
+            for (int i = 0; i < _cameraCfgs.Count; i++)
+            {
+                if (_cameraCfgs[i] != null && CameraIdFor(_cameraCfgs[i], i) == cameraId)
+                    return i;
+            }
+            return -1;
+        }
+
         /// <summary>相机通道推进：拍照完成出结果 → 写 PLC 结果 → 等 PLC 复位请求 → 复位结果。
-        /// 三拍对结果 1/2/3 一视同仁（PLC 读到 3 也必须复位请求，否则通道永不释放，见 §5.3）。</summary>
+        /// 三拍对结果 1/2/3 一视同仁（PLC 读到 3 也必须复位请求，否则通道永不释放，见 §5.3）。
+        /// 【V2.13.4】_activeCh 存相机ID，先反查该相机在列表的位置（取配置/服务实例）。</summary>
         private void StepCameraChannel()
         {
-            int camIdx = _activeCh - 1;   // 相机通道号 → 相机下标（_activeCh≥1）
+            int camIdx = IndexOfCamera(_activeCh);   // 相机ID → 相机列表下标（_activeCh=相机ID）
             var cfg = (camIdx >= 0 && camIdx < _cameraCfgs.Count) ? _cameraCfgs[camIdx] : null;
+            if (cfg == null)
+            {
+                // 相机ID对不上任何配置（配置被改/相机被删）：复位通道，避免卡死
+                _activeCh = ChNone;
+                _chStep = 0;
+                _chanResult = -1;
+                LogHelper.Warn($"相机ID={_activeCh} 找不到配置，相机通道已复位");
+                return;
+            }
 
             if (_chStep == 1)
             {
@@ -388,7 +430,7 @@ namespace CommandCenter.Services
                 {
                     int code = _chanResult;
                     _chanResult = -1;
-                    _plc.WriteCameraResult(cfg, camIdx, code);
+                    _plc.WriteCameraResult(cfg, code);
                     _chStep = 2;
                     SetState($"点位{_pendStation} 已上报结果({code})，等待 PLC 复位请求");
                 }
@@ -396,10 +438,10 @@ namespace CommandCenter.Services
             }
 
             // 步骤2：等 PLC 把请求寄存器复位为 0 → 复位结果寄存器，通道完成
-            bool ok = _plc.ReadCameraRequest(cfg, camIdx, out int still) && still == 0;
+            bool ok = _plc.ReadCameraRequest(cfg, out int still) && still == 0;
             if (ok)
             {
-                _plc.WriteCameraResult(cfg, camIdx, 0);
+                _plc.WriteCameraResult(cfg, 0);
                 _activeCh = ChNone;
                 SetState("等待 PLC 请求");
             }
@@ -417,13 +459,18 @@ namespace CommandCenter.Services
             int code = 2;                 // 默认 NG，成功路径改 1
             string archived = null;
             string resultText = "";
+            // 显示用内存缩略图（V2.13.2 显示提速）：FTP 模式下 jpeg 一到位就提前从源文件加载，
+            // 随显示事件带给 UI——显示不再等"jpeg+iv4p 归档复制 + 删源"全部完成。null=未加载/失败。
+            Image preview = null;
             // 存图点位号（V2.12.1 定稿）：统一用【相机点位号】stationNo 进文件名 {点位}——
             // 点位由相机点位表唯一决定，上下相机点位号各自从 1 起会重复（如上相机 1~18、下相机 1~4），
             // 同名文件靠 ImageStore 的目录 {相机} 层按相机隔开（见 ImageStore 类注释），不再用全局窗口编号。
             // windowIndex 仅用于"显示窗口定位 / WindowEnabled/是否跳过"判定。
             int storeStation = stationNo;
-            // 相机名（存图目录 {相机} 层 / 日志归属用；配置名空时兜底"相机N"）
-            string camName = string.IsNullOrWhiteSpace(cfg.Name) ? $"相机{camIdx + 1}" : cfg.Name.Trim();
+            // 相机名（存图目录 {相机} 层 / 日志归属用；配置名空时优先 CameraId 真编号、其次"相机N"）
+            string camName = string.IsNullOrWhiteSpace(cfg.Name)
+                ? (cfg.CameraId > 0 ? $"相机{cfg.CameraId}" : $"相机{camIdx + 1}")
+                : cfg.Name.Trim();
             try
             {
                 // ① 触发前的输出格式 + 程序切换（V1.12.18/V1.12.25）：
@@ -510,17 +557,27 @@ namespace CommandCenter.Services
                     }
                     else
                     {
+                        // 【V2.13.2 显示提速】jpeg 一到位立刻从 FTP 源加载内存缩略图（异步显示链路，
+                        // 不等归档）。源文件此刻尚未被删、且 SaveImageFilePair 用 FileShare.ReadWrite，
+                        // 即使相机仍在写也最多加载失败为 null——失败则由 UI 回退按归档副本加载，无副作用；
+                        // 若读到半截文件，LoadThumbnailSafe 解码失败返回 null，同样回退。归档不受影响。
+                        preview = ProductionCoordinator.LoadThumbnailSafe(jpeg);
                         archived = _imageStore.SaveImageFilePair(jpeg, iv4p, storeStation, isOk, LatestSerialNumber, camName);
                         if (archived != null)
                         {
-                            // 归档成功 → 删除 FTP 源文件（"处理即删"，防同点位新旧图混淆）；删失败不阻断
+                            // 归档成功 → 删除 FTP 源文件（"处理即删"，防同点位新旧图混淆）；删失败不阻断。
+                            // 注意：preview 已在归档前读完并持有内存副本，删源不影响显示。
                             ImageStore.DeleteSourceFile(jpeg, $"相机[{camName}] 点位{stationNo}");
                             ImageStore.DeleteSourceFile(iv4p, $"相机[{camName}] 点位{stationNo}");
                         }
                         hasImage = archived != null;
                     }
                 }
-                if (!hasImage) return; // 无图 → 保持 code=2（NG）
+                if (!hasImage)
+                {
+                    preview?.Dispose(); // 归档失败：提前加载的预览图没被显示事件带走，立即释放防句柄泄漏
+                    return; // 无图 → 保持 code=2（NG）
+                }
 
                 // ④ 显示 + 计数（抛给 UI 线程刷新对应窗口）
                 _seqNo++;
@@ -529,6 +586,7 @@ namespace CommandCenter.Services
                     SeqNo = _seqNo,
                     IsOk = isOk,
                     ImagePath = archived,
+                    PreviewImage = preview,
                     CapturedAt = DateTime.Now,
                     SerialNumber = LatestSerialNumber,
                     ResultText = resultText,
@@ -608,29 +666,30 @@ namespace CommandCenter.Services
 
         /// <summary>
         /// 把"某台相机拍到某个点位"解析成显示窗口编号（V2.12.1 起统一相机表驱动，不再分自适应/非自适应；
-        /// V2.13 起支持手动编辑的"窗口↔(相机,点位)"独立映射，见 DisplayConfig.WindowPointMaps）。
+        /// V2.13 起支持手动编辑的"窗口↔(相机,点位)"独立映射，见 DisplayConfig.WindowPointMaps；
+        /// V2.13.4 起关联键 = 相机ID CameraId，不再用列表下标）。
         ///
         /// 点位由相机点位表唯一决定：上下相机点位号各自从 1 起会重复（如上相机 1~18、下相机 1~4）。
         /// 定位方式（V2.13 起）：
         ///   - 默认（未手动编辑）：按"前上相机后下相机"分组，窗口 = 相机点位表条目位置
         ///     （= DisplayConfig.DefaultWindowPointMap 的铺排，与旧逻辑等价）；
         ///   - 手动编辑/交换过（WindowPointForm）：查该型号的 WindowPointMaps 表，
-        ///     找"相机=本通道且点位=请求点位"的唯一窗口（同一"相机+点位"只分配给一个窗口）。
+        ///     找"相机=本相机ID且点位=请求点位"的唯一窗口（同一"相机+点位"只分配给一个窗口）。
         /// 找不到窗口：
         ///   - 该点位不归本相机拍（另一台相机的点位）→ 返回 false，调用方按"跳过"处理（写结果 3）；
         /// 该窗口被禁用（WindowEnabled=false）→ 返回 false（同样是跳过，不拍照不计数）。
         /// </summary>
-        private bool TryResolveActiveWindow(int camIdx, int stationNo, out int windowIndex)
+        private bool TryResolveActiveWindow(int cameraId, int stationNo, out int windowIndex)
         {
             windowIndex = -1;
-            // V2.13 独立映射反查：遍历当前型号的窗口→(相机,点位)表，找"相机=camIdx 且点位=stationNo"
+            // V2.13 独立映射反查：遍历当前型号的窗口→(相机,点位)表，找"相机ID=cameraId 且点位=stationNo"
             // 的窗口编号（下标+1）。默认铺排就是"前上相机后下相机"分组，行为与旧版一致。
             if (_windowPointMap != null)
             {
                 for (int i = 0; i < _windowPointMap.Count; i++)
                 {
                     var it = _windowPointMap[i];
-                    if (it != null && it.CameraIndex == camIdx && it.StationNo == stationNo)
+                    if (it != null && it.CameraId == cameraId && it.StationNo == stationNo)
                     {
                         windowIndex = i + 1;
                         return IsWindowEnabled(windowIndex);
@@ -640,6 +699,7 @@ namespace CommandCenter.Services
             }
 
             // 兜底（_windowPointMap 为 null 的极端情况）：退回按相机点位表条目位置定位
+            int camIdx = IndexOfCamera(cameraId);
             if (camIdx < 0 || camIdx >= _cameraCfgs.Count) return false;
             var table = _cameraCfgs[camIdx].ProgramsFor(_productModel);
             if (table == null) return false;
@@ -727,6 +787,54 @@ namespace CommandCenter.Services
                     fs.CopyTo(ms);
                     ms.Position = 0;
                     return Image.FromStream(ms);
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 加载图片并降采样为"显示用缩略图"（V2.13.2，性能优化）：
+        /// 基恩士相机原图很大（常见 2592×1944，甚至更大），若直接把全尺寸原图交给
+        /// PictureBox 显示，每次"读盘 + GDI+ 解码 + Zoom 等比绘制"都在 UI 线程做，
+        /// 会明显卡顿/拖慢画面刷新。本方法把图片先等比缩到最大边不超过 maxDim 的小图
+        /// （显示窗口通常只有几百像素宽，超过 1280 纯属无用开销；该尺寸在"双击全屏
+        /// 放大"查看缺陷时仍基本清晰），解码/绘制成本从"大图"降到"小图"，内存也省。
+        /// 与 LoadImageSafe 一样用 FileShare.ReadWrite 打开，文件被占用也能读。
+        /// 【上限可调】maxDim 默认 1280：足够普通窗口锐利显示 + 全屏可看清；若现场
+        ///   全屏需更大细节可调大（代价是解码/绘制更慢，与本节思想相反，慎用）。
+        /// 失败返回 null（不抛异常），由调用方静默降级（窗口保持空态/上一张图）。
+        /// </summary>
+        /// <param name="path">图片完整路径（jpeg/jpg/png 等 GDI+ 可解码格式）</param>
+        /// <param name="maxDim">缩略图最大边像素数（默认 1280）</param>
+        /// <returns>等比例缩小的新 Bitmap（调用方负责 Dispose）；异常时返回 null</returns>
+        public static Image LoadThumbnailSafe(string path, int maxDim = 1280)
+        {
+            try
+            {
+                using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var src = Image.FromStream(fs))
+                {
+                    // 等比计算目标尺寸：任意一边超过 maxDim 才缩小，否则按原尺寸拷贝一份；
+                    // 拷贝的目的是让返回位图的存活不再依赖已 Dispose 的源流（src 生命周期只在方法内）。
+                    int w = src.Width, h = src.Height;
+                    if (w > maxDim || h > maxDim)
+                    {
+                        double ratio = Math.Min((double)maxDim / w, (double)maxDim / h);
+                        w = Math.Max(1, (int)(w * ratio));
+                        h = Math.Max(1, (int)(h * ratio));
+                    }
+                    var bmp = new Bitmap(w, h);
+                    using (var g = Graphics.FromImage(bmp))
+                    {
+                        // 高质量双三次重采样：缩小后保细节（现场要看缺陷，宁可多花一点绘制时间）。
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        g.CompositingQuality = CompositingQuality.HighQuality;
+                        g.DrawImage(src, 0, 0, w, h);
+                    }
+                    return bmp;
                 }
             }
             catch

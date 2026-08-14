@@ -82,6 +82,11 @@ namespace CommandCenter.Utils
             if (cfg.Image == null) cfg.Image = new Models.ImageConfig();
             if (cfg.Security == null) cfg.Security = new Models.SecurityConfig();
 
+            // V2.13.4：相机配置升级——补 CameraId（旧配置无此字段=0 → 按行序）与 PLC 通道地址
+            // （旧配置 plcRequestAddress=0 曾是"按相机序号自动"，V2.13.4 起改为显式配置，这里把
+            // 前两台按现场默认补齐 2/3、5/6，保证旧配置文件升级后相机仍参与轮询，行为不变）
+            EnsureCameraIdentity(cfg);
+
             // 保证窗口→存图点位映射长度与窗口总数一致（缺的补默认、多的截断）
             EnsureStationMap(cfg);
             // V2.13：保证窗口↔点位独立映射（WindowPointMaps）各型号表长度与窗口总数一致
@@ -136,6 +141,53 @@ namespace CommandCenter.Utils
             {
                 LogHelper.Error("保存配置失败：" + ex.Message);
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// 相机配置升级（V2.13.4）：旧配置文件缺 CameraId / PLC 通道地址（都是 0）时自动补齐，
+        /// 保证升级后相机仍参与轮询、点位/通道仍按相机ID定位，行为与旧版一致。
+        /// 【为什么需要】V2.13.4 起：
+        ///   - 相机身份键 = CameraId（真编号，上=2/下=1），旧 json 没存该字段=0；
+        ///   - PLC 通道地址 = 每台相机显式配置（PlcRequestAddress/PlcResultAddress），旧 json 存的
+        ///     0 曾是"按相机序号自动"（第1台=2/5、第2台=3/6），若保持 0 会被当成"未配置通道"而不参与轮询。
+        /// 【补法】
+        ///   - CameraId<=0 → 先按 IP 匹配现场默认两台相机（DefaultCameras）取真编号（213→2、212→1），
+        ///     匹配不上（新增自定义相机）才按行序兜底；
+        ///   - PlcRequestAddress<=0 且该相机是列表第 1/2 台 → 按现场默认补 2/3（协议 40002/40003）；
+        ///     PlcResultAddress<=0 且第 1/2 台 → 补 5/6（协议 40005/40006）。第 3 台起保留 0
+        ///     （未配置通道，需现场/PLC 协商地址后在设置页填写）。
+        /// </summary>
+        private static void EnsureCameraIdentity(Models.AppConfig cfg)
+        {
+            if (cfg.Cameras == null) return;
+            var defaults = Models.CameraConfig.DefaultCameras();
+            for (int i = 0; i < cfg.Cameras.Count; i++)
+            {
+                var cam = cfg.Cameras[i];
+                if (cam == null) continue;
+
+                // ① 补 CameraId：按 IP 匹配默认相机取真编号，匹配不上按行序
+                if (cam.CameraId <= 0)
+                {
+                    int byIp = 0;
+                    string ip = cam.IpAddress?.Trim() ?? "";
+                    foreach (var d in defaults)
+                    {
+                        if (d != null && (d.IpAddress ?? "").Trim().Equals(ip, StringComparison.OrdinalIgnoreCase))
+                        { byIp = d.CameraId; break; }
+                    }
+                    cam.CameraId = byIp > 0 ? byIp : i + 1;
+                }
+
+                // ② 补 PLC 通道地址：仅前两台且为 0 时补现场默认（第3台起保持 0=未配置）
+                if (i < defaults.Count && defaults[i] != null)
+                {
+                    if (cam.PlcRequestAddress <= 0 && defaults[i].PlcRequestAddress > 0)
+                        cam.PlcRequestAddress = defaults[i].PlcRequestAddress;
+                    if (cam.PlcResultAddress <= 0 && defaults[i].PlcResultAddress > 0)
+                        cam.PlcResultAddress = defaults[i].PlcResultAddress;
+                }
             }
         }
 
@@ -213,14 +265,32 @@ namespace CommandCenter.Utils
                         Points = def
                     });
                 }
-                else if (found.Points == null || found.Points.Count != def.Count)
+                else if (found.Points == null || found.Points.Count != def.Count
+                    || ContainsLegacyCameraIndex(found.Points))
                 {
-                    // 表存在但长度与窗口总数不一致（点位表增删点位后没跟上）：
-                    // 点位由相机点位表唯一决定，数量变了只能重置默认，防越界/错位
+                    // 表存在但长度与窗口总数不一致（点位表增删点位后没跟上），或含旧格式条目
+                    // （V2.13.4 前存 cameraIndex=列表下标，属性改名 CameraId 后反序列化为 0）：
+                    // 点位由相机点位表唯一决定，数量变了只能重置默认，防越界/错位；
+                    // 旧格式条目 CameraId=0 无法可靠迁移（原下标值已被丢弃），同样重置默认铺排。
                     found.Points = def;
                 }
-                // 长度恰好匹配 → 保留用户手动编辑过的映射，不动
+                // 长度恰好匹配且全为新格式（CameraId>0）→ 保留用户手动编辑过的映射，不动
             }
+        }
+
+        /// <summary>
+        /// 判断窗口↔点位映射表是否含"旧格式条目"（V2.13.4 迁移检测）：
+        /// V2.13.4 前 WindowPointItem 存 cameraIndex（相机列表下标），改名 CameraId 后旧 json 的
+        /// cameraIndex 属性对不上新属性名，反序列化时被丢弃 → CameraId=0。新格式条目的 CameraId
+        /// 必然 >0（配置升级时 EnsureCameraIdentity 已保证相机有 ID），故"存在 CameraId<=0 的条目"
+        /// 即说明是旧格式，需重置默认铺排（原下标值已丢失，无法可靠迁移回相机ID）。
+        /// </summary>
+        private static bool ContainsLegacyCameraIndex(List<Models.WindowPointItem> points)
+        {
+            if (points == null) return true;
+            foreach (var p in points)
+                if (p == null || p.CameraId <= 0) return true;
+            return false;
         }
 
         /// <summary>

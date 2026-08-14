@@ -1,5 +1,140 @@
 # 版本改动记录
 
+## V2.13.5（2026-08-14）相机ID落实为唯一关联键 + 相机PLC通道地址显式化（废除"按列表位置自动分配"）
+
+> 承接 V2.13.4（cameraId 新增字段）。本次把 cameraId 从"显示用编号"彻底落实为**运行时唯一关联键**，
+> 同时把每台相机的 PLC 请求/结果通道地址从"0=按相机列表位置自动推导"改为**显式配置**
+> （0=未配置通道、不参与轮询），去掉最后两处"相机身份=列表下标"的隐式约定。
+
+### 改动范围
+- **`Models/AppConfig.cs`**：`WindowPointItem` 字段 `cameraIndex`（列表下标）→ **`cameraId`**
+  （真编号，与 `CameraConfig.CameraId` 一致）；窗口↔点位映射（`windowPointMaps` JSON）属性名随之
+  由 `cameraIndex` 变为 `cameraId`，旧 JSON 不再反序列化成功（由 ConfigStore 检测重置）。
+- **`Services/PlcService.cs`**：删除 `CamRequestAddress`/`CamResultAddress` 两处"按列表位置自动推导"
+  （含越界保护宏）；`ReadCameraRequest(cam, out stationNo)` / `WriteCameraResult(cam, code)` 签名简化，
+  地址一律读相机配置 `PlcRequestAddress`/`PlcResultAddress`，`0`=未配置通道（读按无请求返回、写跳过）。
+- **`Services/ProductionCoordinator.cs`**：轮询/触发/结果流转全程以相机 ID 定位——`BeginCameraChannel`
+  接收 `cameraId` 而非下标，`_activeCh` 存相机 ID；`IndexOfCamera(id)` 由 ID 反查下标取相机对象与点位表。
+- **`Views/WindowPointForm.cs`**：点位编辑候选、占位检测、交换位置均改为以 `CameraId` 为键
+  （`CameraId>0` 用真编号、`0` 回退行序，与 Coordinator 的 CameraIdFor 同规则），新增
+  `FindCameraById`/`IndexOfCameraById` 供显示反查。
+- **`Views/DevTestForm.cs`**：调用新签名 `ReadCameraRequest`/`WriteCameraResult`。
+- **`Views/SettingsForm.cs`**：相机表 PLC 请求/结果列语义文案更新为"0=未配置/必填"（不再是"0=自动"）。
+- **`Utils/ConfigStore.cs`**：
+  - 新增 `EnsureCameraIdentity`：旧配置相机 `cameraId=0` 时按"IP 匹配默认相机真编号"补齐
+    （213→2、212→1），匹配不上按行序；`plcRequestAddress/plcResultAddress=0` 且第 1/2 台时按默认
+    补齐 2/3、5/6（旧"0=自动"语义固化成显式值），**保证旧配置升级后相机仍参与轮询、行为不变**；
+  - `EnsureWindowPointMaps` 增加 `ContainsLegacyCameraIndex` 检测：映射表存在 `CameraId<=0` 条目
+    （旧 JSON `cameraIndex` 被新属性名忽略的结果）即视为旧格式、重置该型号默认铺排。
+
+### 为什么这么改
+- **相机身份彻底不依赖列表位置**：此前仍有两处按"列表下标"取相机身份——`WindowPointItem.CameraIndex`
+  （窗口↔点位映射，V2.13 引入）与 `PlcService` 的通道地址自动推导（V2.12.6 引入）。保留它们意味着
+  "新增/删除/排序相机"仍会悄悄改变通道或点位归属，是全项目最后的隐式下标隐患。本次统一收敛到 `CameraId`。
+- **通道地址显式同现场可控**：0 的双语义（旧=自动、V2.12.6 起第3台=未配置）容易误配；现在统一
+  "0=未配置"，前两台默认值由配置迁移固化成显式写入，现场加相机必须到设置页填地址，杜绝"以为配好了
+  实际在自动"的陷阱。
+
+### 优化点
+- Coordinator / WindowPointForm / SettingsForm / DevTestForm 各层的相机定位规则收敛为同一套
+  `CameraIdFor`（真编号优先、0 回退行序展示），删除全部下标依赖；
+- 旧配置文件（V2.13.3 及更早）自动迁移：补相机ID、补通道地址、重置旧格式窗口映射，升级后无感继续生产；
+- 窗口↔点位映射 JSON 结构变化有明确自愈路径（长度/旧格式检测→重置默认），不会带病运行。
+
+## V2.13.4（2026-08-14）相机编号升级为独立"相机ID"字段：上相机=2、下相机=1（与存图目录号一致）
+
+> 现场要求：设置窗体相机列表第一列不再是"行序序号"，而是**相机真正的编号**。按存图地址对应——
+> 上相机推到 `D:\IV存图\2` → **上相机=相机2**（IP `19.87.6.213`）；下相机推到 `D:\IV存图\1` →
+> **下相机=相机1**（IP `19.87.6.212`）。IP 已实测正确、不动。
+
+### 改动范围
+- **`Models/AppConfig.cs`**：`CameraConfig` 新增 `cameraId` 字段（基恩士真编号，`0`=未填）；
+  `DefaultCameras()` 默认上相机 `CameraId=2`、下相机 `CameraId=1`，注释写明与存图目录号一一对应。
+- **`Views/SettingsForm.cs`**：相机表第一列由只读"序号"改为**可编辑"相机ID"**——读/写 `cameraId`
+  （`0`/旧配置按行序兜底显示）；增删行后 `RenumberCameraSeq` 只给未填编号行补行序、
+  **已配置真编号的行不被覆盖**；"添加相机"新行默认填 0 走行序兜底，避免复制上相机编号 2 造成重复。
+- **`Views/MainForm.cs`**：`CamDisplayName` 无名称回退"相机N"优先取 `cameraId`（`>0`）、其次行序。
+- **`Views/DevTestForm.cs`**：相机下拉/存图目录名/删除日志的无名称回退同步优先 `cameraId`。
+- **`Views/WindowPointForm.cs`**：点位矩阵/相机下拉等 5 处无名称回退同步优先 `cameraId`。
+- **`Services/ProductionCoordinator.cs`**：`CameraLabel` 与存图目录名兜底优先 `cameraId`；日志去冗余编号。
+- **文档同步**：`docs/CommandCenter.md`（§1 设置页相机表说明、§4.4 默认相机说明、§4.5 字段表补
+  `cameraId`、§7 配置示例、§8 版本）、`CHANGELOG.md`、`AGENTS.md`（相机 ID 约定）。
+
+### 为什么这么改
+- **不能靠交换相机列表顺序实现编号**：PLC 通道地址按"相机列表位置"自动分配（第1台=协议40002=上相机、
+  第2台=40003=下相机，`PlcService.CamRequestAddress`）。列表一交换，40002 就从"上相机"变成"下相机"，
+  与 PLC 主站程序冲突、三拍握手全错。故编号独立存 `cameraId` 字段，列表顺序/PLC 通道/窗口映射/
+  存图点位（点位表按相机下标）**全部不动**，零协议影响。
+
+### 优化点
+- 相机真编号与"列表位置"彻底脱钩：现场相机编号调整（如改相机3/4）只改 ID 列，不牵连 PLC 通道与点位表；
+- 设置页、主界面、功能测试、点位配置四处的"相机N"回退统一走 cameraId，所见一致；
+- 旧配置（无 `cameraId`）自动按行序兜底显示，兼容升级不崩。
+
+## V2.13.3（2026-08-14）修复 FTP 取图目录配对错位：上/下相机窗口显示对面相机的图片
+
+> 现场反馈：**上相机触发的确实是上相机（触发指令走相机 IP，正确），但 MainForm 窗口显示的图片是
+> 下相机的**。排查确认根因是**上/下相机的 FTP 取图目录配反了**：现场相机推图目标是"上相机→
+> `D:\IV存图\2`、下相机→`D:\IV存图\1`"（**与安装位置相反配对**，上相机推到 `\2`、下相机推到 `\1`），
+> 而默认配置 `DefaultCameras()` 写成"上→`\1`、下→`\2`"。触发链路（IP 指令式 T1/T2）正确，但取图按
+> `FtpUploadDir` 扫 FTP 目录，扫到的是对面相机的图 → 窗口显示错位。DevTestForm（功能测试）与主窗体
+> 共用 `_config.Cameras` 的 `FtpUploadDir`，同样受影响、随之修正。
+
+### 改动范围
+- **`Models/AppConfig.cs`**：`DefaultCameras()` 互换两台相机的 `FtpUploadDir`（上相机→`D:\IV存图\2`、
+  下相机→`D:\IV存图\1`），注释同步"上/下相机取图目录与安装位置相反配对"及 V2.13.3 修正说明。
+- **`Views/SettingsForm.cs`**：默认相机模板行/添加行注释同步新目录（实际取值来自 `DefaultCameras()`，
+  自动跟随修正）。
+- **文档同步**：`AGENTS.md`、`README.md`、`docs/CommandCenter.md`（§1 FTP 说明、§2.3 设备清单、
+  §4.4 多相机配置、§4.6 校准清单、§7 配置示例/核对事项、§8 版本）全部把"上→\1/下→\2"更正为
+  "上→\2/下→\1"并注明与安装位置相反配对。
+
+### 为什么这么改
+- "触发正确、显示错位"只可能出在取图（FTP 目录）这一环——触发与取图用两条不同链路，目录绑反就会
+  出现这种"触发对、图错"的现象；互换默认目录即对齐现场实际推图位置。
+- 主窗体 `_windowControls[windowIndex]` 显示 / DevTestForm `ResolveLatestFtpPair` 都读相机配置的
+  `FtpUploadDir`，配置这就是唯一数据源，一处改、两边同时正确，不引入任何逻辑分支。
+
+### 优化点
+- 一次修正根治两处（主窗口显示 + 功能测试取图），无行为副作用；
+- 无 PLC 协议/寄存器/相机指令变化，纯相机映射配置修正，风险低。
+
+## V2.13.2（2026-08-14）窗口图片显示提速：显示不等归档（jpeg 一到即预览）+ 解码移出界面线程 + 缩略图
+
+> 现场反馈主窗体窗口图片"显示慢"。拆解拍照→显示整条链路，找到两类问题：
+> **① 显示延迟（本次主攻）**：FTP 模式 `WaitForFtpImage` 等到 jpeg 后，旧实现要等
+> `SaveImageFilePair` 把 **jpeg + iv4p 两个文件都复制完**才会抛显示事件；iv4p（基恩士复盘私有格式）
+> 常比 jpeg 大，且 `CopyWithRetry` 遇到相机仍在写文件会 `Sleep(400)`×3 重试——显示被 iv4p 复制和重试
+> 白白拖慢几百 ms 到 1s+，而窗口只需要 jpeg。
+> **② UI 卡顿（同步修复）**：`OnInspectionFinished` 在 UI 线程同步"读盘+GDI+ 解码全尺寸原图"
+> （基恩士 2592×1944），每窗口每次刷新都掉帧。
+
+### 改动范围
+- **`Models/WindowData.cs`**：新增 `PreviewImage`（Image，V2.13.2）——协调器提前加载好的内存缩略图，
+  随事件带给 UI；null 时 UI 回退按 ImagePath 后台加载。
+- **`Services/ProductionCoordinator.cs`**：
+  - 新增 `LoadThumbnailSafe(path, maxDim=1280)` 静态方法——`FileShare.ReadWrite`（同 LoadImageSafe）+
+    等比降采样到最大边 1280 的小图（HighQualityBicubic），失败返 null 不抛异常；
+  - `DoCameraShot` 的 FTP 分支：`WaitForFtpImage` 拿到 jpeg 后、`SaveImageFilePair` 归档**之前**即
+    `preview = LoadThumbnailSafe(jpeg)`（源文件此刻未删、提前读不影响归档；读到半截/失败=null 走 UI
+    回退，无副作用）；归档/删 FTP 源逻辑原样不动；`WindowData.PreviewImage = preview`；归档失败
+    （hasImage=false）时原地 `preview?.Dispose()` 防句柄泄漏。
+- **`Views/MainForm.cs`**：`OnInspectionFinished` 三层处理——`UpdateCountsTitle`（计数/标题轻量更新，
+  立即回 UI，不拖慢 PLC 握手）＋ 有 `PreviewImage` 直接转交 UI（最快路径，零磁盘 IO）＋ 无预览图则
+  `Task.Factory.StartNew` 后台读盘/解码/降采样后小图回 UI；窗口重建/关窗竞态原地 Dispose 防泄漏。
+- **文档同步**：`CHANGELOG.md` / `docs/CommandCenter.md`（§8） / `AGENTS.md`（红线补"显示不等归档"）。
+
+### 为什么这么改
+- "显示慢"的根子是"显示等归档"：窗口只需要 jpeg，却等 iv4p 复制完才出图。把提前加载的 jpeg 预览图
+  随事件带走，显示链变成"jpeg 到位 → 预览"，省掉 iv4p 复制（含 400ms×3 重试）与删源两步；
+- 归档语义零破坏：`SaveImageFilePair` + 删 FTP 源顺序原样，只是显示与归档解耦，含完整回退链——
+  预览失败降级到"按归档副本后台加载"，可靠不回退到旧慢逻辑。
+
+### 优化点
+- 画面到窗口明显提速：FTP 图一到即显示，不再等 iv4p 归档；
+- UI 线程零解码/零磁盘 IO（有预览图时）；无预览时后台缩略图提供，界面不卡；
+- 内存更省：窗口只持有几百 KB 缩略图（1280 上限，普通窗口超采样锐利、全屏放大仍可看清）。
+
 ## V2.13.1（2026-08-14）"交换位置"放开跨相机：任意两窗口（含上/下相机）可互换点位
 
 > V2.13 恢复的"交换位置"曾限制**仅同相机内允许**，理由是担心"上下相机同号点位跨相机交换会让

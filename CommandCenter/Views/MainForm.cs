@@ -399,14 +399,20 @@ namespace CommandCenter.Views
 
         /// <summary>
         /// 第 i 台相机的显示名（V1.12.23）：有配置名称（上相机/下相机/…）用名称，
-        /// 无名称回退"相机N"（N=i+1，即设置界面的序号）。所有主界面展示相机的文案
-        /// （相机灯/悬停/下拉）都应走这里，保证"序号=ID"唯一对应，有名称就显名称。
+        /// 无名称回退"相机N"（V2.13.4 起优先 CameraConfig.CameraId 真编号，其次行序 i+1）。
+        /// 所有主界面展示相机的文案（相机灯/悬停/下拉）都应走这里，保证"编号"唯一对应。
         /// </summary>
         private string CamDisplayName(int i)
         {
             if (i < 0 || i >= _cameras.Count) return "相机";
             string name = _cameras[i].DisplayName;
-            return string.IsNullOrWhiteSpace(name) ? $"相机{i + 1}" : name;
+            if (!string.IsNullOrWhiteSpace(name)) return name;
+            // 无名称时优先用相机真编号（CameraId>0），没有才退回行序 i+1（与设置页第一列一致）
+            int camId = 0;
+            var cfgList = _config.Cameras;
+            if (cfgList != null && i < cfgList.Count && cfgList[i] != null)
+                camId = cfgList[i].CameraId;
+            return camId > 0 ? $"相机{camId}" : $"相机{i + 1}";
         }
 
         /// <summary>
@@ -1100,29 +1106,95 @@ namespace CommandCenter.Views
         /// <summary>
         /// 一次检测完成：在界面线程刷新对应窗口图片+OK/NG徽标，并更新统计。
         /// 事件可能从工作线程抛出，统一 Invoke 回界面线程。
+        ///
+        /// 【V2.13.2 显示提速，两层配合，图片"到窗口"不再滞后】
+        ///   ① 协调器（ProductionCoordinator.DoCameraShot）在 FTP 模式 jpeg 一到位就**提前从源文件
+        ///      加载内存缩略图**塞进 WindowData.PreviewImage 随事件带过来——显示不等"jpeg+iv4p
+        ///      归档复制 + 删 FTP 源"全部完成（iv4p 复制可能因文件在写而 400ms×3 重试，是旧链路最大
+        ///      的隐性延迟）；UI 收到直接赋值，不做任何磁盘 IO。
+        ///   ② 若 PreviewImage 为 null（非 FTP 取图 / 提前加载失败 / 源文件半截）——回退：后台
+        ///      Task 读盘+解码+降采样（LoadThumbnailSafe）完成后把小图带回 UI 赋值。解码/缩放开销
+        ///      完全移出界面线程（较旧版"UI 线程全尺寸解码"已不卡界面）。
+        ///   计数/标题等轻量更新与图片加载分开投递（图片加载不得拖慢写回 PLC 结果的协调器线程）。
         /// </summary>
         private void OnInspectionFinished(WindowData data, int windowIndex)
         {
             if (IsDisposed) return;
             if (InvokeRequired)
             {
-                BeginInvoke(new Action<WindowData, int>(OnInspectionFinished), data, windowIndex);
+                // ① 计数更新立刻回 UI（纯状态刷新，即刻反映到标题栏）
+                BeginInvoke(new Action<WindowData>(UpdateCountsTitle), data);
+
+                if (data.PreviewImage != null)
+                {
+                    // 协调器已提前加载好的内存缩略图：直接转交 UI（无磁盘 IO，最快路径）
+                    BeginInvoke(new Action<WindowData, int, Image>(ApplyResultImage), data, windowIndex, data.PreviewImage);
+                    return;
+                }
+
+                // ② 回退路径：图片读盘/解码/降采样放后台 Task，完成后小图回 UI 赋值。
+                string path = data.ImagePath;
+                Task.Factory.StartNew(() =>
+                {
+                    Image thumb = (!string.IsNullOrEmpty(path) && File.Exists(path))
+                        ? ProductionCoordinator.LoadThumbnailSafe(path)
+                        : null;
+                    if (IsDisposed)
+                    {
+                        // 窗体已关：无窗口可显示，立即释放缩略图防 GDI+ 句柄泄漏
+                        thumb?.Dispose();
+                        return;
+                    }
+                    try
+                    {
+                        BeginInvoke(new Action<WindowData, int, Image>(ApplyResultImage), data, windowIndex, thumb);
+                    }
+                    catch
+                    {
+                        // 关窗竞态：BeginInvoke 抛异常（句柄已销毁等），原地释放缩略图防泄漏
+                        thumb?.Dispose();
+                    }
+                });
                 return;
             }
 
+            // 罕见：直接在 UI 线程调用（测试/harness 直连）：优先用事件带的内存图，否则同步缩略图。
+            UpdateCountsTitle(data);
+            Image img = data.PreviewImage
+                ?? (!string.IsNullOrEmpty(data.ImagePath) && File.Exists(data.ImagePath)
+                    ? ProductionCoordinator.LoadThumbnailSafe(data.ImagePath)
+                    : null);
+            ApplyResultImage(data, windowIndex, img);
+        }
+
+        /// <summary>
+        /// 检测计数+标题栏刷新（V2.13.2 拆出）：只做轻量 UI 状态更新，供检测完成事件
+        /// 的 UI 回调使用（图片刷新见 ApplyResultImage，两者独立分工，计数不依赖图片加载结果）。
+        /// </summary>
+        private void UpdateCountsTitle(WindowData data)
+        {
+            if (IsDisposed) return;
             _total++;
             if (data.IsOk) _ok++; else _ng++;
             RefreshTitle();
+        }
 
-            // 刷新目标显示窗口（V1.12.28 起按窗口编号查字典；禁用的窗口不建控件、不参与检测，
-            // 若仍收到事件（异常路径）直接忽略，避免 null 解引用）。
+        /// <summary>
+        /// 把后台加载好的缩略图赋给对应窗口（V2.13.2 拆出，UI 线程执行）：
+        /// 按窗口编号查字典（禁用的窗口不建控件，事件异常路径直接忽略）；
+        /// 窗口已消失（禁用/切型号重建）时不落控件、原地 Dispose 缩略图，防句柄泄漏。
+        /// </summary>
+        private void ApplyResultImage(WindowData data, int windowIndex, Image thumb)
+        {
+            if (IsDisposed) { thumb?.Dispose(); return; }
             if (_windowControls.TryGetValue(windowIndex, out var w))
             {
-                var img = !string.IsNullOrEmpty(data.ImagePath) && File.Exists(data.ImagePath)
-                    ? ProductionCoordinator.LoadImageSafe(data.ImagePath)
-                    : null;
-                w.SetImage(img);
+                w.SetImage(thumb);
                 w.SetOkNgStatus(data.IsOk);
+            }
+            else
+            {
+                thumb?.Dispose(); // 窗口已重建：释放刚加载的缩略图，防句柄泄漏
             }
         }
 
