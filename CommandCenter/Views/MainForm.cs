@@ -1424,8 +1424,8 @@ namespace CommandCenter.Views
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 ConfigStore.Save(_config);
                 ApplyRuntimeConfig();   // 保存即生效：停旧服务、按新配置重建服务层与界面
-                MessageBox.Show("配置已保存并即时生效。", "提示",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                // V2.14.3：保存后静默热更，不再弹"配置已保存并即时生效"提示
+                // （现场操作时弹窗打断刷新观察；界面矩阵/标题栏/状态自行刷新即可感知，成败看日志）。
             }
         }
     }
