@@ -526,7 +526,11 @@ namespace CommandCenter.Models
         ///   上下相机点位号各自从 1 起会重复，窗口只是把点位条目"前上相机后下相机"
         ///   顺序铺排的格子（表里第 i 条点位 = 该相机起始窗口 + i）。
         /// 【行列形状】
-        ///   - 自适应：列 = min(7, 总点数)（点数≤7 单行铺满），行 = ceil(总点数/列)；
+        ///   - 自适应（V2.14 起）：列最多 7，遍历列数取"行列和最小"（尽量接近方形）、
+        ///     并列时列多者优先（优先增加列），让最后一行缺失的窗口最少；
+        ///     例：1→1×1（单窗占满）、2→1×2、3→1×3、4→2×2、5→2×3、6→2×3、7→2×4、
+        ///     22→4×6、28→4×7（铺满）。行多放不下时主窗体自动出竖直滚动条（见
+        ///     MainForm.ApplyGridScrollLayout）。
         ///   - 非自适应：列 = 手填 Columns、行 = 手填 Rows（乘积不够自动补行），
         ///     手填只决定排列宽度，窗口数仍=点位和，保证与自适应窗口↔点位一一对应。
         /// 勾选自适应后，设置在设置窗体的"显示窗口"行、切型号（标题栏/设置页）时自动重算；
@@ -556,7 +560,10 @@ namespace CommandCenter.Models
         /// 统一窗口布局计算（V2.12.1）：返回 (行, 列, 窗口总数)，所有使用窗口矩阵的层共用。
         /// 【窗口总数】恒 = WindowCountFor（相机点位表条目和，≥1）——点位由相机表唯一决定。
         /// 【行列形状】
-        ///   - 自适应（autoFit=true）：列 = min(7, 总数)（点数≤7 单行铺满），行 = ceil(总数/列)；
+        ///   - 自适应（autoFit=true，V2.14 新规则）：列数遍历 1..min(7,总数)，行 = ceil(总数/列)，
+        ///     取"行+列"最小的方案（越接近方形越好），并列时列数多者优先（优先增加列）——
+        ///     效果是让缺的格子集中在最后一行且最少，窗口尽量大、占满显示区域；
+        ///     例：1→1×1、2→1×2、3→1×3、4→2×2、5→2×3、6→2×3、7→2×4、28→4×7。
         ///   - 非自适应（autoFit=false）：列 = 手动 columns（≥1）、行 = 手动 rows（≥1）；
         ///     手填的 rows×columns 若放不下全部窗口，自动补行到 ceil(总数/列)（多余格子留空），
         ///     保证"窗口↔相机点位一一对应"与自适应一致，手填行列只决定排列宽度。
@@ -569,9 +576,20 @@ namespace CommandCenter.Models
             int total = Math.Max(1, WindowCountFor(cameras, productModel));
             if (autoFit)
             {
-                int cols = Math.Min(7, total);               // 点数≤7 → 单行；否则固定 7 列
-                int rows = (int)Math.Ceiling(total / (double)Math.Max(1, cols));
-                return (rows, cols, total);
+                // V2.14 自适应铺排：遍历所有可用列数，选"行列和最小"者（尽量接近方形）、
+                // 并列时列多者优先（优先增加列）。同时满足"窗口尽量放大占满显示区"（行少）与
+                // "最后一行缺失最少"（缺格 R*C-N 在方形排布下自然少）。行多为极端场景，
+                // 由主窗体 ApplyGridScrollLayout 出滚动条承接，这里只保证形状。
+                int bestRows = 1, bestCols = 1, bestSum = int.MaxValue;
+                int maxCols = Math.Min(7, Math.Max(1, total));   // 列数最多 7
+                for (int cols = 1; cols <= maxCols; cols++)
+                {
+                    int rows = (total + cols - 1) / cols;        // ceil(total / cols)
+                    int sum = rows + cols;
+                    if (sum < bestSum || (sum == bestSum && cols > bestCols))
+                    { bestSum = sum; bestRows = rows; bestCols = cols; }
+                }
+                return (bestRows, bestCols, total);
             }
             int cols2 = Math.Max(1, manualCols);
             int rows2 = Math.Max(1, manualRows);

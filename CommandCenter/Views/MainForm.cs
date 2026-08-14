@@ -24,7 +24,8 @@ namespace CommandCenter.Views
     /// │  │ W1   │ │ W2   │ │ W3   │ │ W4   │ │ W5   │                   │
     /// │  │ [OK] │ │ [NG] │ │ [OK] │ │ ...  │ │ [NG] │                   │
     /// │  └──────┘ └──────┘ └──────┘ └──────┘ └──────┘                  │
-    /// │  （Rows × Columns 个窗口，逐次环形刷新）                            │
+    /// │  （Rows × Columns 个窗口，逐次环形刷新；外层 pnlWindowScroll      │
+    /// │   AutoScroll=true，行多超高时右侧出滚动条、滚轮下滑）              │
     /// ├───────────────────────────────────────────────────────────────────┤
     /// │ 状态:等待PLC主站到位…（左下角；型号切换成功时变绿显示"型号切换完成"）     │
     /// └───────────────────────────────────────────────────────────────────┘
@@ -513,6 +514,12 @@ namespace CommandCenter.Views
             Bounds = new Rectangle(work.Location, work.Size);
 
             RelayoutTitleBar();
+
+            // V2.14：铺满到真实屏幕后"窗口显示区高度"才正确，用真实高度重算一次矩阵的
+            // 铺满/滚动形态（构造期 BuildWindowGrid 用的是设计器默认高度，可能偏小）。
+            // 重建只动窗口控件（Dispose 旧的、按新行列新建），不影响已 Start 的协调器
+            // （刷新窗口改走 _windowControls 字典，重建后字典照常可用）。
+            BuildWindowGrid();
         }
 
         /// <summary>
@@ -711,9 +718,11 @@ namespace CommandCenter.Views
 
         /// <summary>
         /// 显示窗口矩阵：按"当前型号 + 相机点位表"在【设计器容器 gridCameraWindows】里动态重建
-        /// （V2.12.1 起自适应/非自适应统一，窗口总数=相机点位表条目和，见 DisplayConfig.ResolveLayout）。
-        /// 设计器只负责"容器长什么样"（Dock=Fill 铺满主区、淡蓝白底），具体行列数量与
-        /// 每格的 CameraDisplayControl 全部以这里为准重建，保证改行列/切型号/保存配置即生效。
+        /// （V2.12.1 起自适应/非自适应统一，窗口总数=相机点位表条目和，见 DisplayConfig.ResolveLayout；
+        ///  V2.14 起自适应行列形状改为"优先增加列、最后一行缺失最少"，见 ResolveLayout 注释）。
+        /// 设计器只负责"容器长什么样"（Dock=Fill 铺满 pnlWindowScroll 滚动宿主、淡蓝白底），
+        /// 具体行列数量与每格的 CameraDisplayControl 全部以这里为准重建，保证改行列/切型号/
+        /// 保存配置即生效；行数放不下时滚动宿主自动出滚动条（见 ApplyGridScrollLayout）。
         ///
         /// 【V1.12.28 窗口禁用重排】DisplayConfig.WindowEnabled=false 的窗口【不创建控件】：
         /// 从矩阵中"完全移除"该格子，剩余启用窗口按原窗口编号顺序【紧凑排列】（编号保留原值，
@@ -758,6 +767,10 @@ namespace CommandCenter.Views
             for (int r = 0; r < rows; r++)
                 grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100f / rows));
 
+            // V2.14：铺满 vs 滚动。行少 → grid 占满滚动宿主（窗口尽量大、占满整个显示区域）；
+            // 行多放不下 → 固定每行最小高度让矩阵变长，由 pnlWindowScroll（AutoScroll）出竖直滚动条。
+            ApplyGridScrollLayout(grid, rows);
+
             // 逐窗口编号创建：禁用的窗口不建控件（从矩阵移除），启用的按顺序紧凑填格子。
             var enabled = _config.Display.WindowEnabled ?? new List<bool>();
             int cellIdx = 0;
@@ -792,6 +805,47 @@ namespace CommandCenter.Views
             // 此刻标题栏/底部栏都已存在，把矩阵放在 z-order 最顶（最后布局），
             // 否则 Top 的标题栏会叠加覆盖矩阵第一排（"第一排窗口显示不全"的根源）。
             grid.BringToFront();
+        }
+
+        /// <summary>
+        /// 窗口矩阵"每行最小高度"（V2.14，滚动阈值）：当 行数×本高度 超过滚动宿主可视高度时，
+        /// 窗口不再被继续压缩，而是切换成"滚动模式"——每行固定本高度、超出部分由外侧滚动条翻看。
+        /// 取 160：既保证基恩士画面缩到最小时仍可辨识，又不会因为行数稍多就让窗口塌成一条缝。
+        /// </summary>
+        private const int MinWindowRowHeight = 160;
+
+        /// <summary>
+        /// 切换窗口矩阵的"铺满 / 滚动"两种形态（V2.14）：
+        ///   - 铺满（grid.Dock=Fill）：行样式百分比等分、矩阵占满整个窗口显示区——1 个窗口即最大
+        ///     尺寸占满，2 个即左右平分，4 个即 2×2 等分，符合"不要多余空白"的自适应预期；
+        ///   - 滚动（grid.Dock=Top + 定高）：行数×MinWindowRowHeight 超过宿主可视高度时，
+        ///     矩阵按最小行高定高变长，pnlWindowScroll（AutoScroll=true）自动出右侧竖直滚动条，
+        ///     鼠标滚轮 / 滑块翻看，标题栏与状态栏不随滚动。
+        /// 【为什么以像素高度判定而不看行数】窗体 FixedSingle 全屏铺满（高度≈屏幕工作区），
+        /// 用"行数×最小行高 > 可视高"能精确做到"放得下就占满、放不下才滚动"，与分辨率无关。
+        /// 构造期宿主高度还没跟上（设计器默认值），先保守铺满；OnShown 铺到实际工作区后
+        /// 会再调一次 BuildWindowGrid 重算，保证最终形态基于真实屏幕高度。
+        /// </summary>
+        private void ApplyGridScrollLayout(TableLayoutPanel grid, int rows)
+        {
+            var host = pnlWindowScroll;
+            if (host == null || host.ClientSize.Height <= 0)
+            {
+                grid.Dock = DockStyle.Fill;   // 宿主尺寸未知（构造期）→ 保守铺满，OnShown 会重算
+                return;
+            }
+            int minH = rows * MinWindowRowHeight + grid.Padding.Vertical;   // 滚动模式下矩阵应占高度
+            bool scroll = minH > host.ClientSize.Height;                    // 放不下才出滚动条
+            if (scroll)
+            {
+                grid.Dock = DockStyle.Top;      // Top：宽随宿主、高用自定值 → 超出后宿主出竖直滚动条
+                grid.Height = minH;
+                grid.AutoScroll = false;        // grid 自身不滚，滚动交给外层宿主
+            }
+            else
+            {
+                grid.Dock = DockStyle.Fill;     // 铺满整个显示区，窗口按行百分比等分占满
+            }
         }
 
         /// <summary>

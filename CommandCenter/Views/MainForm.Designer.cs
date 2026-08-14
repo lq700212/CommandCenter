@@ -15,7 +15,8 @@ namespace CommandCenter.Views
     ///   │   | 总数:[lblTotal] OK:[lblOk] NG:[lblNg]                     │
     ///   │          | [btnSettings系统设置]    ●[lblPlcStatus] ●[lblScannerStatus]│
     ///   ├──────────────────────────────────────────────────────────────┤
-    ///   │                 gridCameraWindows（TableLayoutPanel 等分）      │
+    ///   │  pnlWindowScroll（AutoScroll=true，行多超高时出竖直滚动条）       │
+    ///   │            └─ gridCameraWindows（TableLayoutPanel 等分）        │
     ///   ├──────────────────────────────────────────────────────────────┤
     ///   │ lblStatus（状态文本，左下角）                                      │
     ///   └──────────────────────────────────────────────────────────────┘
@@ -69,8 +70,10 @@ namespace CommandCenter.Views
             this.pnlStatusBar = new System.Windows.Forms.Panel();
             this.lblStatus = new System.Windows.Forms.Label();
             this.gridCameraWindows = new System.Windows.Forms.TableLayoutPanel();
+            this.pnlWindowScroll = new System.Windows.Forms.Panel();
             this.pnlTitleBar.SuspendLayout();
             this.pnlStatusBar.SuspendLayout();
+            this.pnlWindowScroll.SuspendLayout();
             this.SuspendLayout();
             // 
             // pnlTitleBar
@@ -306,13 +309,30 @@ namespace CommandCenter.Views
             this.gridCameraWindows.Size = new System.Drawing.Size(1400, 718);
             this.gridCameraWindows.TabIndex = 12;
             // 
+            // pnlWindowScroll
+            // 
+            // 窗口矩阵的滚动宿主（V2.14）：包裹 gridCameraWindows。
+            // AutoScroll=true：行数多、矩阵超高放不下时，由本面板自动出竖直滚动条（右侧滑块），
+            // 滚轮/滑块翻看；标题栏（Top）与状态栏（Bottom）挂在窗体上、不在本面板内，不随滚动。
+            // "铺满 / 滚动"两种形态由 MainForm.BuildWindowGrid → ApplyGridScrollLayout 运行切换：
+            //   铺满 = grid.Dock=Fill（行少，窗口尽量大占满本区域）；滚动 = grid.Dock=Top + 定高。
+            // 底色与 grid 同浅蓝，滚动露出空隙时视觉连续。
+            this.pnlWindowScroll.AutoScroll = true;
+            this.pnlWindowScroll.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(240)))), ((int)(((byte)(245)))), ((int)(((byte)(250)))));
+            this.pnlWindowScroll.Controls.Add(this.gridCameraWindows);
+            this.pnlWindowScroll.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.pnlWindowScroll.Location = new System.Drawing.Point(0, 48);
+            this.pnlWindowScroll.Name = "pnlWindowScroll";
+            this.pnlWindowScroll.Size = new System.Drawing.Size(1400, 718);
+            this.pnlWindowScroll.TabIndex = 13;
+            // 
             // MainForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 19F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(240)))), ((int)(((byte)(245)))), ((int)(((byte)(250)))));
             this.ClientSize = new System.Drawing.Size(1400, 820);
-            this.Controls.Add(this.gridCameraWindows);
+            this.Controls.Add(this.pnlWindowScroll);
             this.Controls.Add(this.pnlStatusBar);
             this.Controls.Add(this.pnlTitleBar);
             this.Font = new System.Drawing.Font("微软雅黑", 10F);
@@ -335,6 +355,7 @@ namespace CommandCenter.Views
             this.pnlTitleBar.PerformLayout();
             this.pnlStatusBar.ResumeLayout(false);
             this.pnlStatusBar.PerformLayout();
+            this.pnlWindowScroll.ResumeLayout(false);
             this.ResumeLayout(false);
 
         }
@@ -359,6 +380,7 @@ namespace CommandCenter.Views
         private Label lblCamPlaceholder;
         private Panel pnlStatusBar;
         private Label lblStatus;
+        private Panel pnlWindowScroll;   // 窗口矩阵滚动宿主（V2.14，AutoScroll=true，行多出滚动条）
         private TableLayoutPanel gridCameraWindows;
     }
 }
