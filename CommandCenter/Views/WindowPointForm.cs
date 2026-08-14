@@ -913,10 +913,18 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             {
                 // 互换两个槽位的条目引用（当前窗口非空才会走到这里，但被选点位可能被别的窗口占用，
                 // 直接交换引用即可；与 SwapCells 语义一致——交换"窗口↔点位"对应，值集合不变、反查唯一）。
+                // 【V2.14.20】与 SwapCells 同步：禁用状态跟随点位迁移，两窗口启用标志一并互换。
                 var tmp = map[_selectedIdx];
                 map[_selectedIdx] = map[conflict];
                 map[conflict] = tmp;
-                LogHelper.Info($"窗口 {_selectedIdx + 1} 点位改为「{options[sel].Item2}」，原占用窗口 {conflict + 1} 与本窗口互换（点确定后生效）");
+                // 与 SwapCells 同步的防御：_enabled 与 map 同长对齐，这里再兜底防不同步越界。
+                if (_selectedIdx < _enabled.Count && conflict < _enabled.Count)
+                {
+                    bool tmpEn = _enabled[_selectedIdx];
+                    _enabled[_selectedIdx] = _enabled[conflict];
+                    _enabled[conflict] = tmpEn;
+                }
+                LogHelper.Info($"窗口 {_selectedIdx + 1} 点位改为「{options[sel].Item2}」，原占用窗口 {conflict + 1} 与本窗口互换（禁用状态随点位迁移，点确定后生效）");
             }
             else
             {
@@ -952,7 +960,11 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         /// 只改变【窗口和点位的对应关系】（写回 WindowPointMaps），与"编辑点位"同语义、只是快速互换。
         /// 【空窗口（V2.14.18）】空窗口条目为 null，**可以参与交换**：跟有点位的窗口互换后，
         /// 点位搬进空窗口、原窗口变成空窗口——这是"把点位放到空窗口"的入口（编辑点位不支持空窗口）。
-        /// 被禁用的窗口照常参与交换（交换的是点位归属，与启用状态无关）。
+        /// 被禁用的窗口照常参与交换。
+        /// 【V2.14.20 禁用跟随点位】：**禁用状态跟着相机点位走、不跟着窗口走**——交换的同时把两窗口的
+        /// 禁用标志（_enabled，存储层是"窗口序号→布尔"）也一并互换。语义：禁用=该窗口对应的点位停了
+        /// （主界面不显示该窗、PLC 拍到该点位直接跳过），点位搬到哪扇窗、禁用就在哪扇窗上，禁止"互换
+        /// 后禁用还留在旧窗口、新窗口却因原点位被禁而继续跑"的错乱。
         /// 【V2.13.4】交换条目以相机ID（CameraId）为关联键，跨相机交换后反查键 (CameraId,StationNo)
         /// 仍唯一（值集合不变）。
         /// </summary>
@@ -965,7 +977,15 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             var tmp = map[a];
             map[a] = map[b];
             map[b] = tmp;
-            LogHelper.Info($"交换窗口 {a + 1} ↔ {b + 1} 的点位（{ResolveWindowSource(a + 1)} / {ResolveWindowSource(b + 1)}）（点确定后生效）");
+            // 【V2.14.20】禁用状态跟随点位一起走：a↔b 的启用标志同步互换（_enabled.Count 与 map.Count
+            // 同长对齐，见构造 / ApplyMatrixForModel；这里再兜底一层防不同步越界）。
+            if (a < _enabled.Count && b < _enabled.Count)
+            {
+                bool tmpEn = _enabled[a];
+                _enabled[a] = _enabled[b];
+                _enabled[b] = tmpEn;
+            }
+            LogHelper.Info($"交换窗口 {a + 1} ↔ {b + 1} 的点位（{ResolveWindowSource(a + 1)} / {ResolveWindowSource(b + 1)}），禁用状态随点位迁移（点确定后生效）");
             _selectedIdx = -1;
             RefillStationColumn();
             RefreshCells();
