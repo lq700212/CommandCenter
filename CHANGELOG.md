@@ -1,5 +1,23 @@
 # 版本改动记录
 
+## V2.14.1（2026-08-14）设置窗体"自适应"默认勾选（`autoFit` 默认 true）
+
+> 用户要求：SettingsForm 的自适应选项默认勾选上。点位表是窗口数的唯一来源，且 V2.13 起"窗口↔点位"
+> 可手动编辑、与行列形状无关——自适应铺排对现场最省心；需要固定排列宽度时再取消勾选手填行列。
+
+### 改动范围
+- **`Models/AppConfig.cs`**：`DisplayConfig.AutoFit` 默认值 `false` → `true`。设置窗体 `chkAutoFit`
+  （LoadFromConfig 读 `_cfg.Display.AutoFit`）与主窗体 `BuildWindowGrid` 共用同一字段，默认勾选即
+  全链路生效；新配置 / JSON 缺失 `autoFit` 字段（`DeserializeObject` 保留属性默认值）均取 true，
+  现场已显式配 `autoFit:false` 的配置文件不受影响（保持用户手选）。
+
+### 为什么这么改
+- 现场窗口矩阵默认就走"点位驱动自动铺排"，首次部署 / 换型号即所见即所得，不再需要手动勾选。
+
+### 优化点
+- 非自适能力保留：取消勾选后行/列输入框恢复可用，且保存逻辑只在不勾选时回写 Rows/Columns
+  （勾选时保留手填参考值、不污染配置），默认勾选不覆盖用户已有的手动行列。
+
 ## V2.14（2026-08-14）窗口矩阵自适应铺排升级：优先增加列 + 放不下自动滚动
 
 > 用户要求：勾选"自适应（AutoFit）"后，主界面窗口行/列要"刚好占满整个窗口显示区"——
@@ -31,6 +49,17 @@
   的既有语义——滚动只加能力、不碰语义，原功能零破坏。
 - 所有窗口尺寸仍由容器百分比等分自动保持一致（不写死像素布局），滚动模式只是把"每行等高"固定
   为最小行高 160，格子宽高比依旧整齐。
+
+### 自查修复（push 后复检，同版本内一并完成）
+- **滚动位置残留**：滚动模式下切型号/热更重建矩阵后，`pnlWindowScroll.AutoScrollPosition` 停留在上次
+  位置不回顶部，用户会看到新矩阵"从中间开始"（第一排被滚出视口）。修：`BuildWindowGrid` 尾部先
+  `PerformLayout` 再置 `AutoScrollPosition=(0,0)`（反射实测：滚到 73px 后重建，重建后 pos.Y=0）。
+- **滚轮焦点盲区**：WinForms 的 `WM_MOUSEWHEEL` 只发给聚焦控件、沿父链冒泡到 ScrollableControl——
+  若用户启动后还没点过任何窗口（焦点停在窗体本身）、或焦点落在标题栏 TextBox/ComboBox（自己消费滚轮
+  不冒泡），光标在窗口矩阵区滚轮不会滚动宿主（表现为"滚轮没反应"）。修：`MainForm.WndProc` 拦
+  `WM_MOUSEWHEEL`，光标（消息 lParam 携带的屏幕坐标）落在 `pnlWindowScroll` 内且出滚动条时，把消息
+  原样转发给宿主滚动（`SendMessage`），矩阵区外保持默认行为。反射实测：合成 3 次向下滚轮，
+  `VerticalScroll.Value` 0→73、`AutoScrollPosition.Y=-73`，转发生效。
 
 ## V2.13.11（2026-08-14）修复 CameraId 审查出的全部风险点：改号迁移/唯一性校验/补号语义
 

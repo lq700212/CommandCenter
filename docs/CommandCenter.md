@@ -285,8 +285,9 @@
   自动有自己的空表**，配好后点保存映射不会丢。
 - 换 PLC 地址：改 `plc.ipAddress`（上位机固定 IP 需先配到网卡再填同值）。
 - 换扫码枪触发指令：改 `scanners[].triggerCommand`（如非 `LON`）。
-- 调整窗口矩阵：默认改 `display.rows/columns`；**V2.12.0 起可开 `display.autoFit=true`** 让系统
-  按"当前产品型号 + 各相机点位表"自动铺排行列与窗口数（换型号自动重排，无需手填）。
+- 调整窗口矩阵：**V2.14.1 起 `display.autoFit` 默认已开（true）**，系统按"当前产品型号 + 各相机点位表"
+  自动铺排行列与窗口数（换型号自动重排，无需手填）；需要固定排列宽度时再手改
+  `display.autoFit=false` + `display.rows/columns`。
 
 ---
 

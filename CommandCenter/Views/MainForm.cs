@@ -530,9 +530,34 @@ namespace CommandCenter.Views
         /// 做法：把系统返回的"调整大小热区"（左/右/上/下/四角，HTLEFT..HTBOTTOMRIGHT）
         /// 全部改写为 HTCLIENT（客户区），Windows 就不会进入 resize 拖拽流程；
         /// 最小化/关闭按钮（HTMINBUTTON/HTCLOSE）与标题栏拖动（HTCAPTION）不受影响。
+        /// 另拦 WM_MOUSEWHEEL（V2.14）：光标在窗口矩阵滚动宿主内时把滚轮转发给宿主滚动，
+        /// 见下方"为什么"注释。
         /// </summary>
         protected override void WndProc(ref Message m)
         {
+            // V2.14 滚动宿主滚轮转发：
+            // 【为什么】WinForms 的 WM_MOUSEWHEEL 只发给"聚焦控件"，并沿 聚焦控件→父链 冒泡到某个
+            // ScrollableControl。若用户还没点击过任何窗口（焦点停在窗体本身）、或焦点落在标题栏的
+            // TextBox/ComboBox 上（它们自己消费滚轮、不冒泡），滚轮就不会到达 pnlWindowScroll——
+            // 表现为"鼠标在窗口矩阵上滚轮没反应"。这里用消息自带的鼠标屏幕坐标（lParam）判断光标
+            // 是否落在滚动宿主内，命中就把消息原样转发给宿主（其 WndProc 按坐标判定后自行滚动）。
+            // 光标在标题栏/状态栏等宿主外时保持默认行为，不干扰其它区域。
+            const int WM_MOUSEWHEEL = 0x020A;
+            if (m.Msg == WM_MOUSEWHEEL &&
+                pnlWindowScroll != null && !pnlWindowScroll.IsDisposed &&
+                pnlWindowScroll.VerticalScroll.Visible)
+            {
+                long lp = m.LParam.ToInt64();
+                int sx = (short)(lp & 0xFFFF);          // 低16位 X 屏幕坐标（可能为负，转 short）
+                int sy = (short)((lp >> 16) & 0xFFFF);  // 高16位 Y 屏幕坐标
+                if (pnlWindowScroll.RectangleToScreen(pnlWindowScroll.ClientRectangle)
+                        .Contains(sx, sy))
+                {
+                    SendMessage(pnlWindowScroll.Handle, m.Msg, m.WParam, m.LParam);
+                    return;                             // 已交给宿主滚动，主窗体不再处理
+                }
+            }
+
             const int WM_NCHITTEST = 0x0084;
             if (m.Msg == WM_NCHITTEST)
             {
@@ -547,6 +572,10 @@ namespace CommandCenter.Views
             }
             base.WndProc(ref m);
         }
+
+        /// <summary>发送 WM_* 消息给指定窗口（V2.14 滚动转发用；user32 原生 API）。</summary>
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
         /// <summary>
         /// 标题栏紧凑重排：按固定顺序把"可见"的字段从左往右 x 进位摆放，
@@ -805,6 +834,15 @@ namespace CommandCenter.Views
             // 此刻标题栏/底部栏都已存在，把矩阵放在 z-order 最顶（最后布局），
             // 否则 Top 的标题栏会叠加覆盖矩阵第一排（"第一排窗口显示不全"的根源）。
             grid.BringToFront();
+
+            // V2.14：矩阵重建后把滚动宿主滚回顶部。否则切型号/热更重建时若上次滚到过中下部，
+            // AutoScrollPosition 会残留 → 用户看到新矩阵"从中间开始"，第一排窗口被滚出视口。
+            // 铺满模式（无滚动条）时置 0 无害。先 PerformLayout 让滚动范围随新行列算好再归零。
+            if (pnlWindowScroll != null)
+            {
+                pnlWindowScroll.PerformLayout();
+                pnlWindowScroll.AutoScrollPosition = new Point(0, 0);
+            }
         }
 
         /// <summary>
