@@ -1,6 +1,42 @@
 # 版本改动记录
 
-## V2.14.22（2026-08-14）归档目录"完整路径当一层"嵌套根治：加载自动归一化 + 渲染拆段 + 界面禁止
+## V2.14.23（2026-08-14）热更/保存后 PLC 收不到请求修复：从站重建必须释放旧 master 连接
+
+> 现场血泪：SettingsForm 点保存后必现 PLC 异常——主界面右上角 PLC 灯变黄后一直卡黄，
+> 期间 PLC 发请求上位机全部收不到。根因 = 热更（`ApplyRuntimeConfig` → `_plc.Dispose` →
+> `BuildServices` 重建 PlcService）时只 `_listener.Stop()` + `_cts.Cancel()`，**从未调用
+> NModbus 从站网络的 `Dispose()`**。NModbus 3.0.83 的 `ModbusTcpSlaveNetwork` 实现了
+> `IDisposable`，其 `Dispose()` 会停止 TcpListener 并**逐个关闭所有已连入的 PLC 主站 TCP 会话
+> （ModbusMasterTcpConnection）**；而 `_cts.Cancel()` 只触发 NModbus 的取消回调去 Stop 监听器，
+> **已 accept 的 master socket 不会被关闭**。于是旧主站 socket 残留、PLC 主站认为 TCP 连接还活着、
+> 不重连新从站 → 新从站 Masters 恒为空 → 黄灯（监听就绪、等待主站）卡死；PLC 请求都写进已废弃的
+> 旧 socket，新从站从未 accept 到该连接 → 上位机收不到任何请求。
+
+### 改动范围
+
+- **`Services/PlcService.cs` 三处清理点全部补上 `_network?.Dispose()`**（顺序：先 `_cts.Cancel()`
+  再 `_network.Dispose()` 最后置空引用；`_listener.Stop()` 保留作双保险）：
+  - `EnsureConnected()` 顶部"先清旧资源"（重建/热更前）；
+  - `EnsureConnected()` catch 分支（启动失败清理）；
+  - `ResetConnection()`（被 `Dispose()` 复用；`Dispose()` 锁外强停分支也同步补上）。
+- 修复效果：热更后旧主站 socket 被真正关闭 → PLC 立即感知断连并按既有机制重新连入新从站，
+  黄灯转绿、请求恢复正常（与"保存后设备短暂断连、几秒内自动连回"的既有设计一致）。
+
+### 验证
+
+- MSBuild Debug/AnyCPU 构建通过；exe 冒烟存活。
+- harness 反射实测（模拟 502 场景）：模拟主站连入旧从站 → `HasMasterConnected=true` →
+  `Dispose` 后模拟主站 socket 读回 EOF（**旧 master 连接被服务端关闭 ✓**，修复前为残留）→
+  重建新从站后模拟主站重新连入 → `HasMasterConnected=true`（**新从站可接入 ✓**）。
+
+### 文档同步
+
+- `README.md`：无结构变化，跳过。
+- `docs/CommandCenter.md`：§5 PLC 从站章节补充"热更重建必须 Dispose 旧从站网络"说明，
+  第八部分版本记录追加 V2.14.23。
+- `AGENTS.md`：PLC 从站段落补充"热更重建旧 master 连接释放"红线。
+
+
 
 > 现场血泪：归档路径变成"一层套一层"的超长嵌套目录（实测 `E:\Images\2026年08月14日\SN\相机\NG`
 > 重复 4 层），且随配置保存越叠越深。根因 = `ImageStore` 把 `SubDirs` 里"整条完整路径模板"

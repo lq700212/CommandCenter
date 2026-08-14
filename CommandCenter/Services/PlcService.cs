@@ -131,8 +131,17 @@ namespace CommandCenter.Services
                 if (_listening && _network != null) return true;
 
                 // 先清旧资源
+                // ★ V2.14.23 热更断连修复：必须调用 _network.Dispose() 而不能只 Stop listener——
+                //   NModbus 3.0.83 的 ModbusTcpSlaveNetwork 实现了 IDisposable，其 Dispose() 会停止
+                //   TcpListener 并逐个关闭所有已连入的 PLC 主站 TCP 会话（ModbusMasterTcpConnection）。
+                //   旧代码只 _listener.Stop() + _cts.Cancel()：_cts.Cancel 只触发 NModbus 取消回调
+                //   Stop 监听器，已 accept 的 master socket 不会被关闭 → PLC 主站认为 TCP 连接还活着、
+                //   不会重连新从站 → SettingsForm 保存（ApplyRuntimeConfig→_plc.Dispose→重建）后
+                //   黄灯常亮、PLC 发请求上位机收不到。补上 _network.Dispose() 让旧主站 socket 真正
+                //   关闭，PLC 立即感知断连并重新连入新从站，黄灯转绿。
                 try { _cts?.Cancel(); } catch { }
-                try { _listener?.Stop(); } catch { }
+                try { _network?.Dispose(); } catch { }    // 关旧从站网络（含全部 master 连接 + listener）
+                try { _listener?.Stop(); } catch { }      // 双保险：network.Dispose 内部已 Stop listener
                 StopMasterPoll();   // 停旧轮询，重建成功后重新启动（防旧 Timer 读半新 _network）
                 _cts = null; _listener = null; _network = null; _slave = null; _dataStore = null;
 
@@ -196,6 +205,7 @@ namespace CommandCenter.Services
                     SetConnected(false);
                     StopMasterPoll();
                     try { _cts?.Cancel(); } catch { }
+                    try { _network?.Dispose(); } catch { }    // V2.14.23：释放已创建的网络对象，防 master 残留
                     try { _listener?.Stop(); } catch { }
                     _cts = null; _listener = null; _network = null; _slave = null; _dataStore = null;
                     _listening = false;
@@ -527,12 +537,18 @@ namespace CommandCenter.Services
         /// <summary>
         /// 清掉从站监听资源，强制下次 EnsureConnected 完整重建。
         /// 【必须在 lock 内调用】
+        /// ★ V2.14.23 热更断连修复：必须调用 _network.Dispose() 而不能只 Stop listener——
+        ///   NModbus 3.0.83 的 ModbusTcpSlaveNetwork.Dispose() 会关闭所有已连入的 PLC 主站 TCP 会话
+        ///   （ModbusMasterTcpConnection）。旧代码只 _listener.Stop() + _cts.Cancel()，已 accept 的
+        ///   master socket 不会被关闭，PLC 主站误以为连接仍活着、不重连新从站 → 热更后黄灯常亮、
+        ///   请求收不到（详见 EnsureConnected 顶部注释）。这里 Dispose 掉旧网络，PLC 立即断连重连。
         /// </summary>
         private void ResetConnection()
         {
             _listening = false;
             try { _cts?.Cancel(); } catch { }
-            try { _listener?.Stop(); } catch { }
+            try { _network?.Dispose(); } catch { }    // 关旧从站网络（含全部 master 连接 + listener）
+            try { _listener?.Stop(); } catch { }      // 双保险：network.Dispose 内部已 Stop listener
             StopMasterPoll();
             _cts = null; _listener = null; _network = null; _slave = null; _dataStore = null;
         }
@@ -556,6 +572,7 @@ namespace CommandCenter.Services
             {
                 LogHelper.Warn("PLC Dispose 未能拿到锁（后台监听繁忙），改走锁外强停");
                 try { _cts?.Cancel(); } catch { }
+                try { _network?.Dispose(); } catch { }    // V2.14.23：锁外同样要关旧网络（含 master 连接）
                 try { _listener?.Stop(); } catch { }
                 StopMasterPoll();
             }

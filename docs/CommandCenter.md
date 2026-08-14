@@ -744,6 +744,15 @@ FTP 目录取修改时间最新的一对**（`ImageStore.FindLatestPair`），�
   探测、间隔 5s）。此前 NModbus 从站不设 keepalive，汇川主站拔网线/断电（无 FIN/RST）时
   死会话不会自动清理，界面"主站已连入"三态灯会一直停在绿；启用后 TCP 栈判死约数十秒，
   NModbus 自动踢掉死会话，三态灯转红，主站恢复连入后再转绿。
+- **热更重建必须释放旧从站网络（V2.14.23，血泪）**：SettingsForm 点保存 → `ApplyRuntimeConfig`
+  会 `Dispose` 旧 `PlcService` 再 `BuildServices` 重建。**重建/释放时除 `_cts.Cancel()` 外必须调用
+  NModbus 从站网络的 `Dispose()`（`_network?.Dispose()`）**——NModbus 3.0.83 的
+  `ModbusTcpSlaveNetwork` 实现了 `IDisposable`，其 `Dispose()` 会停止 TcpListener 并**逐个关闭
+  所有已连入的主站 TCP 会话**。若只 Stop listener，已 accept 的 master socket 残留 → PLC 主站
+  认为连接仍活着、不重连新从站 → 新从站 Masters 恒为空 → 主界面 PLC 灯**卡黄**（监听就绪、
+  等待主站）且 PLC 发请求上位机收不到。修复：`PlcService` 三处清理点（`EnsureConnected` 重建前
+  /catch 分支、`ResetConnection` 及 `Dispose` 锁外强停）统一补 `_network?.Dispose()`，热更后
+  PLC 立即感知断连并重连，黄灯转绿。
 
 <a name="part5-s2"></a>
 ## 5.2 寄存器表速览与配置字段
@@ -1359,6 +1368,17 @@ SubDirs 为空时用模型默认含 `{相机}` 的四层 `{年月日}/{SN}/{相�
 # 第八部分 版本
 
 > 本部分保留原 `通讯接入.md` 的版本演进记录，最新在前。
+
+- V2.14.23（2026-08-14，热更/保存后 PLC 收不到请求修复）：SettingsForm 点保存后必现 PLC 异常——
+  主界面 PLC 灯变黄后一直卡黄、期间 PLC 发请求上位机收不到。根因 = 热更（`ApplyRuntimeConfig` →
+  `_plc.Dispose` → `BuildServices` 重建）时 `PlcService` 只 `_listener.Stop()` + `_cts.Cancel()`，
+  **从未调用 NModbus 从站网络的 `Dispose()`**。NModbus 3.0.83 的 `ModbusTcpSlaveNetwork` 实现了
+  `IDisposable`，其 `Dispose()` 会停止 TcpListener 并逐个关闭所有已连入的 master TCP 会话
+  （`ModbusMasterTcpConnection`）；而 `_cts.Cancel()` 只触发取消回调去 Stop 监听器，已 accept 的
+  master socket 残留 → PLC 主站认为连接还活着、不重连新从站 → 新从站 Masters 恒空、黄灯卡死、
+  请求写进废弃旧 socket。修复：`PlcService` 三处清理点（`EnsureConnected` 重建前 / catch 分支、
+  `ResetConnection` 及 `Dispose` 锁外强停）统一补 `_network?.Dispose()`，热更后 PLC 立即感知断连
+  并重连，黄灯转绿。同步 CHANGELOG（V2.14.23）/AGENTS.md（PLC 从站"热更重建释放旧网络"红线）。
 
 - V2.14.22（2026-08-14，归档目录"完整路径当一层"嵌套根治）：现场归档路径变成"一层套一层"的超长
   嵌套目录（实测 `E:\Images\2026年08月14日\SN\相机\NG` 重复 4 层且随保存越叠越深）。根因 =
