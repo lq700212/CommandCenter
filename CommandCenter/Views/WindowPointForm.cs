@@ -80,9 +80,14 @@ namespace CommandCenter.Views
     ///   【禁用窗口/点位（V1.12.28）】右键点击格子、或选中后点"禁用/启用"按钮切换某窗口的启停：
     ///   禁用的格子显示灰底"已禁用"；生效后主界面该窗口不显示（矩阵紧凑重排）、PLC 拍照请求写到
     ///   该点位时上位机不触发相机、不显示、不存图、不计数，直接把结果写成 3（跳过）让 PLC 走下一工位。
-    ///   所有改动先落在内存编辑副本上，点"确定"才写回 DisplayConfig.WindowEnabled、
+/// 所有改动先落在内存编辑副本上，点"确定"才写回 DisplayConfig.WindowEnabled、
     ///   WindowPointMaps 与各相机 ModelStationPrograms（同一实例引用，保证设置窗体保存时拿到最新值）；
     ///   WindowStationMap 已退役不再写回（见 DisplayConfig.WindowStationMap 注释）。
+    ///   【格子高亮配色（V2.14.21）】三种状态三种颜色、互不混淆：普通选中=浅黄（_selectedIdx，
+    ///   禁用/编辑按钮的定位高亮）；交换模式下第一次点选的起点=天蓝（_swapA）；交换完成（交换位置 /
+    ///   编辑点位自动互换）后参与互换的两扇窗=绿色（SwapDoneColor）闪烁 1.6s 后自动熄灭（_swapFlash +
+    ///   _flashTimer），明确告知用户"换完后的位置就是这两扇窗"。禁用格子高亮时只加同色粗边框、
+    ///   底色保持灰不换（见 RefreshCells/HighlightFor/ApplyCellHighlight）。
     /// </summary>
     public partial class WindowPointForm : Form
     {
@@ -108,6 +113,28 @@ namespace CommandCenter.Views
 
         /// <summary>交换模式里已选中的第一个窗口序号（-1 = 还没选第一个）。</summary>
         private int _swapA = -1;
+
+        /// <summary>
+        /// 交换完成后的"闪烁高亮"窗口序号集合（V2.14.21）：交换位置（SwapCells）或编辑点位自动互换
+        /// （EditSelectedPoint）完成后，参与互换的两扇窗加进本集合，用"交换完成绿"高亮闪烁一段时间，
+        /// 让用户一眼看到"刚换完的是哪两扇窗/换完后的位置在哪里"；计时结束后自动清空恢复普通底色。
+        /// 与 _selectedIdx（普通选中浅黄）、_swapA（交换起点天蓝）互相独立，HighlightFor 按优先级取色。
+        /// </summary>
+        private readonly List<int> _swapFlash = new List<int>();
+
+        /// <summary>交换完成闪烁的定时器（V2.14.21）：到时自动熄灭 _swapFlash 高亮，恢复普通格子底色。</summary>
+        private Timer _flashTimer;
+
+        /// <summary>普通选中高亮色（浅黄）："禁用/启用""编辑点位"按钮定位当前选中的格子（历史既有）。</summary>
+        private static readonly Color SelectedColor = Color.FromArgb(255, 224, 130);
+
+        /// <summary>交换起点高亮色（天蓝，V2.14.21）：交换模式下第一次点击选中的窗口，与普通选中
+        /// 的浅黄明显区分，让用户分得清"正在换的起点是哪扇窗"。</summary>
+        private static readonly Color SwapStartColor = Color.FromArgb(120, 190, 255);
+
+        /// <summary>交换完成高亮色（浅绿，V2.14.21）：交换完成后参与互换的两扇窗闪烁此色
+        /// （现场 OK=绿 的习惯，成功语义），明确告知"换完后的位置就是这两扇窗"。</summary>
+        private static readonly Color SwapDoneColor = Color.FromArgb(130, 220, 130);
 
         /// <summary>编辑副本（V1.12.28 窗口禁用）：与 _map 同下标表示"该窗口是否启用"，确定时整体写回。</summary>
         private readonly List<bool> _enabled;
@@ -264,6 +291,21 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             }
 
             InitializeComponent();      // 先解析设计器里的静态控件
+            // V2.14.21 交换完成闪烁定时器：SwapCells/EditSelectedPoint 互换后把两扇窗加入
+            // _swapFlash 绿色高亮，1600ms 后自动熄灭（Timer 不放 components 容器，FormClosed 手动释放
+            // 防句柄泄漏；WireEvents 尚未挂、此时 FormClosed 事件直接挂在本窗体上不受影响）。
+            _flashTimer = new Timer { Interval = 1600 };
+            _flashTimer.Tick += (s, e) =>
+            {
+                _flashTimer.Stop();
+                _swapFlash.Clear();
+                RefreshCells();
+            };
+            FormClosed += (s, e) =>
+            {
+                _flashTimer?.Stop();
+                _flashTimer?.Dispose();
+            };
             // DataError 兜底：DataGridViewComboBoxCell 单元格值不在下拉候选里时（旧配置里非法点位/
             // 程序号、切型号窗口期 _matrixModel 与 _programModel 不一致等边界），DataGridView 默认会
             // 弹"值无效"异常对话框。ReloadProgramGrid 已把候选补齐/规范化，这里再兜底吞掉漏网的，
@@ -728,7 +770,8 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             {
                 if (_swapA < 0)
                 {
-                    _swapA = idx;                      // 第一次点击：记起点并高亮
+                    _swapA = idx;                      // 第一次点击：记起点并高亮（天蓝，见 RefreshCells）
+                    _swapFlash.Clear();                // 起点换成新窗口，先清掉上一次交换完成的闪烁残留
                     lblHint.Text = "已选中" + (idx + 1) + "号窗口作为交换起点，请再点一个要互换点位的窗口（可跨相机）。";
                     RefreshCells();
                 }
@@ -738,8 +781,8 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                     int a = _swapA;
                     _swapA = -1;
                     _swapping = false;
-                    SwapCells(a, b);
-                    lblHint.Text = HintDefault;
+                    _selectedIdx = -1;
+                    SwapCells(a, b);                   // SwapCells 内部负责"交换完成绿色闪烁 + 提示文案"
                 }
                 return;
             }
@@ -925,6 +968,11 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                     _enabled[conflict] = tmpEn;
                 }
                 LogHelper.Info($"窗口 {_selectedIdx + 1} 点位改为「{options[sel].Item2}」，原占用窗口 {conflict + 1} 与本窗口互换（禁用状态随点位迁移，点确定后生效）");
+                // V2.14.21：自动互换后同样闪烁提示（与 SwapCells 共用 FlashSwap 高亮"交换完成绿"），
+                // 告知用户"窗口 X ↔ 窗口 Y 已互换、换完后的位置是这两扇"。
+                FlashSwap(_selectedIdx, conflict, "编辑点位完成：窗口 " + (_selectedIdx + 1) + " ↔ 窗口 " +
+                    (conflict + 1) + " 已自动互换点位（绿色高亮的两个窗口就是换完后的位置，点【确定】保存生效）。\r\n" +
+                    HintDefault);
             }
             else
             {
@@ -942,6 +990,11 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         {
             _swapping = !_swapping;
             _swapA = -1;
+            // V2.14.21：进入/退出交换模式的瞬间清掉普通选中与旧的交换完成闪烁，避免两者残留高亮
+            // 干扰"交换起点天蓝"的判断（此前 _selectedIdx 未清，普通选中格会一直浅黄挂着）。
+            _selectedIdx = -1;
+            _swapFlash.Clear();
+            _flashTimer?.Stop();
             lblHint.Text = _swapping
                 ? "交换模式：请依次点击两个要互换点位的窗口（可跨相机；交换的是\"窗口↔归属相机·点位号\"\r\n" +
                   "的对应关系，不改相机自身的点位/程序表）。再次点击\"交换位置\"按钮可取消交换模式。"
@@ -988,7 +1041,30 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             LogHelper.Info($"交换窗口 {a + 1} ↔ {b + 1} 的点位（{ResolveWindowSource(a + 1)} / {ResolveWindowSource(b + 1)}），禁用状态随点位迁移（点确定后生效）");
             _selectedIdx = -1;
             RefillStationColumn();
+            // V2.14.21：交换完成后把参与互换的两扇窗加进 _swapFlash 绿色闪烁高亮 + 更新提示文案，
+            // 明确告知用户"换完后的位置就是这两扇窗"；计时结束自动熄灭（见 _flashTimer.Tick）。
+            FlashSwap(a, b, "交换完成：窗口 " + (a + 1) + " ↔ 窗口 " + (b + 1) +
+                " 已互换点位（绿色高亮的两个窗口就是换完后的位置，点【确定】保存生效）。\r\n" + HintDefault);
             RefreshCells();
+        }
+
+        /// <summary>
+        /// 交换完成后的"闪烁高亮"提示（V2.14.21）：把参与互换的两扇窗（a、b，0 起序号）加进
+        /// _swapFlash 集合，用"交换完成绿"高亮，并更新提示文案；1.6s 后 _flashTimer 到时自动熄灭。
+        /// SwapCells（【交换位置】按钮）与 EditSelectedPoint（【编辑点位】选中被另一窗口占用的点位时
+        /// 自动互换）共用——不管走哪条路换了点，用户都能一眼看到刚换完的是哪两扇窗。
+        /// </summary>
+        private void FlashSwap(int a, int b, string hint)
+        {
+            _swapFlash.Clear();
+            if (a >= 0) _swapFlash.Add(a);
+            if (b >= 0 && b != a) _swapFlash.Add(b);
+            if (_flashTimer != null)
+            {
+                _flashTimer.Stop();
+                _flashTimer.Start();
+            }
+            if (!string.IsNullOrEmpty(hint)) lblHint.Text = hint;
         }
 
         /// <summary>
@@ -1007,6 +1083,8 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             _selectedIdx = -1;
             _swapA = -1;
             _swapping = false;
+            _swapFlash.Clear();    // V2.14.21：恢复默认不产生"交换"语义，清掉残留的交换完成闪烁
+            _flashTimer?.Stop();
             RefillStationColumn();
             RefreshCells();
         }
@@ -1014,8 +1092,10 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         /// <summary>
         /// 刷新所有格子的显示：窗口编号 + "相机名·点位号"（V2.12.1 起自适应/非自适应统一用
         /// 相机点位表标注——点位由相机表唯一决定，上下相机同号点位靠相机名区分开）。
-        /// 选中的格子用浅黄高亮；【禁用的格子（V1.12.28）灰底 + "已禁用"】
-        /// （禁用后主界面不显示该窗口、PLC 拍到此点位直接跳过）。
+        /// 高亮优先级（V2.14.21）：交换完成闪烁（_swapFlash 绿）> 交换起点选中（_swapA 天蓝）>
+        /// 普通选中（_selectedIdx 浅黄）> 无高亮——三种高亮颜色互相区分，见 HighlightFor。
+        /// 【禁用的格子（V1.12.28）灰底 + "已禁用"】；高亮时底色保持灰、改用同色粗边框提示
+        /// （不能换底色，否则丢失"已禁用"的视觉语义）。
         /// 【空窗口（V2.14.18）】未配置点位的格子浅灰底 + "空窗口（无点位）"，可用【交换位置】
         /// 把点位搬进来（编辑点位/禁用启用不支持空窗口，见 UpdateActionButtons）。
         /// </summary>
@@ -1027,36 +1107,69 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 var b = _cells[r, c];
                 bool disabled = i >= _enabled.Count || !_enabled[i];
                 bool empty = IsEmptyWindow(i + 1);
+                Color? hl = HighlightFor(i);
                 if (disabled)
                 {
-                    // 禁用：灰底 + 灰字，醒目区分于普通格子
+                    // 禁用：灰底 + 灰字，醒目区分于普通格子；处于高亮状态时用同色粗边框提示
                     b.Text = $"窗口 {i + 1}\r\n已禁用";
                     b.BackColor = Color.FromArgb(222, 222, 222);
                     b.ForeColor = Color.FromArgb(150, 150, 150);
-                    b.FlatStyle = FlatStyle.Flat;
+                    b.UseVisualStyleBackColor = true;
+                    b.FlatAppearance.BorderColor = hl ?? Color.FromArgb(180, 180, 180);
+                    b.FlatAppearance.BorderSize = hl.HasValue ? 3 : 1;
                 }
                 else if (empty)
                 {
                     // 空窗口（V2.14.18）：主界面占位格子、未配置点位（默认=非自适行列乘积多出的格），
-                    // 浅灰底 + 灰字提示，可用【交换位置】把点位搬进来
+                    // 浅灰底 + 灰字提示，可用【交换位置】把点位搬进来；高亮时直接换高亮底色
                     b.Text = $"窗口 {i + 1}\r\n空窗口（无点位）";
                     b.ForeColor = Color.FromArgb(140, 140, 140);
-                    b.BackColor = (i == _selectedIdx)
-                        ? Color.FromArgb(255, 240, 200)
-                        : Color.FromArgb(245, 245, 245);
-                    b.UseVisualStyleBackColor = (i != _selectedIdx);
+                    ApplyCellHighlight(b, hl, Color.FromArgb(245, 245, 245));
                 }
                 else
                 {
                     b.Text = $"窗口 {i + 1}\r\n{ResolveWindowSource(i + 1)}";
                     b.ForeColor = Color.Black;
-                    b.BackColor = (i == _selectedIdx)
-                        ? Color.FromArgb(255, 224, 130)
-                        : SystemColors.Control;
-                    b.UseVisualStyleBackColor = (i != _selectedIdx);
+                    ApplyCellHighlight(b, hl, SystemColors.Control);
                 }
             }
             UpdateActionButtons();
+        }
+
+        /// <summary>
+        /// 格子高亮色判定（V2.14.21）：按优先级返回应显示的高亮色，无高亮返回 null。
+        /// ① 交换完成闪烁（_swapFlash，交换完成绿）> ② 交换起点选中（_swapA，交换起点天蓝）>
+        /// ③ 普通选中（_selectedIdx，浅黄）。
+        /// 为什么这样分层：普通选中是"禁用/启用""编辑点位"按钮的定位高亮；交换模式第一次点选的
+        /// 起点用天蓝、与浅黄明显区分，用户分得清"正在换的起点是哪扇窗"；交换完成后两扇窗用
+        /// 绿色（现场 OK=绿 的成功语义）闪烁，明确告知"换完后的位置就在这两扇"。
+        /// </summary>
+        private Color? HighlightFor(int i)
+        {
+            if (_swapFlash.Contains(i)) return SwapDoneColor;
+            if (_swapping && _swapA == i) return SwapStartColor;
+            if (_selectedIdx == i) return SelectedColor;
+            return null;
+        }
+
+        /// <summary>统一应用格子的"高亮/普通"底色与边框（V2.14.21）：高亮时换高亮底色 +
+        /// 同色系加深粗边框（更醒目）；无高亮时恢复 fallbackBack 普通底色 + 细灰边。</summary>
+        private static void ApplyCellHighlight(Button b, Color? hl, Color fallbackBack)
+        {
+            if (hl.HasValue)
+            {
+                b.BackColor = hl.Value;
+                b.UseVisualStyleBackColor = false;
+                b.FlatAppearance.BorderColor = ControlPaint.Dark(hl.Value, 0.2f);
+                b.FlatAppearance.BorderSize = 3;
+            }
+            else
+            {
+                b.BackColor = fallbackBack;
+                b.UseVisualStyleBackColor = false;
+                b.FlatAppearance.BorderColor = Color.FromArgb(180, 180, 180);
+                b.FlatAppearance.BorderSize = 1;
+            }
         }
 
         /// <summary>

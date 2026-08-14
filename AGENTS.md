@@ -72,6 +72,13 @@
   点位搬到哪扇窗、禁用就跟到哪扇窗，绝不能互换后禁用还留在旧窗口（否则旧窗口换来的点位照常拍、
   新窗口搬入的被禁点位却还在跑）。存储层 WindowEnabled 仍是"窗口序号→布尔"、与 WindowPointMaps 同长
   对齐，交换时成对搬移即等效"禁用跟点位走"；两处交换都带下标越界防御。
+  **格子高亮三态配色（V2.14.21，UI 视觉约定）**：WindowPointForm 的格子有三种高亮颜色、互不混淆——
+  普通选中=浅黄（`SelectedColor`，禁用/编辑按钮定位）、交换模式下第一次点选的起点=天蓝（`SwapStartColor`）、
+  交换完成（SwapCells / EditSelectedPoint 自动互换）后参与互换的两扇窗=绿色（`SwapDoneColor`，现场 OK=绿
+  成功语义）闪烁约 1.6s 后熄灭（`_swapFlash` + `_flashTimer`，FormClosed 手动 Dispose 防句柄泄漏）。
+  高亮判定统一走 `HighlightFor`（优先级：交换完成绿 > 交换起点天蓝 > 普通选中浅黄），渲染统一走
+  `ApplyCellHighlight`；**被禁用的格子高亮时保持灰底、只加同色粗边框，绝不能换底色**（否则丢失
+  "已禁用"视觉语义）。改高亮渲染先读这两处，禁止各分支各写一套。
   **编辑副本深拷贝红线（V2.14.2 血泪）**：WindowPointForm 的 `_windowPointEdits` 必须用 `ClonePoints`
   深拷贝 `WindowPointMaps` 里持久化的 Points 列表当编辑副本——**绝不许直接引用目标列表对象**（此前
   引用导致交换/编辑/恢复默认立刻污染 `_cfg`，用户点【取消】也生效、后续保存照落盘）；点【确定】OnOk
