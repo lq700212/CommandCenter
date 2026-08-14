@@ -1214,6 +1214,19 @@ string model = Encoding.ASCII.GetString(bytes, 0, end);
 
 > 本部分保留原 `通讯接入.md` 的版本演进记录，最新在前。
 
+- V2.13.11（2026-08-14，CameraId 审查风险修复：改号迁移/唯一性校验/补号语义）：按 `docs/CameraId审查报告.md`
+  逐条排查并修复 3 条风险（R4 下标对齐属安全侧不改）。
+  **① R1 改号后 WindowPointMaps 不迁移**：`WindowPointMaps` 条目只校验长度与旧格式（`CameraId<=0`），
+  相机改号后旧条目仍是孤儿编号（>0 却查不到对应相机），运行时 `ResolveWindowPointMap` 也只看长度不看
+  ID 有效性 → `TryResolveActiveWindow` 按 (孤儿ID,点位) 永远反查不到窗口，该相机全部点位被判跳 3（罢工）。
+  修复：新增 `DisplayConfig.PointMapValidForCameras`（有效 ID 集合=`CameraId>0` 真编号、0 行序兜底，
+  与铺排/反查同一把钥匙）；`EnsureWindowPointMaps` 重置条件并入孤儿检测（替换 `ContainsLegacyCameraIndex`），
+  `ResolveWindowPointMap` 运行时也防御——加载/保存清理 + 运行双保险，改号即自动重置为新编号默认铺排。
+  **② R2 CameraId 重复无校验**：`SettingsForm.OnSave` 最开头加唯一性拦截，两相机同号弹窗并中止本次保存。
+  **③ R3 补号撞号**：`EnsureCameraIdentity` 改三遍分配——先收集已固定 ID，IP 匹配默认相机优先取真编号
+  （213→2、212→1，不能被自定义相机抢），自定义相机取"第一个未被占用正整数"（替换行序 `i+1`），全局唯一；
+  `Save` 也补调 `EnsureCameraIdentity`（新增相机 ID=0 写盘前统一补号）。涉及：`Models/AppConfig.cs`、
+  `Utils/ConfigStore.cs`、`Views/SettingsForm.cs`。协议/寄存器/相机指令不变，仅配置归一与校验增强。
 - V2.13.10（2026-08-14，扫码枪 TCP 连接超时补日志）：现场反馈"扫码枪好像一直在触发、但上位机读不到码"。
   排查发现 TCP 扫码枪**从未成功建立连接**（日志无一条"已连接"，也无"收到条码"），而 `TryConnect` 的
   **连接超时分支此前完全静默**（只有 catch 异常分支才记"连接失败"），日志里一片空白无从定位。本次给

@@ -662,11 +662,52 @@ namespace CommandCenter.Models
                 if (m == null || m.Points == null) continue;
                 if (string.Equals(m.ModelName, productModel, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (m.Points.Count == def.Count) return m.Points;   // 长度一致 → 用用户映射
-                    return def;                                        // 数量变了 → 回退默认
+                    // V2.13.10：长度一致【且】所有条目的 CameraId 都指向真实存在的相机，
+                    // 才返回用户手动编辑过的映射；否则回退默认铺排。
+                    // 【为什么必须校验 CameraId】改号/删相机后，旧映射里的 CameraId 变成孤儿——
+                    // 它 >0 又 ≠ 任何相机的真编号，旧的"CameraId<=0 即旧格式"判定抓不到；
+                    // 若运行时用了孤儿表，TryResolveActiveWindow 按 (孤儿ID,点位) 永远反查不到
+                    // 窗口 → 该相机全部点位被当作"不归本相机"返回假、结果写 3（整台相机罢工）。
+                    // 本校验与 ConfigStore.EnsureWindowPointMaps（加载/保存清理）共用同一套规则，
+                    // 双保险保证运行时拿到的映射永不包含孤儿 ID。
+                    if (m.Points.Count == def.Count && PointMapValidForCameras(cameras, m.Points))
+                        return m.Points;   // 长度与 ID 都合法 → 用用户映射
+                    return def;            // 数量变了或含孤儿 ID → 回退默认
                 }
             }
             return def;
+        }
+
+        /// <summary>
+        /// 校验"窗口↔点位映射表"所有条目的 CameraId 是否都指向真实存在的相机（V2.13.10 引入）。
+        /// 【为什么需要】映射条目存 CameraId（相机真编号，见 WindowPointItem）；若某台相机的
+        ///   CameraId 被改号（设置页"相机ID"列或手改 json）/相机被删除，旧映射里的 CameraId 就
+        ///   变成"孤儿 ID"——它 >0 却又 ≠ 任何相机的真编号，而旧的"CameraId<=0 即旧格式"判定
+        ///   抓不到它（旧格式是缺失字段=0，改号后的孤儿是"值仍在但已无对应相机"）。
+        /// 【判定】收集当前相机列表的"有效 ID 集合"：CameraId>0 用真编号、0 用行序兜底
+        ///   （与 DefaultWindowPointMap / ProductionCoordinator.CameraIdFor 同一套兜底规则，保证
+        ///   "编辑候选"、"默认铺排"、"运行时反查"用同一把钥匙）；映射里只要有一个条目的
+        ///   CameraId 不在集合中 → 判为无效（return false），调用方应重置该型号为默认铺排。
+        /// 【调用方】ConfigStore.EnsureWindowPointMaps（加载/保存时清理孤儿表）与
+        ///   ResolveWindowPointMap（运行时解析防御）统一走本方法，两端规则绝不漂移。
+        /// </summary>
+        /// <param name="cameras">当前相机列表（可含 null 元素，空安全跳过）</param>
+        /// <param name="points">要校验的窗口↔点位映射表（null 视为无效）</param>
+        /// <returns>true=所有条目均指向存在的相机；false=含孤儿/空条目</returns>
+        public static bool PointMapValidForCameras(
+            IEnumerable<CameraConfig> cameras, IEnumerable<WindowPointItem> points)
+        {
+            if (points == null) return false;
+            var ids = new HashSet<int>();          // 当前相机列表的有效 ID 集合（全局唯一判定基准）
+            int ci = 0;                            // 行序兜底下标（与 DefaultWindowPointMap 一致）
+            foreach (var cam in cameras ?? new List<CameraConfig>())
+            {
+                if (cam != null) ids.Add(cam.CameraId > 0 ? cam.CameraId : ci + 1);
+                ci++;                              // null 元素也累加下标，保行序与铺排一致
+            }
+            foreach (var p in points)
+                if (p == null || !ids.Contains(p.CameraId)) return false;
+            return true;
         }
 
         /// <summary>

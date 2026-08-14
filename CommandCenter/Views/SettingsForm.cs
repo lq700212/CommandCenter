@@ -630,6 +630,28 @@ namespace CommandCenter.Views
         /// 把界面值回写内存配置（V1.6.0：保存后由 MainForm 热生效，免重启）。</summary>
         private void OnSave(object sender, EventArgs e)
         {
+            // V2.13.10【R2 拦截】相机ID唯一性校验——放在最开头、任何配置回写之前：
+            // 若两台相机填了同一个 CameraId(>0)，运行时 IndexOfCamera 恒命中第一台 →
+            // 相机路由/存图目录/结果通道张冠李戴（审查报告 R2）。发现重复立即提示并中止本次保存
+            // （return），保证 _cfg 一个字段都不改；0（未填）不算重复——后续由
+            // ConfigStore.EnsureCameraIdentity 全局唯一补号，天然不会撞。
+            var camIds = new HashSet<int>();
+            foreach (DataGridViewRow r in gridCameras.Rows)
+            {
+                if (r.IsNewRow) continue;   // 末尾"新行"占位行跳过
+                string ip = r.Cells["IpAddress"].Value == null ? "" : r.Cells["IpAddress"].Value.ToString().Trim();
+                if (string.IsNullOrWhiteSpace(ip)) continue; // 空行/未填IP行（收集时也会剔除）
+                int id = 0;
+                string idTxt = r.Cells["CameraId"].Value == null ? "" : r.Cells["CameraId"].Value.ToString();
+                if (int.TryParse(idTxt, out id) && id > 0 && !camIds.Add(id))
+                {
+                    MessageBox.Show($"相机ID不能重复：已存在「相机{id}」。请把其中一台改成别的编号（>0），" +
+                        "或清空该项让保存时自动补一个不重复的编号。", "相机ID重复",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return; // 中止本次保存，_cfg 未做任何回写
+                }
+            }
+
             _cfg.Plc.IpAddress = txtPlcIp.Text.Trim();
             _cfg.Plc.Port = (int)nudPlcPort.Value;
             // 固定产品型号（V2.7 协议）：保存后每次扫码上位机把型号写入 PLC 40007~40011；
