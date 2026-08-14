@@ -236,7 +236,7 @@ namespace CommandCenter.Views
             // 
             this.btnDisable.Location = new System.Drawing.Point(350, 614);
             this.btnDisable.Name = "btnDisable";
-            this.btnDisable.Size = new System.Drawing.Size(70, 30);
+            this.btnDisable.Size = new System.Drawing.Size(100, 30);
             this.btnDisable.TabIndex = 15;
             this.btnDisable.Text = "禁用/启用";
             this.btnDisable.UseVisualStyleBackColor = true;

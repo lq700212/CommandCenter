@@ -344,7 +344,7 @@ namespace CommandCenter.Views
             // 现场觉得气泡挡画面可取消勾选。位于"显示窗口编号"右侧、垂直居中对齐。
             //
             this.chkWindowToolTip.AutoSize = true;
-            this.chkWindowToolTip.Location = new System.Drawing.Point(402, 219);
+            this.chkWindowToolTip.Location = new System.Drawing.Point(414, 219);
             this.chkWindowToolTip.Name = "chkWindowToolTip";
             this.chkWindowToolTip.Size = new System.Drawing.Size(90, 23);
             this.chkWindowToolTip.TabIndex = 18;
