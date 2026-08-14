@@ -39,7 +39,7 @@ namespace CommandCenter.Services
         private Thread _thread;
         private DateTime _lastAttempt = DateTime.MinValue;
         private readonly StringBuilder _line = new StringBuilder();
-        private bool _connectedEver;   // 是否成功连上过（重连失败日志降噪）
+        private DateTime _lastFailLogAt = DateTime.MinValue;   // 上次记录"连接失败/超时"日志的时间（30s 节流，防刷屏）
         private volatile bool _disposed;
         private bool _connected;        // 当前连接状态缓存，用于 ConnectionChanged 边沿检测（状态没变不发事件）
 
@@ -162,6 +162,10 @@ namespace CommandCenter.Services
                 {
                     // V1.12.6：连接失败也通知订阅方（对齐 PLC/相机"连接失败→状态灯变红"）。
                     // 边沿检测：_connected 已是 false 时不重复发事件，无日志循环负担。
+                    // V2.13.10 补充：超时分支此前完全静默（只有 catch 异常分支才记"连接失败"），
+                    //   现场"Test-NetConnection 通但软件一直红灯"时日志里一片空白，无从排查。
+                    //   这里改为记一条（30s 节流，见 LogConnectFailure），说明是"超时+持续重连"。
+                    LogConnectFailure("连接超时");
                     SetConnected(false);
                     try { tcp.Close(); } catch { }
                     return null;
@@ -183,7 +187,6 @@ namespace CommandCenter.Services
                 var stream = tcp.GetStream();
                 _tcp = tcp;
                 _stream = stream;
-                _connectedEver = true;
                 LogHelper.Info($"扫码枪(TCP)已连接 {_cfg.IpAddress}:{_cfg.Port}");
                 // V1.12.5：通知订阅方（功能测试窗体状态灯）连接已成功。放日志后、发触发指令前，
                 // 保证状态第一时间变绿；触发指令发送失败会走断流分支自动重连，状态灯随后转红。
@@ -198,14 +201,28 @@ namespace CommandCenter.Services
                 try { tcp?.Close(); } catch { }
                 _tcp = null;
                 _stream = null;
-// 连接失败只记一条日志（重连期间静默，避免每 3s 刷一行）
-                    if (!_connectedEver)
-                        LogHelper.Warn($"扫码枪(TCP)连接失败 {_cfg.IpAddress}:{_cfg.Port}（后台持续重连）");
-                    // V1.12.6：失败也通知订阅方（对齐 PLC/相机"连接失败→状态灯变红"）。
-                    // 边沿检测：状态没变（已是 false）不发重复事件，重连期间无事件风暴。
-                    SetConnected(false);
-                    return null;
+                // 连接失败记一条日志（30s 节流，见 LogConnectFailure；重连期间静默，避免每 3s 刷一行）
+                LogConnectFailure("连接失败");
+                // V1.12.6：失败也通知订阅方（对齐 PLC/相机"连接失败→状态灯变红"）。
+                // 边沿检测：状态没变（已是 false）不发重复事件，重连期间无事件风暴。
+                SetConnected(false);
+                return null;
             }
+        }
+
+        /// <summary>
+        /// 记一条扫码枪连接失败/超时日志（V2.13.10 统一降噪）。
+        /// 【为什么需要节流】断线重连节流是 3s，若每 3s 刷一条 WARN 会刷屏淹没有用日志；
+        ///   故无论"超时"还是"异常"分支，都先检查距上次记录是否已过 30s，过了才记——
+        ///   现场排查时 30s 内至少一条能定位"连不上"的根因方向，又不至于刷爆日志。
+        /// 【什么时候不打】刚记过（30s 内）再失败 → 静默等待，避免同因重复刷。
+        ///   曾连上过再断线的场景由 MarkDown 的边沿日志负责，不在此重复。
+        /// </summary>
+        private void LogConnectFailure(string kind)
+        {
+            if ((DateTime.Now - _lastFailLogAt).TotalSeconds < 30) return; // 节流：30s 内只记一次
+            _lastFailLogAt = DateTime.Now;
+            LogHelper.Warn($"扫码枪(TCP){kind} {_cfg.IpAddress}:{_cfg.Port}（{ConnectTimeoutMs}ms，后台持续重连）");
         }
 
         /// <summary>
