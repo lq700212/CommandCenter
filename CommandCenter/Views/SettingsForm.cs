@@ -155,12 +155,14 @@ namespace CommandCenter.Views
             {
                 var layout = DisplayConfig.AutoFitLayout(_cfg.Cameras, cmbModel.Text?.Trim() ?? "");
                 nudRows.Value = Math.Max(1, Math.Min(10, layout.rows));
-                nudCols.Value = Math.Max(1, Math.Min(10, layout.cols));
+                nudCols.Value = Math.Max(1, Math.Min(7, layout.cols)); // 自适应列数上限 7（V2.14.15 与手填一致）
             }
             else
             {
-                nudRows.Value = _cfg.Display.Rows;
-                nudCols.Value = _cfg.Display.Columns;
+                // 非自适：按配置手填值回填。行数上限 10、列数上限 7（V2.14.15 起列数与自适应一致
+                // 最多 7 列）；配置被手改成超限值时先钳到上限再赋给 nud.Value，防止越界抛异常。
+                nudRows.Value = Math.Max(1, Math.Min(10, _cfg.Display.Rows));
+                nudCols.Value = Math.Max(1, Math.Min(7, _cfg.Display.Columns));
             }
             // V2.13：点位编辑已放开（两模式都可编辑，见 WindowPointForm），ToolTip 说明可编辑能力
             tip.SetToolTip(btnEditPoints, AutoFitPointsButtonTip);

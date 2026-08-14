@@ -812,7 +812,8 @@ namespace CommandCenter.Views
                 grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100f / rows));
 
             // V2.14：铺满 vs 滚动。行少 → grid 占满滚动宿主（窗口尽量大、占满整个显示区域）；
-            // 行多放不下 → 固定每行最小高度让矩阵变长，由 pnlWindowScroll（AutoScroll）出竖直滚动条。
+            // V2.14.15：每行最小高度按显示区高度动态算（显示区高/10），行数≤10 恒铺满平分显示区，
+            // 只有行数 >10 才由 pnlWindowScroll（AutoScroll）出竖直滚动条（见 ApplyGridScrollLayout）。
             ApplyGridScrollLayout(grid, rows);
 
             // 逐窗口编号创建：禁用的窗口不建控件（从矩阵移除），启用的按顺序紧凑填格子。
@@ -861,19 +862,30 @@ namespace CommandCenter.Views
         }
 
         /// <summary>
-        /// 窗口矩阵"每行最小高度"（V2.14，滚动阈值）：当 行数×本高度 超过滚动宿主可视高度时，
+        /// 窗口矩阵"每行最小高度下限"（V2.14 固定 160；V2.14.15 起改为按显示区高度动态算，
+        /// 本常量只作下限，见 ApplyGridScrollLayout）：当 行数×每行最小高度 超过滚动宿主可视高度时，
         /// 窗口不再被继续压缩，而是切换成"滚动模式"——每行固定本高度、超出部分由外侧滚动条翻看。
-        /// 取 160：既保证基恩士画面缩到最小时仍可辨识，又不会因为行数稍多就让窗口塌成一条缝。
+        /// 取 60：极端行数（如手填列太少自动补行）滚动兜底时，画面缩到本下限仍勉强可辨识；
+        /// 常规行数（≤10）下由动态阈值保证铺满平分显示区，根本到不了本下限。
         /// </summary>
-        private const int MinWindowRowHeight = 160;
+        private const int MinWindowRowHeight = 60;
 
         /// <summary>
-        /// 切换窗口矩阵的"铺满 / 滚动"两种形态（V2.14）：
+        /// 切换窗口矩阵的"铺满 / 滚动"两种形态（V2.14；V2.14.15 阈值改动态）：
         ///   - 铺满（grid.Dock=Fill）：行样式百分比等分、矩阵占满整个窗口显示区——1 个窗口即最大
         ///     尺寸占满，2 个即左右平分，4 个即 2×2 等分，符合"不要多余空白"的自适应预期；
-        ///   - 滚动（grid.Dock=Top + 定高）：行数×MinWindowRowHeight 超过宿主可视高度时，
+        ///   - 滚动（grid.Dock=Top + 定高）：行数×每行最小高度 超过宿主可视高度时，
         ///     矩阵按最小行高定高变长，pnlWindowScroll（AutoScroll=true）自动出右侧竖直滚动条，
         ///     鼠标滚轮 / 滑块翻看，标题栏与状态栏不随滚动。
+        /// 【V2.14.15 每行最小高度动态化 = 显示区高/10（下限 MinWindowRowHeight=60）】：
+        ///   设置窗体"行数"输入框上限就是 10，而 10 ×（显示区高/10）= 显示区高，故行数 ≤10 时
+        ///   矩阵高度恒 ≤ 显示区 → 一律走【铺满】——"设置几行就几行平分显示区高度"，行高 = 显示区高/
+        ///   行数，与自适应的铺满效果完全一致（自适应行数通常更少，铺满本来就是它的默认形态）；
+        ///   只有行数 >10（如非自适手填列数太少导致自动补行、或极端窗口数）才切【滚动】兜底，
+        ///   每行高度 = 显示区高/10，超出部分靠滚动条翻看。
+        /// 【为什么改（V2.14.15 现场反馈）】此前每行最小高度固定 160：非自适设 7 行 → 7×160=1120
+        ///   超过显示区可视高（约 950~1000）→ 误触发滚动，行高被固定 160、后面几行要滚着看，
+        ///   与"设置行数后窗口高度应平分显示区"的预期不符；自适应效果好正是行数少、总是铺满。
         /// 【为什么以像素高度判定而不看行数】窗体 FixedSingle 全屏铺满（高度≈屏幕工作区），
         /// 用"行数×最小行高 > 可视高"能精确做到"放得下就占满、放不下才滚动"，与分辨率无关。
         /// 构造期宿主高度还没跟上（设计器默认值），先保守铺满；OnShown 铺到实际工作区后
@@ -887,12 +899,17 @@ namespace CommandCenter.Views
                 grid.Dock = DockStyle.Fill;   // 宿主尺寸未知（构造期）→ 保守铺满，OnShown 会重算
                 return;
             }
-            int minH = rows * MinWindowRowHeight + grid.Padding.Vertical;   // 滚动模式下矩阵应占高度
-            bool scroll = minH > host.ClientSize.Height;                    // 放不下才出滚动条
+            // 矩阵可用高度 = 宿主可视高 − 矩阵内边距（Padding 上下各 6）。用可用高而非原始高，
+            // 保证 10 行铺满时不会因 12px 内边距多出而误判成"放不下"去滚动。
+            int avail = host.ClientSize.Height - grid.Padding.Vertical;
+            // 每行最小高度（滚动阈值）= 显示区高/10（下限 60）：10 行 × 高/10 = 显示区高，
+            // 因此用户手填行数（≤10）恒能铺满平分显示区；只有行数 >10 才滚动。
+            int minRowHeight = Math.Max(MinWindowRowHeight, avail / 10);
+            bool scroll = rows * minRowHeight > avail;                    // 放不下才出滚动条
             if (scroll)
             {
                 grid.Dock = DockStyle.Top;      // Top：宽随宿主、高用自定值 → 超出后宿主出竖直滚动条
-                grid.Height = minH;
+                grid.Height = rows * minRowHeight + grid.Padding.Vertical;
                 grid.AutoScroll = false;        // grid 自身不滚，滚动交给外层宿主
             }
             else

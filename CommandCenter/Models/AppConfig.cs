@@ -573,7 +573,10 @@ namespace CommandCenter.Models
         ///     22→4×6、28→4×7（铺满）。行多放不下时主窗体自动出竖直滚动条（见
         ///     MainForm.ApplyGridScrollLayout）。
         ///   - 非自适应：列 = 手填 Columns、行 = 手填 Rows（乘积不够自动补行），
-        ///     手填只决定排列宽度，窗口数仍=点位和，保证与自适应窗口↔点位一一对应。
+        ///     手填只决定排列宽度，窗口数仍=点位和，保证与自适应窗口↔点位一一对应；
+        ///     主窗体显示时两种模式走同一套"按显示区高度动态铺满/滚动"逻辑（V2.14.15：
+        ///     行数≤10 一律铺满平分显示区高度，行高=显示区高/行数，与自适应铺满效果一致，
+        ///     见 MainForm.ApplyGridScrollLayout）。
         /// 勾选自适应后，设置在设置窗体的"显示窗口"行、切型号（标题栏/设置页）时自动重算；
         /// 【为什么加】现场 28 个窗口点位由两台相机分工，窗口数与型号点位强相关，手填行列容易
         /// 对不上；让窗口数跟随点位自动铺排，换型号即所见即所得。
@@ -608,9 +611,10 @@ namespace CommandCenter.Models
         ///     取"行+列"最小的方案（越接近方形越好），并列时列数多者优先（优先增加列）——
         ///     效果是让缺的格子集中在最后一行且最少，窗口尽量大、占满显示区域；
         ///     例：1→1×1、2→1×2、3→1×3、4→2×2、5→2×3、6→2×3、7→2×4、28→4×7。
-        ///   - 非自适应（autoFit=false）：列 = 手动 columns（≥1）、行 = 手动 rows（≥1）；
-        ///     手填的 rows×columns 若放不下全部窗口，自动补行到 ceil(总数/列)（多余格子留空），
-        ///     保证"窗口↔相机点位一一对应"与自适应一致，手填行列只决定排列宽度。
+        ///   - 非自适应（autoFit=false）：列 = 手动 columns（≥1，上限 7，与自适应一致）、
+        ///     行 = 手动 rows（≥1）；手填的 rows×columns 若放不下全部窗口，自动补行到
+        ///     ceil(总数/列)（多余格子留空），保证"窗口↔相机点位一一对应"与自适应一致，
+        ///     手填行列只决定排列宽度。
         /// 主窗体 BuildWindowGrid / WindowPointForm / 设置页预览 / ConfigStore 统一调用。
         /// </summary>
         public static (int rows, int cols, int windowCount) ResolveLayout(
@@ -635,7 +639,11 @@ namespace CommandCenter.Models
                 }
                 return (bestRows, bestCols, total);
             }
-            int cols2 = Math.Max(1, manualCols);
+            // 非自适应：列 = 手填 columns、行 = 手填 rows（≥1）。列数上限 7（V2.14.15 与自适应一致，
+            // 见 SettingsForm.nudCols.Maximum）——这里钳位是双保险：即使配置被手改成超限值，
+            // 主窗体矩阵也最多 7 列，两种模式的列上限恒一致。手填 rows×columns 若放不下全部窗口，
+            // 自动补行到 ceil(总数/列)（多余格子留空），保证"窗口↔相机点位一一对应"与自适应一致。
+            int cols2 = Math.Max(1, Math.Min(7, manualCols));
             int rows2 = Math.Max(1, manualRows);
             if (rows2 * (long)cols2 < total)                 // 手填行列放不下全部窗口 → 自动补行
                 rows2 = (int)Math.Ceiling(total / (double)cols2);

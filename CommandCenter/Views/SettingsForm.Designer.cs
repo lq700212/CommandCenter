@@ -226,10 +226,10 @@ namespace CommandCenter.Views
             this.lblCols.Text = "列:";
             //
             // nudCols
-            // 显示窗口列数（1~10），决定矩阵几列
+            // 显示窗口列数（1~7，与自适应列上限一致，V2.14.15），决定矩阵几列
             //
             this.nudCols.Location = new System.Drawing.Point(230, 60);
-            this.nudCols.Maximum = new decimal(new int[] { 10, 0, 0, 0 });
+            this.nudCols.Maximum = new decimal(new int[] { 7, 0, 0, 0 });
             this.nudCols.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             this.nudCols.Name = "nudCols";
             this.nudCols.Size = new System.Drawing.Size(70, 25);
