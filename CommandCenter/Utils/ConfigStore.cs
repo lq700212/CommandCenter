@@ -120,6 +120,10 @@ namespace CommandCenter.Utils
             // V2.13：保证窗口↔点位独立映射（WindowPointMaps）各型号表长度与窗口总数一致
             EnsureWindowPointMaps(cfg);
             // V2.12.1：归档子目录必须含 {相机} 层（上下相机同号点位靠它隔开），缺则自动补
+            // V2.14.13：先做"历史脏配置归一化"（把"完整路径当一层"的 SubDirs 拆成单层、去盘符/去根前缀/
+            // 去重），再补 {相机}——顺序不能反：若脏项里已含 {相机}（如 E:\Images\{年月日}\{SN}\{相机}
+            // \{OKNG}），EnsureCameraSubDir 会误判"已含"而不补，必须归一化在前、补层在后。
+            NormalizeSubDirs(cfg);
             EnsureCameraSubDir(cfg);
         }
 
@@ -451,6 +455,69 @@ namespace CommandCenter.Utils
                 }
                 // 长度恰好匹配且全为有效 ID（当前相机均存在）→ 保留用户手动编辑过的映射，不动
             }
+        }
+
+        /// <summary>
+        /// 【V2.14.13 加固】历史脏配置归一化：把 SubDirs 里"完整路径当一层"的脏项自动修复。
+        ///
+        /// 背景（血泪教训）：DirTreeEditForm 曾允许把含反斜杠的完整路径模板（如
+        /// "E:\Images\{年月日}\{SN}\{相机}\{OKNG}"）作为单独一层粘贴进配置，现场实测归档路径
+        /// 变成"一层套一层"的超长嵌套目录（如 2026年08月14日\SN\相机\NG × 4）。本方法在
+        /// 加载/保存时对 SubDirs 做一次性清洗：
+        ///   1) 每项若含 `\` 或 `/`，按分隔符拆成独立层级（还原"完整路径"为逐层模板）；
+        ///   2) 丢弃纯盘符段（"E:"）与等于保存根目录末段的前缀段（如根 E:\Images 的 "Images"，
+        ///      避免把根目录名再重复一层）;
+        ///   3) 忽略大小写去重，保持原有先后顺序。
+        /// 拆完若还有 {相机} 层，EnsureCameraSubDir 会识别到而不再重复补；单层干净配置不受影响。
+        /// </summary>
+        private static void NormalizeSubDirs(Models.AppConfig cfg)
+        {
+            if (cfg.Image == null) cfg.Image = new Models.ImageConfig();
+            var subs = cfg.Image.SubDirs;
+            if (subs == null) cfg.Image.SubDirs = subs = new List<string>();
+
+            // 保存根目录的末段（如 E:\Images → "Images"）：用于丢弃"完整路径里的根目录前缀段"。
+            string root = (cfg.Image.SaveRootDir ?? "").Trim();
+            string rootLast = string.IsNullOrWhiteSpace(root) ? "" : Path.GetFileName(root.TrimEnd('\\', '/'));
+
+            var cleaned = new List<string>();
+            foreach (var raw in subs)
+            {
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                // 不含路径分隔符的项是正常的单层模板（如 "{年月日}"、"OK"），原样保留
+                if (raw.IndexOf('\\') < 0 && raw.IndexOf('/') < 0)
+                {
+                    string t = raw.Trim();
+                    if (t.Length > 0 && !cleaned.Any(x => string.Equals(x, t, StringComparison.OrdinalIgnoreCase)))
+                        cleaned.Add(t);
+                    continue;
+                }
+                // 含分隔符 → 按正/反斜杠拆成独立层（脏配置的"完整路径"还原为逐层模板）
+                var parts = raw.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(p => p.Trim()).Where(p => p.Length > 0).ToList();
+                // 绝对路径模板（如 "E:\Images\{...}"）整体剥掉前缀：盘符段（E:）+ 根目录段（Images）。
+                // 判据 = 首段是盘符（如 "E:"）——说明这一项把整条绝对路径粘进来了，
+                // 盘符和紧随其后的根目录名都是路径前缀，不应成为归档子层（不要求根名与 SaveRootDir
+                // 拼写完全一致：现场曾出现根目录 E:\Images 但粘贴成 E:\Image 的拼写错误）。
+                int startIdx = 0;
+                if (parts.Count >= 2
+                    && parts[0].Length == 2 && char.IsLetter(parts[0][0]) && parts[0][1] == ':')
+                {
+                    startIdx = 2;   // 跳过盘符段 + 根目录段（前缀整体丢弃）
+                }
+                for (int i = startIdx; i < parts.Count; i++)
+                {
+                    string seg = parts[i];
+                    // 纯盘符段兜底（如只剩 "E:" 这种，防御）；根目录末段同名段也丢（防根名再重复一层）
+                    if (seg.Length == 2 && char.IsLetter(seg[0]) && seg[1] == ':') continue;
+                    if (rootLast.Length > 0 && string.Equals(seg, rootLast, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!cleaned.Any(x => string.Equals(x, seg, StringComparison.OrdinalIgnoreCase)))
+                        cleaned.Add(seg);
+                }
+            }
+            // 全部为空/被清掉时兜底一层（与模型默认一致）
+            if (cleaned.Count == 0) cleaned.Add("{年月日}");
+            cfg.Image.SubDirs = cleaned;
         }
 
         /// <summary>

@@ -317,6 +317,25 @@ namespace CommandCenter.Views
         /// <summary>确定：把编辑结果写回 ImageConfig（同一实例）。</summary>
         private void OnOk()
         {
+            // V2.14.13 加固【禁止完整路径当一层】：层级名必须是"一层目录的名字/规则"，
+            // 不能含路径分隔符（\ 或 /）。历史上有人把整条路径模板（如 E:\Images\{年月日}...）粘贴进来，
+            // 保存后归档路径出现"一层套一层"的超长嵌套目录（实测 4 层 年月日\SN\相机\NG）。
+            // 在保存前统一拦截：任何一个层级含分隔符就中止保存并提示，从根上杜绝脏配置再产生。
+            foreach (var item in lstLevels.Items)
+            {
+                string s = item?.ToString() ?? "";
+                if (s.IndexOf('\\') >= 0 || s.IndexOf('/') >= 0)
+                {
+                    MessageBox.Show(
+                        $"目录层级「{s}」里含路径分隔符（\\ 或 /）。\r\n\r\n" +
+                        "每个层级只能是【一层目录】的名字或规则（如 {年月日}、{SN}、OK、NG）。\r\n" +
+                        "需要多级目录请用【添加/插入层级】分开成多行，不要一次粘贴整条路径。\r\n" +
+                        "本次修改未保存，请先修正后再点确定。",
+                        "目录层级格式错误", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;   // 中止保存，对话框保持打开
+                }
+            }
+
             // 收集层级：清掉空白项，避免存出空目录层级；删空则保留默认 {年月日} 兜底
             var levels = lstLevels.Items.Cast<string>()
                 .Where(s => !string.IsNullOrWhiteSpace(s))

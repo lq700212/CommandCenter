@@ -121,15 +121,9 @@ namespace CommandCenter.Services
                 string renderedFile = RenderTemplate(_cfg.FileNameTemplate, now, serial, isOk, stationNo, cameraName);
 
                 // 目录：按 SubDirs 逐级渲染（每级名字清洗掉非法字符防路径被搞坏），逐级拼到根目录下
-                var levels = _cfg.SubDirs ?? new List<string>();
-                if (levels.Count == 0) levels.Add("{年月日}");   // 兜底：目录层级别是空的
-                var segs = new List<string>();
-                foreach (var lvl in levels)
-                {
-                    string rendered = RenderTemplate(lvl, now, serial, isOk, stationNo, cameraName);
-                    if (!string.IsNullOrWhiteSpace(rendered))
-                        segs.Add(SanitizeForPath(rendered));
-                }
+                // V2.14.13 加固：统一走 RenderSubDirsToSegments（渲染后按 \ or / 拆段 + 丢盘符段 +
+                // 丢与根目录重复的前缀段 + 去重），任何"完整路径当一层"的脏配置都不会再拼出嵌套路径。
+                var segs = RenderSubDirsToSegments(serial, isOk, stationNo, cameraName, now);
                 string dir = Path.Combine(_cfg.SaveRootDir, Path.Combine(segs.ToArray()));
                 Directory.CreateDirectory(dir);
 
@@ -201,15 +195,9 @@ namespace CommandCenter.Services
                     srcStem = srcStem + "_" + now.ToString("yyyyMMdd_HHmmss_fff");
 
                 // 目录：按 SubDirs 逐级渲染（与 SaveImage 完全同一套规则，保证两种入口归档位置一致）
-                var levels = _cfg.SubDirs ?? new List<string>();
-                if (levels.Count == 0) levels.Add("{年月日}");
-                var segs = new List<string>();
-                foreach (var lvl in levels)
-                {
-                    string rendered = RenderTemplate(lvl, now, serial, isOk, stationNo, cameraName);
-                    if (!string.IsNullOrWhiteSpace(rendered))
-                        segs.Add(SanitizeForPath(rendered));
-                }
+                // V2.14.13 加固：与 SaveImage 共用 RenderSubDirsToSegments（拆段/丢盘符/去重），
+                // 脏配置"完整路径当一层"不再拼出嵌套目录。
+                var segs = RenderSubDirsToSegments(serial, isOk, stationNo, cameraName, now);
                 string dir = Path.Combine(_cfg.SaveRootDir, Path.Combine(segs.ToArray()));
                 Directory.CreateDirectory(dir);
 
@@ -518,6 +506,69 @@ namespace CommandCenter.Services
                 LogHelper.Error("图像字节归档失败（若相机非标准 BMP 返回，需按实测格式补 BMP 文件头）", ex);
                 return null;
             }
+        }
+
+        /// <summary>
+        /// 【V2.14.13 加固】把 SubDirs 逐级渲染成"实际落盘的目录段"列表（SaveImage / SaveImageFilePair 共用）。
+        ///
+        /// 为什么需要按段清洗而不是一项一段（血泪教训）：
+        ///   配置里 SubDirs 本应是一层一个模板（如 ["{年月日}","{SN}","{相机}","{OKNG}"]），但历史上
+        ///   出现过把【整条完整路径模板】当一层写进去的脏配置（如 "E:\Images\{年月日}\{SN}\{相机}\{OKNG}"，
+        ///   DirTreeEditForm 允许手动粘贴含反斜杠的完整路径段）。若直接 Path.Combine 拼接，每个脏段会
+        ///   把含 `\` 的整串拼成"一层套一层"的超长嵌套目录（实测出现过 4 层 2026年08月14日\SN\相机\NG 嵌套）。
+        ///
+        /// 处理规则（与 DirTreeEditForm 预览同一口径）：
+        ///   1) 每项渲染占位符后按 `\` 和 `/` 拆成独立段（用户可能粘贴正/反斜杠两种写法）；
+        ///   2) 丢弃空段、纯盘符段（"E:"）、以及等于保存根目录末段的前缀段（如根目录 E:\Images 的 "Images"）——
+        ///      防"完整路径"里把根目录名再重复一层；
+        ///   3) 剩余段按非法字符清洗（SanitizeForPath）后去重（忽略大小写，Windows 路径不区分大小写），
+        ///      保持原有先后顺序。
+        /// 这样即使配置仍是脏的，落盘路径也会回到"根目录 / 年月日 / SN / 相机 / OKNG"的正确结构。
+        /// </summary>
+        private List<string> RenderSubDirsToSegments(string serial, bool isOk, int stationNo, string cameraName, DateTime now)
+        {
+            var levels = _cfg.SubDirs ?? new List<string>();
+            if (levels.Count == 0) levels = new List<string> { "{年月日}" };   // 兜底：目录层级别是空的
+
+            // 保存根目录的末段（如 E:\Images → "Images"）：用作"完整路径前缀段"的丢弃基准。
+            // 注意：根目录本身可能含 `\`，按同样规则拆末段比较，避免把根目录名再拼进归档路径。
+            string rootLast = (_cfg.SaveRootDir ?? "").TrimEnd('\\', '/');
+            rootLast = rootLast.Substring(rootLast.LastIndexOfAny(new[] { '\\', '/' }) + 1);
+
+            var segs = new List<string>();
+            foreach (var lvl in levels)
+            {
+                string rendered = RenderTemplate(lvl, now, serial, isOk, stationNo, cameraName);
+                if (string.IsNullOrWhiteSpace(rendered)) continue;
+
+                // 拆段：正反斜杠都拆；空段丢弃（如连续 \\ 或首尾斜杠）
+                var parts = rendered.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(p => p.Trim()).Where(p => p.Length > 0).ToList();
+                // 绝对路径模板（如 "E:\Images\..."）整体剥掉前缀：盘符段（E:）+ 根目录段（Images）。
+                // 判据 = 首段是盘符（如 "E:"）——说明渲染结果是整条绝对路径，前缀不应成为归档子层
+                //（不要求根名与 SaveRootDir 拼写完全一致，现场曾出现 E:\Images 被粘成 E:\Image）。
+                int startIdx = 0;
+                if (parts.Count >= 2
+                    && parts[0].Length == 2 && char.IsLetter(parts[0][0]) && parts[0][1] == ':')
+                {
+                    startIdx = 2;   // 跳过盘符段 + 根目录段（前缀整体丢弃）
+                }
+
+                for (int i = startIdx; i < parts.Count; i++)
+                {
+                    string seg = parts[i];
+                    // 纯盘符段兜底（防御：如只剩 "E:"）
+                    if (seg.Length == 2 && char.IsLetter(seg[0]) && seg[1] == ':') continue;
+                    // 与保存根目录末段同名的前缀段丢弃（完整路径里的 "E:\Images\" 前缀不应重复一层）
+                    if (segs.Count == 0 && string.Equals(seg, rootLast, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    string clean = SanitizeForPath(seg);
+                    if (clean.Length > 0
+                        && !segs.Any(x => string.Equals(x, clean, StringComparison.OrdinalIgnoreCase)))
+                        segs.Add(clean);
+                }
+            }
+            return segs;
         }
 
         /// <summary>把非法文件名字符替换成下划线，避免序列号等动态内容把路径搞坏。</summary>

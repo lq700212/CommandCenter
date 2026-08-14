@@ -135,7 +135,17 @@ ProductModelIndexAddress/ProductModelAddress/ProductModelLen/ModelIndexes`）+ �
    **通用路径**目录名非日期时递归查整棵子树**所有文件**都早于阈值才删、还有新图保留（防误删）；
    单目录失败记日志跳过；**存图根目录是盘符根（如 `E:\`）直接放弃清理并告警，绝不删盘根子目录**。
    清理只动保存根目录过期目录、绝不动相机 FTP 取图目录；`Dispose` 停定时器（热更/关窗自动停）。
-   改动存图清理逻辑必须同步本段与 docs/CommandCenter.md（§4.3 ⑨/第六部分）。⚠️ **ImageStore 归 MainForm 所有，协调器 Dispose【不得】关它**（V2.13.6 修复：
+   改动存图清理逻辑必须同步本段与 docs/CommandCenter.md（§4.3 ⑨/第六部分）。**SubDirs 层级禁止"完整路径当一层"（V2.14.22 血泪）**：`ImageConfig.SubDirs`
+   每项只能是【一层目录名/规则】（如 `{年月日}`、`{SN}`、`{相机}`、`OK`、`NG`），**绝不允许把整条绝对
+   路径模板（如 `E:\Images\{年月日}\{SN}\{相机}\{OKNG}`）粘成一个层级**——否则 `ImageStore` 整串带 `\`
+   路径被 `Path.Combine` 直接拼接成"一层套一层"超长嵌套目录（实测 `年月日\SN\相机\NG` 重复 4 层），
+   且随配置保存越叠越深；三层防御防线：① `ConfigStore.NormalizeSubDirs`（ApplyDefaults 加载/保存时，
+   在 `EnsureCameraSubDir` **之前**）把含 `\`/`/` 的项按分隔符拆层、剥掉"盘符+根目录段"前缀（已现
+   `E:\Images` 被粘成 `E:\Image` 少个 s 的拼写错误）、忽略大小写去重，脏配置不手改即自愈；②
+   `ImageStore.RenderSubDirsToSegments`（SaveImage/SaveImageFilePair 共用）渲染后同样拆段/丢盘符/丢
+   根目录末段重名前缀再拼接，运行时配置被改脏也不出嵌套；③ `DirTreeEditForm.OnOk` 保存前拦截——
+   任一层级含 `\` 或 `/` 弹窗"每级只能是一层名字"并中止保存（从源头杜绝。改动 SubDirs 相关逻辑
+   必须先读这三处，禁止各层各写一套。⚠️ **ImageStore 归 MainForm 所有，协调器 Dispose【不得】关它**（V2.13.6 修复：
    此前协调器 Dispose 调 `_imageStore.Dispose()`，SwitchModel 只重建协调器、复用同一 ImageStore，
    切型号后监听就被关掉、信号加速失效）；热更（ApplyRuntimeConfig）与关窗（FormClosing）由 MainForm
    显式 Dispose，旧 watcher 不泄漏。**现场相机映射（V1.12.22 定稿；V2.13.3 修正 FTP 目录；V2.13.4 相机编号=独立 cameraId 字段）**：列表第1台=**上相机**=`19.87.6.213`→FTP 取图目录 `D:\IV存图\2`（**真编号 `cameraId`=2**）；列表第2台=**下相机**=`19.87.6.212`→`D:\IV存图\1`（**真编号=1**）——编号=存图目录号（上→\2=相机2、下→\1=相机1）。⚠️ **相机真编号独立存 `CameraConfig.CameraId`，不能靠交换列表顺序实现**（V2.13.5 起 PLC 通道地址
