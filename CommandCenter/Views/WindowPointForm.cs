@@ -219,11 +219,15 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             // V2.13：为当前铺排型号 seed 窗口↔点位编辑副本（默认=前上相机后下相机铺排）。
             // 若目标配置里已有该型号的已编辑映射（长度=该型号窗口总数），载入继续编辑——
             // 保证"上次改过的点位/交换"下次打开还能看到、能再改。
+            // 【V2.14.x 修复"取消也生效"】目标配置（WindowPointMaps）里的 Points 是持久化引用，
+            // 必须深拷贝一份当编辑副本。若直接引用它，SwapCells/EditSelectedPoint/ResetAll
+            // 的改动会立刻污染配置——用户点【取消】点位改动照样生效、后续设置页保存照落盘
+            // （WindowEnabled/_programEdits 本来就是副本，唯独这里漏了拷贝）。
             var defMap = DisplayConfig.DefaultWindowPointMap(_cameras, _matrixModel);
             var seed = _windowPointMapsTarget.FirstOrDefault(x => x != null
                 && string.Equals(x.ModelName, _matrixModel, StringComparison.OrdinalIgnoreCase));
             if (seed != null && seed.Points != null && seed.Points.Count == defMap.Count)
-                _windowPointEdits[_matrixModel] = seed.Points;
+                _windowPointEdits[_matrixModel] = ClonePoints(seed.Points);
             else
                 _windowPointEdits[_matrixModel] = defMap;
 
@@ -283,13 +287,14 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             // V2.13：切型号后必须为新型号 seed 窗口↔点位编辑副本（长度=新型号窗口总数）。
             // 缺省（首次切到该型号）按默认铺排补，已有该型号编辑表（长度正确）则保留继续编辑，
             // 长度不对（点位表增删）回退默认铺排防越界。
+            // 【V2.14.x】载入已编辑映射时同样深拷贝（见构造处注释：直接引用会让"取消"也生效）。
             if (!_windowPointEdits.ContainsKey(_matrixModel))
             {
                 var defMap = DisplayConfig.DefaultWindowPointMap(_cameras, _matrixModel);
                 var found = _windowPointMapsTarget.FirstOrDefault(x => x != null
                     && string.Equals(x.ModelName, _matrixModel, StringComparison.OrdinalIgnoreCase));
                 if (found != null && found.Points != null && found.Points.Count == defMap.Count)
-                    _windowPointEdits[_matrixModel] = found.Points;
+                    _windowPointEdits[_matrixModel] = ClonePoints(found.Points);
                 else
                     _windowPointEdits[_matrixModel] = defMap;
             }
@@ -564,6 +569,24 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             return copy;
         }
 
+        /// <summary>
+        /// 深拷贝一份"窗口↔(相机,点位)映射"表（V2.14.x 新增，编辑副本用）。
+        /// 【为什么必须深拷贝】DisplayConfig.WindowPointMaps（目标配置）里的 Points 是持久化引用，
+        /// 交换/编辑/恢复默认直接改它会让【取消】也生效（见构造函数注释）；克隆出一份独立列表后，
+        /// 所有编辑只落在这份副本上，点【确定】（OnOk 把副本整体赋回目标）才生效。
+        /// </summary>
+        private static List<WindowPointItem> ClonePoints(List<WindowPointItem> src)
+        {
+            var copy = new List<WindowPointItem>();
+            if (src != null)
+            {
+                foreach (var p in src)
+                    if (p != null)
+                        copy.Add(new WindowPointItem { CameraId = p.CameraId, StationNo = p.StationNo });
+            }
+            return copy;
+        }
+
         /// <summary>重新把当前"相机+型号"组合的编辑副本灌入表格（切换相机/型号/增删行后调用）。
         /// 下拉列填值：点位/程序号都直接放 int；程序号 -1 或超界用"不切换"文案（与下拉选项一致）。
         /// 【DataError 防控】DataGridViewComboBoxCell 的单元格值【必须在下拉候选里】，否则渲染时抛
@@ -732,8 +755,9 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         private const string HintDefault =
             "每个格子 = 主界面一个显示窗口。上方是【窗口编号】；下方是【归属相机·相机点位号】。\r\n" +
             "默认按\"前上相机后下相机、各相机点位表顺序\"铺排（随下方\"型号\"下拉联动）。\r\n" +
-            "可选中窗口后点【编辑点位】（从相机点位表候选里换点）、【交换位置】（点两个窗口互换，可跨相机）、\r\n" +
-            "【恢复默认】（重置该型号出厂铺排并全部启用）；【右键格子】或选中后点\"禁用/启用\"停用某窗口。\r\n" +
+            "可选中窗口后点【编辑点位】（从相机点位表候选里换点；选中的点位若被别的窗口占用会【自动互换】）、\r\n" +
+            "【交换位置】（点两个窗口互换，可跨相机）、【恢复默认】（重置该型号出厂铺排并全部启用）；\r\n" +
+            "【右键格子】或选中后点\"禁用/启用\"停用某窗口。\r\n" +
             "下方\"相机程序映射\"区照常可配：相机+型号 → 点位 → 相机程序号。";
 
         /// <summary>
@@ -772,10 +796,14 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         }
 
         /// <summary>
-        /// 编辑点位（V2.13 恢复）：把当前选中窗口的 (相机,点位) 换成另一个候选点位。
-        /// 候选来源 = 当前型号下各相机点位表里已存在的点位（数量=窗口数，不引入相机表外的点）；
-        /// 已分配给其他窗口的"相机+点位"不出现在候选里（同一"相机+点位"只属于一个窗口，
-        /// 避免 PLC 反查出两个窗口）；当前窗口自己当前的点位保留为默认选中项。
+        /// 编辑点位（V2.13 恢复；V2.14.x 修复候选恒 1）：把当前选中窗口的 (相机,点位) 换成另一个点位。
+        /// 候选 = 当前型号下各相机点位表里【全部】已有点位（数量=窗口数，不引入相机表外的点）。
+        /// 【V2.14.x 修复】旧实现把"已被其他窗口占用的组合"排除出候选——但窗口总数 = 相机点位表
+        /// 条目和、默认铺排恰是一一对应，排除后候选恒只剩当前窗口自己的点位，"编辑点位"实际
+        /// 换不了点位（现场点按钮弹窗只有一个选项、等于没反应）。改为：候选 = 全部点位；
+        /// 若选中的点位恰好被另一窗口占用，自动与该窗口【互换点位】（窗口↔点位映射本就是用
+        /// "归属相机+点位号"二元组区分，交换不改变值集合、运行时反查仍唯一），实现"给窗口
+        /// 换点位"的真实诉求；选到未占用（理论不发生）或自己当前点位则直接赋值。
         /// </summary>
         private void EditSelectedPoint()
         {
@@ -789,15 +817,17 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             if (_selectedIdx >= map.Count) return;
             var cur = map[_selectedIdx];
 
-            // 收集候选："相机·点位"集合（当前型号相机点位表） − 已被其他窗口占用的组合
+            // 收集候选：全部"相机·点位"（当前型号相机点位表）+ 占用该组合的窗口号（用于自动互换）。
             var options = new List<Tuple<WindowPointItem, string>>();   // 值 + 显示文案
-            var used = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);   // "相机ID:点位" → 窗口号
+            var owner = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);   // "相机ID:点位" → 占用窗口号(1起)
             for (int j = 0; j < map.Count; j++)
             {
-                if (j == _selectedIdx || map[j] == null) continue;
+                if (map[j] == null) continue;
                 var it = map[j];
-                used[$"{it.CameraId}:{it.StationNo}"] = j + 1;
+                // 正常情况"相机+点位"只属于一个窗口；异常重复时记最后一个，不影响候选（见下）
+                owner[$"{it.CameraId}:{it.StationNo}"] = j + 1;
             }
+            int defIdx = 0;   // 弹窗默认选中项 = 当前窗口自己的点位（找不到则第一个）
             for (int ci = 0; ci < _cameras.Count; ci++)
             {
                 var cam = _cameras[ci];
@@ -813,10 +843,14 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 foreach (var it in table)
                 {
                     if (it == null) continue;
-                    if (used.ContainsKey($"{camId}:{it.StationNo}")) continue;   // 已被别的窗口占用 → 不给选
+                    if (camId == cur.CameraId && it.StationNo == cur.StationNo)
+                        defIdx = options.Count;            // 记住"当前窗口自己点位"的位置，弹窗默认选中它
+                    string note = "";
+                    if (owner.TryGetValue($"{camId}:{it.StationNo}", out int occ) && occ != _selectedIdx + 1)
+                        note = $"（当前窗口{occ}，选中即互换）";   // 被别的窗口占着 → 明示会自动交换
                     options.Add(Tuple.Create(
                         new WindowPointItem { CameraId = camId, StationNo = it.StationNo },
-                        $"{camName}·点位{it.StationNo}"));
+                        $"{camName}·点位{it.StationNo}{note}"));
                 }
             }
             if (options.Count == 0)
@@ -826,7 +860,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 return;
             }
 
-            // 弹选择框：用 ComboBox 列候选（含当前项），确定后写入编辑副本
+            // 弹选择框：用 ComboBox 列候选（默认选中当前项），确定后交换或写入编辑副本
             int sel = -1;
             using (var f = new Form
             {
@@ -834,18 +868,15 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false, MinimizeBox = false,
                 StartPosition = FormStartPosition.CenterParent,
-                ClientSize = new Size(300, 110)
+                ClientSize = new Size(330, 110)
             })
             {
                 var lbl = new Label { Text = "请为该窗口选择一个相机点位：", Location = new Point(12, 12), AutoSize = true };
-                var cmb = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(12, 36), Width = 276 };
+                var cmb = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(12, 36), Width = 306 };
                 foreach (var o in options) cmb.Items.Add(o.Item2);
-                // 默认选中当前项（若当前项仍合法且在候选中）
-                string curText = ResolveWindowSource(_selectedIdx + 1);
-                int def = cmb.Items.IndexOf(curText);
-                cmb.SelectedIndex = def >= 0 ? def : 0;
-                var ok = new Button { Text = "确定", DialogResult = DialogResult.OK, Location = new Point(206, 70), Width = 82 };
-                var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Location = new Point(118, 70), Width = 82 };
+                cmb.SelectedIndex = defIdx < options.Count ? defIdx : 0;   // 默认当前点位；不在候选则选第一个
+                var ok = new Button { Text = "确定", DialogResult = DialogResult.OK, Location = new Point(236, 70), Width = 82 };
+                var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Location = new Point(148, 70), Width = 82 };
                 f.Controls.Add(lbl); f.Controls.Add(cmb); f.Controls.Add(ok); f.Controls.Add(cancel);
                 f.AcceptButton = ok; f.CancelButton = cancel;
                 if (f.ShowDialog(this) == DialogResult.OK && cmb.SelectedIndex >= 0)
@@ -853,8 +884,24 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             }
             if (sel < 0) return;   // 用户取消
 
-            map[_selectedIdx] = options[sel].Item1;
-            LogHelper.Info($"窗口 {_selectedIdx + 1} 点位改为「{options[sel].Item2}」（点确定后生效）");
+            var chosen = options[sel].Item1;
+            // 目标组合已被另一窗口占用 → 与该窗口互换点位（值集合不变 → 运行时反查仍唯一）。
+            // 判定直接用上面统计的 owner（与弹窗标注"当前窗口N"同源，行为一致）
+            int conflict = -1;
+            if (owner.TryGetValue($"{chosen.CameraId}:{chosen.StationNo}", out int ownerOcc) && ownerOcc != _selectedIdx + 1)
+                conflict = ownerOcc - 1;
+            if (conflict >= 0)
+            {
+                var tmp = map[_selectedIdx];
+                map[_selectedIdx] = new WindowPointItem { CameraId = map[conflict].CameraId, StationNo = map[conflict].StationNo };
+                map[conflict] = new WindowPointItem { CameraId = tmp.CameraId, StationNo = tmp.StationNo };
+                LogHelper.Info($"窗口 {_selectedIdx + 1} 点位改为「{options[sel].Item2}」，原占用窗口 {conflict + 1} 与本窗口互换（点确定后生效）");
+            }
+            else
+            {
+                map[_selectedIdx] = chosen;
+                LogHelper.Info($"窗口 {_selectedIdx + 1} 点位改为「{options[sel].Item2}」（点确定后生效）");
+            }
             _selectedIdx = -1;
             RefillStationColumn();   // 点位列候选随点位变化刷新（点位集合可能不变，保证一致性）
             RefreshCells();
