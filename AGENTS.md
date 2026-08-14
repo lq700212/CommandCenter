@@ -35,15 +35,23 @@
 - **UI 线程禁做网络 IO（V1.0.1 血泪）**：轮询/连接/读写 PLC 与相机一律放后台线程（`System.Threading.Timer`），TCP 连接必须 `BeginConnect + WaitOne` 强制超时。禁止在 UI 线程同步 `TcpClient.Connect` 或 `ReadHoldingRegisters`——对不可达 IP 会冻结整个界面（表现为"点按钮半天才响应"）。
 - **显示链路图片一律后台解码 + 缩略图（V2.13.2 血泪）**：禁止在 UI 线程同步"读盘 + GDI+ 解码 + 向 PictureBox 给全尺寸大图"——基恩士原图可达 2592×1944，每次刷新都卡界面。显示图片必须：① 走 `ProductionCoordinator.LoadThumbnailSafe`（`FileShare.ReadWrite` + 等比降采样到最大边 1280）把解码/缩放放到后台线程（如 `Task.Factory.StartNew`），完成后把小图 `BeginInvoke` 回 UI 赋值；② 计数/标题等轻量更新与图片加载分开投递（图片加载不得拖慢写回 PLC 结果的协调器线程）；③ 窗口被重建/关窗竞态时原地 `Dispose` 新加载的缩略图防句柄泄漏。**显示不等归档（同版本）**：FTP 取图时"jpeg 一到 FTP 目录 → 显示"与"归档复制（含 iv4p）+ 删 FTP 源"解耦——协调器在 `SaveImageFilePair` 之前就用 `LoadThumbnailSafe(jpeg)` 提前加载内存预览图塞进 `WindowData.PreviewImage` 随事件带走，UI 直接赋值；预览失败回退按 `ImagePath`（归档副本）后台加载。别再让显示等 iv4p 复制/重试。相机取图/归档本身仍走既有后台链路，别为显示去改归档逻辑。
 - **显示窗口矩阵用 TableLayoutPanel 百分比等分**：窗口数量由 `display.rows/columns` 配置，所有窗口尺寸由容器等分自动保持一致，禁止写死像素布局。**V2.14 起矩阵外层包 `pnlWindowScroll`（AutoScroll=true）滚动宿主；V2.14.15 起"铺满/滚动"判定阈值按显示区高度动态算**：`MainForm.ApplyGridScrollLayout` 每行最小高度 = 显示区高/10（下限 60px），因设置窗体行数上限 10，**行数 ≤10 恒走铺满（行高=显示区高/行数，与自适应铺满效果一致，"设置几行就几行平分显示区"）**；仅行数 >10（如手填列太少自动补行、极端窗口数）才切"滚动模式"（grid Dock=Top + 定高，右侧出竖直滚动条、滚轮/滑块翻看，标题栏/状态栏不随滚动）。**列数两种模式统一上限 7**（自适应天然 ≤7；非自适 `SettingsForm.nudCols.Maximum=7`，`DisplayConfig.ResolveLayout` 非自适应分支再钳位 `Math.Min(7,manualCols)` 双保险）。改动主窗体网格必须先过这套"铺满/滚动"判定。
-- **显示窗口矩阵统一模型（V2.12.1，取代并合并 V2.12.0"自适应"；V2.14 改自适应铺排规则）**：窗口总数**恒** = 各相机按型号
-  点位表 `ProgramsFor(型号)` 条目和（`DisplayConfig.WindowCountFor` / `ResolveLayout` 统一计算，
+- **显示窗口矩阵统一模型（V2.12.1，取代并合并 V2.12.0"自适应"；V2.14 改自适应铺排规则；V2.14.18 非自适窗口总数=行×列）**：
+  **窗口总数 = `DisplayConfig.ResolveLayout(cameras, model, display).windowCount`（全链路统一唯一口径，
+  主窗体 BuildWindowGrid / 设置页预览 / 协调器 / WindowPointForm / ConfigStore 对齐共用，禁止各层各写一套）**：
+  自适应 = 各相机按型号点位表 `ProgramsFor(型号)` 条目和；**非自适 = 手填行×列（放不下点位自动补行）**，
+  **点位不够多出的格子 = 【空窗口】（映射 null 条目）**——主界面照样建窗占满显示区、只是不接图，
+  不是"点数少就留空白"。各型号点位不同（U171=24、Z121=29…），每个型号按自身点数算窗口总数/空窗口位置。
   **自适应自动铺排（V2.14）**=列最多 7，遍历列 1..min(7,总数)、行=ceil(总数/列)，取"行列和最小、并列列多者优先"
   ——效果接近方形、缺格集中在最后一行且最少、窗口尽量放大占满（1→1×1、2→1×2、3→1×3、4→2×2、5→2×3、
   6→2×3、7→2×4、28→4×7），`AutoFitCameraStarts` 返回各相机窗口起始序号
   （"前上相机后下相机"分组），主窗体 BuildWindowGrid / 设置页预览 / 协调器 / WindowPointForm **共用同一套
   计算，禁止各层再各写一套**。**勾选"自适应"只决定行列是否自动算**：`AutoFit=true` 时行/列输入框置灰
-  （行列按上述规则自动铺排）；不勾时手填行/列只当"排列宽度/期望行数"，放不下**自动补行**，窗口总数仍=点位和，
-  两种模式所见完全一致。**存图点位统一 = 相机点位号（StationNo）**（上下相机各自从 1 起会重复，靠
+  （行列按上述规则自动铺排）；不勾时手填行×列**即窗口总数**（填满显示区、所见即所得），两模式区别只在
+  "行列怎么来"。**空窗口约定（V2.14.18）**：默认铺排 = `ResolveWindowPointMap(cameras, windowCount, model, maps)`
+  前 N（=点位数）张按"前上相机后下相机"填 `WindowPointItem`、**尾部 null=空窗口**；空窗口可【交换位置】
+  （把点位搬进空窗口的唯一入口，含空↔空无效果），**不支持【编辑点位】【禁用/启用】**（WindowPointForm 选中
+  空窗口时按钮自动置灰 + 方法内防御提示），WindowEnabled/WindowStationMap/WindowPointMaps 全部按行列乘积
+  占位对齐；空窗口不参与协调器 PLC 轮询/点位匹配（null 条目天然跳过）。**存图点位统一 = 相机点位号（StationNo）**（上下相机各自从 1 起会重复，靠
   ImageStore 归档子目录 **`{相机}` 层隔开**——`SubDirs` 默认含 `{相机}`，旧配置加载自动补，绝不拿
    WindowStationMap/windowIndex 当存图点位）；手动点位编辑（编辑点位/交换位置/恢复默认）在 WindowPointForm
   里两种模式**都可编辑（V2.13 恢复）**：结果按型号分表存 `DisplayConfig.WindowPointMaps`

@@ -561,22 +561,25 @@ namespace CommandCenter.Models
 
         /// <summary>
         /// 显示窗口矩阵是否"自适应"（V2.12.0）：窗口行列的形状是否按点位自动算。
-        /// 【窗口总数】无论勾不勾都 = 各相机按当前运营产品型号查到的"点位→程序号"表
-        ///   （ModelStationPrograms 对应型号表，型号没配表回退 StationPrograms 默认表）
-        ///   点位条目数之和（上相机点位 + 下相机点位）——点位由相机点位表唯一决定，
-        ///   上下相机点位号各自从 1 起会重复，窗口只是把点位条目"前上相机后下相机"
-        ///   顺序铺排的格子（表里第 i 条点位 = 该相机起始窗口 + i）。
+        /// 【窗口总数】
+        ///   - 自适应（AutoFit=true）：= 各相机按当前运营产品型号查到的"点位→程序号"表
+        ///     （ModelStationPrograms 对应型号表，型号没配表回退 StationPrograms 默认表）
+        ///     点位条目数之和（上相机点位 + 下相机点位）——点位由相机点位表唯一决定，
+        ///     上下相机点位号各自从 1 起会重复，窗口只是把点位条目"前上相机后下相机"
+        ///     顺序铺排的格子（表里第 i 条点位 = 该相机起始窗口 + i）。
+        ///   - 非自适应（AutoFit=false，V2.14.18 改）：= 用户手填的【行 × 列】（含自动补行），
+        ///     点位不够时多出的格子是【空窗口】——主界面照样建窗、显示区填满，空窗口默认
+        ///     不配置点位，可在"窗口/点位配置"里把点位交换/分配过去（见 DefaultWindowPointMap）。
         /// 【行列形状】
         ///   - 自适应（V2.14 起）：列最多 7，遍历列数取"行列和最小"（尽量接近方形）、
         ///     并列时列多者优先（优先增加列），让最后一行缺失的窗口最少；
         ///     例：1→1×1（单窗占满）、2→1×2、3→1×3、4→2×2、5→2×3、6→2×3、7→2×4、
         ///     22→4×6、28→4×7（铺满）。行多放不下时主窗体自动出竖直滚动条（见
         ///     MainForm.ApplyGridScrollLayout）。
-        ///   - 非自适应：列 = 手填 Columns、行 = 手填 Rows（乘积不够自动补行），
-        ///     手填只决定排列宽度，窗口数仍=点位和，保证与自适应窗口↔点位一一对应；
-        ///     主窗体显示时两种模式走同一套"按显示区高度动态铺满/滚动"逻辑（V2.14.15：
-        ///     行数≤10 一律铺满平分显示区高度，行高=显示区高/行数，与自适应铺满效果一致，
-        ///     见 MainForm.ApplyGridScrollLayout）。
+        ///   - 非自适应：列 = 手填 Columns、行 = 手填 Rows（乘积不够放点位时自动补行），
+        ///     手填决定排列形状，窗口总数=行列乘积；主窗体显示时两种模式走同一套
+        ///     "按显示区高度动态铺满/滚动"逻辑（V2.14.15：行数≤10 一律铺满平分显示区高度，
+        ///     行高=显示区高/行数，与自适应铺满效果一致，见 MainForm.ApplyGridScrollLayout）。
         /// 勾选自适应后，设置在设置窗体的"显示窗口"行、切型号（标题栏/设置页）时自动重算；
         /// 【为什么加】现场 28 个窗口点位由两台相机分工，窗口数与型号点位强相关，手填行列容易
         /// 对不上；让窗口数跟随点位自动铺排，换型号即所见即所得。
@@ -587,12 +590,14 @@ namespace CommandCenter.Models
         public bool AutoFit { get; set; } = true;
 
         /// <summary>
-        /// 窗口总数（V2.12.1）：各相机按"当前产品型号"点位表 ProgramsFor(型号) 条目数之和，
-        /// 至少 1（防除 0/空矩阵）。**无论是否勾选"自适应"，窗口数都按这个算**——
-        /// 点位由相机点位表唯一决定（上下相机点位号各自从 1 起、会重复），窗口只是将这些
-        /// 点位条目"前上相机后下相机"顺序铺排的格子，"自适应"开关只影响行列的形状计算。
-        /// 主窗体矩阵 / WindowPointForm / 协调器 / ConfigStore / 设置页预览统一走本方法，
-        /// 禁止各层再各写一套窗口数计算。
+        /// **映射点位数**（V2.12.1）：各相机按"当前产品型号"点位表 ProgramsFor(型号) 条目数之和，
+        /// 至少 1（防除 0/空矩阵）。点位由相机点位表唯一决定（上下相机点位号各自从 1 起、会重复），
+        /// 窗口默认只是将这些点位条目"前上相机后下相机"顺序铺排。
+        /// 【与 ResolveLayout.windowCount 的关系（V2.14.18）】windowCount=主界面窗口控件总数：
+        /// 自适应下 = 本值；非自适下 = 行列乘积（可能 &gt; 本值，多出的格子=空窗口）。
+        /// 存图点位/切程序/运行时反查仍以本值（点位数）为准，空窗口不参与。
+        /// 主窗体矩阵 / WindowPointForm / 协调器 / ConfigStore / 设置页预览统一走本方法与
+        /// ResolveLayout，禁止各层再各写一套窗口数计算。
         /// </summary>
         public static int WindowCountFor(IEnumerable<CameraConfig> cameras, string productModel)
         {
@@ -604,18 +609,23 @@ namespace CommandCenter.Models
         }
 
         /// <summary>
-        /// 统一窗口布局计算（V2.12.1）：返回 (行, 列, 窗口总数)，所有使用窗口矩阵的层共用。
-        /// 【窗口总数】恒 = WindowCountFor（相机点位表条目和，≥1）——点位由相机表唯一决定。
+        /// 统一窗口布局计算（V2.12.1；V2.14.18 非自适窗口总数改=行列乘积）：返回 (行, 列, 窗口总数)，
+        /// 所有使用窗口矩阵的层共用。**windowCount = 主界面要创建的窗口控件总数**（含空窗口）：
+        ///   - 自适应（autoFit=true）：= WindowCountFor（点位数）——行列自动铺排，点数位正好放下，
+        ///     尾部缺格留空（保持 V2.14 既有行为）；
+        ///   - 非自适应（autoFit=false）：= 行列乘积（含自动补行）——用户设几行几列就铺几个窗口，
+        ///     点位不够时多出的格子是【空窗口】（无点位，主界面照样建窗占满显示区），可在
+        ///     "窗口/点位配置"里把点位分配过去（WindowPointMaps 长度 = windowCount，空窗口=null 条目）。
+        /// 【点位数】恒 = WindowCountFor（相机点位表条目和，≥1）——点位由相机表唯一决定，存图/切程序
+        ///   仍以它为准；空窗口不参与点位。调用方（BuildWindowGrid/WindowPointForm/ConfigStore/协调器）
+        ///   一律取 windowCount 建窗、取 WindowCountFor 判断"映射点位个数"，禁止再各写一套。
         /// 【行列形状】
-        ///   - 自适应（autoFit=true，V2.14 新规则）：列数遍历 1..min(7,总数)，行 = ceil(总数/列)，
+        ///   - 自适应（V2.14 新规则）：列数遍历 1..min(7,总数)，行 = ceil(总数/列)，
         ///     取"行+列"最小的方案（越接近方形越好），并列时列数多者优先（优先增加列）——
         ///     效果是让缺的格子集中在最后一行且最少，窗口尽量大、占满显示区域；
         ///     例：1→1×1、2→1×2、3→1×3、4→2×2、5→2×3、6→2×3、7→2×4、28→4×7。
-        ///   - 非自适应（autoFit=false）：列 = 手动 columns（≥1，上限 7，与自适应一致）、
-        ///     行 = 手动 rows（≥1）；手填的 rows×columns 若放不下全部窗口，自动补行到
-        ///     ceil(总数/列)（多余格子留空），保证"窗口↔相机点位一一对应"与自适应一致，
-        ///     手填行列只决定排列宽度。
-        /// 主窗体 BuildWindowGrid / WindowPointForm / 设置页预览 / ConfigStore 统一调用。
+        ///   - 非自适应：列 = 手动 columns（≥1，上限 7，与自适应一致）、行 = 手动 rows（≥1）；
+        ///     手填的 rows×columns 若放不下全部点位（点位数更多），自动补行到 ceil(点数/列)。
         /// </summary>
         public static (int rows, int cols, int windowCount) ResolveLayout(
             IEnumerable<CameraConfig> cameras, string productModel,
@@ -641,13 +651,14 @@ namespace CommandCenter.Models
             }
             // 非自适应：列 = 手填 columns、行 = 手填 rows（≥1）。列数上限 7（V2.14.15 与自适应一致，
             // 见 SettingsForm.nudCols.Maximum）——这里钳位是双保险：即使配置被手改成超限值，
-            // 主窗体矩阵也最多 7 列，两种模式的列上限恒一致。手填 rows×columns 若放不下全部窗口，
-            // 自动补行到 ceil(总数/列)（多余格子留空），保证"窗口↔相机点位一一对应"与自适应一致。
+            // 主窗体矩阵也最多 7 列，两种模式的列上限恒一致。手填 rows×columns 若放不下全部点位
+            // （点位数更多），自动补行到 ceil(点数/列)（保证每个点位仍有窗口），
+            // 之后 windowCount = rows×cols —— 点位少时多出的格子=空窗口、主界面照建窗占满显示区。
             int cols2 = Math.Max(1, Math.Min(7, manualCols));
             int rows2 = Math.Max(1, manualRows);
-            if (rows2 * (long)cols2 < total)                 // 手填行列放不下全部窗口 → 自动补行
+            if (rows2 * (long)cols2 < total)                 // 手填行列放不下全部点位 → 自动补行
                 rows2 = (int)Math.Ceiling(total / (double)cols2);
-            return (rows2, cols2, total);
+            return (rows2, cols2, rows2 * cols2);
         }
 
         /// <summary>
@@ -680,16 +691,19 @@ namespace CommandCenter.Models
         }
 
         /// <summary>
-        /// 生成某型号的【默认窗口↔点位映射】（V2.13）：按"前上相机后下相机、各相机点位表
-        /// 条目顺序"铺排——窗口 1 起，依次取相机 0 点位表第 1、2…条，再取相机 1 点位表第 1、2…条。
-        /// 返回列表长度 = 该型号窗口总数（各相机点位表条目和，≥1，见 WindowCountFor）；
-        /// 若各相机点位表全空则兜底给一条"相机·点位1"（防空列表，与 WindowCountFor 的 ≥1 一致）。
+        /// 生成某型号的【默认窗口↔点位映射】（V2.13；V2.14.18 支持空窗口）：按"前上相机后下相机、
+        /// 各相机点位表条目顺序"铺排——窗口 1 起，依次取相机 0 点位表第 1、2…条，再取相机 1 点位表
+        /// 第 1、2…条。
+        /// 【长度】返回列表长度 = windowCount（= ResolveLayout.windowCount，即主界面窗口控件总数）：
+        ///   - 前"点位数"（各相机点位表条目和）个元素 = 有效点位条目（WindowPointItem）；
+        ///   - 尾部"windowCount − 点位数"个元素 = **null（空窗口）**——主界面非自适下点位不够、
+        ///     行列乘积多出的占位格子，默认不配置点位，用户可在点位配置里把点位分配过去。
         /// 【V2.13.4 关联键升级】条目存 CameraId（CameraConfig.CameraId，真编号）；相机 ID 为 0
         /// （旧配置）时用列表行序兜底，保证唯一可反查。
         /// 与 V2.12.1 的"窗口=相机点位表条目"隐式铺排等价——不编辑时默认映射=这个，行为零变化。
         /// </summary>
         public static List<WindowPointItem> DefaultWindowPointMap(
-            IEnumerable<CameraConfig> cameras, string productModel)
+            IEnumerable<CameraConfig> cameras, string productModel, int windowCount)
         {
             var list = new List<WindowPointItem>();
             int ci = 0;                                          // 相机列表下标（仅铺排顺序，非关联键）
@@ -708,32 +722,37 @@ namespace CommandCenter.Models
                 }
                 ci++;
             }
-            if (list.Count == 0) list.Add(new WindowPointItem { CameraId = 1, StationNo = 1 }); // 兜底≥1
+            // 补齐到 windowCount 个：多出的格子置 null（空窗口，未配置点位）。
+            // 点位表全空时整个映射都是空窗口（无点位就不该有映射），运行时反查自然落空=跳过。
+            while (list.Count < windowCount) list.Add(null);
+            if (list.Count > windowCount) list.RemoveRange(windowCount, list.Count - windowCount);
+            if (list.Count == 0) list.Add(null);                 // 极端防空：windowCount=0 时至少留一条空窗口
             return list;
         }
 
         /// <summary>
         /// 解析"某型号当前的窗口↔点位映射"（V2.13，主窗体/协调器/点位窗体/设置页统一调用）：
-        ///   ① WindowPointMaps 里找到与指定型号同名（大小写不敏感）且长度=该型号窗口总数的表
-        ///      → 返回该表（用户手动编辑/交换过的映射）；
+        ///   ① WindowPointMaps 里找到与指定型号同名（大小写不敏感）且长度=windowCount 的表
+        ///      → 返回该表（用户手动编辑/交换过的映射，条目可为 null=空窗口）；
         ///   ② 型号没配表 / 表长度不对（相机点位表改动后数量变了）→ 回退默认铺排
         ///      （DefaultWindowPointMap），保证运行时窗口与点位一一对应、永不越界。
-        /// 【为什么长度必须校验】窗口总数 = 相机点位表条目和，若映射表长度与它不一致
-        ///   （点位表增删点位后旧的映射没跟着变），反查会越界/找不到窗口，必须回退默认。
+        /// 【为什么长度必须校验】窗口总数 = ResolveLayout.windowCount（非自适=行列乘积、含空窗口），
+        ///   若映射表长度与它不一致（点位表增删点位后旧的映射没跟着变），反查会越界/找不到窗口，
+        ///   必须回退默认。空窗口条目（null）合法、不参与反查。
         /// </summary>
         public static List<WindowPointItem> ResolveWindowPointMap(
             IEnumerable<CameraConfig> cameras, string productModel,
-            List<ModelWindowPointMap> maps)
+            List<ModelWindowPointMap> maps, int windowCount)
         {
-            var def = DefaultWindowPointMap(cameras, productModel);
+            var def = DefaultWindowPointMap(cameras, productModel, windowCount);
             if (maps == null || string.IsNullOrWhiteSpace(productModel)) return def;
             foreach (var m in maps)
             {
                 if (m == null || m.Points == null) continue;
                 if (string.Equals(m.ModelName, productModel, StringComparison.OrdinalIgnoreCase))
                 {
-                    // V2.13.10：长度一致【且】所有条目的 CameraId 都指向真实存在的相机，
-                    // 才返回用户手动编辑过的映射；否则回退默认铺排。
+                    // V2.13.10：长度一致【且】所有条目的 CameraId 都指向真实存在的相机
+                    // （空窗口 null 条目跳过不校验），才返回用户手动编辑过的映射；否则回退默认铺排。
                     // 【为什么必须校验 CameraId】改号/删相机后，旧映射里的 CameraId 变成孤儿——
                     // 它 >0 又 ≠ 任何相机的真编号，旧的"CameraId<=0 即旧格式"判定抓不到；
                     // 若运行时用了孤儿表，TryResolveActiveWindow 按 (孤儿ID,点位) 永远反查不到
@@ -750,20 +769,22 @@ namespace CommandCenter.Models
 
         /// <summary>
         /// 校验"窗口↔点位映射表"所有条目的 CameraId 是否都指向真实存在的相机（V2.13.10 引入）。
+        /// 【V2.14.18 空窗口支持】null 条目（空窗口，未配置点位）合法、跳过校验——非自适下
+        ///   windowCount &gt; 点位数时默认铺排尾部就是空窗口，映射表允许这些 null 存在。
         /// 【为什么需要】映射条目存 CameraId（相机真编号，见 WindowPointItem）；若某台相机的
         ///   CameraId 被改号（设置页"相机ID"列或手改 json）/相机被删除，旧映射里的 CameraId 就
         ///   变成"孤儿 ID"——它 >0 却又 ≠ 任何相机的真编号，而旧的"CameraId<=0 即旧格式"判定
         ///   抓不到它（旧格式是缺失字段=0，改号后的孤儿是"值仍在但已无对应相机"）。
         /// 【判定】收集当前相机列表的"有效 ID 集合"：CameraId>0 用真编号、0 用行序兜底
         ///   （与 DefaultWindowPointMap / ProductionCoordinator.CameraIdFor 同一套兜底规则，保证
-        ///   "编辑候选"、"默认铺排"、"运行时反查"用同一把钥匙）；映射里只要有一个条目的
+        ///   "编辑候选"、"默认铺排"、"运行时反查"用同一把钥匙）；映射里只要有一个**非空**条目的
         ///   CameraId 不在集合中 → 判为无效（return false），调用方应重置该型号为默认铺排。
         /// 【调用方】ConfigStore.EnsureWindowPointMaps（加载/保存时清理孤儿表）与
         ///   ResolveWindowPointMap（运行时解析防御）统一走本方法，两端规则绝不漂移。
         /// </summary>
         /// <param name="cameras">当前相机列表（可含 null 元素，空安全跳过）</param>
-        /// <param name="points">要校验的窗口↔点位映射表（null 视为无效）</param>
-        /// <returns>true=所有条目均指向存在的相机；false=含孤儿/空条目</returns>
+        /// <param name="points">要校验的窗口↔点位映射表（null 视为无效；空窗口 null 条目跳过）</param>
+        /// <returns>true=所有非空条目均指向存在的相机；false=含孤儿/空列表</returns>
         public static bool PointMapValidForCameras(
             IEnumerable<CameraConfig> cameras, IEnumerable<WindowPointItem> points)
         {
@@ -776,7 +797,10 @@ namespace CommandCenter.Models
                 ci++;                              // null 元素也累加下标，保行序与铺排一致
             }
             foreach (var p in points)
-                if (p == null || !ids.Contains(p.CameraId)) return false;
+            {
+                if (p == null) continue;           // 空窗口（未配置点位）合法，跳过校验
+                if (!ids.Contains(p.CameraId)) return false;
+            }
             return true;
         }
 

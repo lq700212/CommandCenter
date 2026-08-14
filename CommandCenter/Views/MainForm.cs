@@ -143,7 +143,8 @@ namespace CommandCenter.Views
             // 热更/关窗时旧 ImageStore Dispose 会自行停掉定时器，这里只对当前新实例启动。
             _imageStore.StartPeriodicCleanup();
             _coordinator = new ProductionCoordinator(_plc, _cameras, cams, _imageStore,
-                _config.Display.WindowEnabled, _config.ProductModel, _config.Display.WindowPointMaps);
+                _config.Display.WindowEnabled, _config.ProductModel, _config.Display.WindowPointMaps,
+                WindowCount());
 
             // 连接健康监控：后台心跳 + 断连自动重连 + 边沿日志（不影响任何 UI 刷新）
             _monitor = new ConnectionMonitor(_plc, _cameras);
@@ -744,7 +745,8 @@ namespace CommandCenter.Views
 
             _coordinator = new ProductionCoordinator(_plc, _cameras,
                 _config.Cameras ?? new List<CameraConfig>(), _imageStore,
-                _config.Display.WindowEnabled, _config.ProductModel, _config.Display.WindowPointMaps);
+                _config.Display.WindowEnabled, _config.ProductModel, _config.Display.WindowPointMaps,
+                WindowCount());
             _coordinator.AttachScanners(_scanners);
             _coordinator.LatestSerialNumber = serial;
             SubscribeCoordinatorEvents();
@@ -762,11 +764,16 @@ namespace CommandCenter.Views
 
         /// <summary>
         /// 显示窗口矩阵：按"当前型号 + 相机点位表"在【设计器容器 gridCameraWindows】里动态重建
-        /// （V2.12.1 起自适应/非自适应统一，窗口总数=相机点位表条目和，见 DisplayConfig.ResolveLayout；
-        ///  V2.14 起自适应行列形状改为"优先增加列、最后一行缺失最少"，见 ResolveLayout 注释）。
+        /// （V2.14.18 起窗口总数=布局窗口数 windowCount：自适应=点位和、非自适=行列乘积含空窗口，
+        ///  见 DisplayConfig.ResolveLayout。自适应行列形状"优先增加列、最后一行缺失最少"，见注释）。
         /// 设计器只负责"容器长什么样"（Dock=Fill 铺满 pnlWindowScroll 滚动宿主、淡蓝白底），
         /// 具体行列数量与每格的 CameraDisplayControl 全部以这里为准重建，保证改行列/切型号/
         /// 保存配置即生效；行数放不下时滚动宿主自动出滚动条（见 ApplyGridScrollLayout）。
+        ///
+        /// 【空窗口（V2.14.18）】非自适下 windowCount=行列乘积 > 点位数时，多出的格子照样建
+        /// CameraDisplayControl 当作【空窗口】占位（无相机点位、一直空态），显示区被填满；
+        /// 空窗口要不要显示点位由"窗口/点位配置"里的映射决定（用户可把点位换到空窗口）。
+        /// 协调器只对有映射的窗口 SetImage，空窗口不接图。
         ///
         /// 【V1.12.28 窗口禁用重排】DisplayConfig.WindowEnabled=false 的窗口【不创建控件】：
         /// 从矩阵中"完全移除"该格子，剩余启用窗口按原窗口编号顺序【紧凑排列】（编号保留原值，
@@ -775,11 +782,20 @@ namespace CommandCenter.Views
         /// 为什么保留原编号：窗口编号绑定"相机点位表条目"（前上相机后下相机分组）与 WindowEnabled、
         /// StationPrograms（点位→相机程序）等配置，重新编号会打乱既有配置，宁可让格子位置空出。
         /// </summary>
+        /// <summary>当前配置下主界面要创建的窗口控件总数（V2.14.18）：统一走 ResolveLayout.windowCount
+        /// （自适应=点位数；非自适=行列乘积、含空窗口）。协调器构造 / 窗口矩阵 / 配置对齐复用同一套
+        /// 计算，禁止各处再单独写一遍 windowCount。</summary>
+        private int WindowCount()
+        {
+            return DisplayConfig.ResolveLayout(
+                _config.Cameras, _config.ProductModel,
+                _config.Display.AutoFit, _config.Display.Rows, _config.Display.Columns).windowCount;
+        }
+
         private void BuildWindowGrid()
         {
-            // V2.12.1 统一布局：窗口总数 = 各相机按当前产品型号点位表条目数之和（与是否自适应无关，
-            // 自适应/非自适都是"点位由相机表唯一决定，窗口只是按前上后下把点位条目铺排"）；
-            // 行列形状：自适应自动算，非自适列用手填、行不足自动补齐（见 DisplayConfig.ResolveLayout）。
+            // V2.14.18 统一布局：窗口总数 = ResolveLayout.windowCount（自适应=点位数、非自适=行列
+            // 乘积含空窗口）；行列形状：自适应自动算，非自适列用手填、行不足自动补齐（见注释）。
             // 当产品型号在各相机点位表里查不到任何点位时 windowCount≥1，矩阵至少保留一个窗口。
             var layout = DisplayConfig.ResolveLayout(
                 _config.Cameras,
@@ -788,7 +804,8 @@ namespace CommandCenter.Views
                 _config.Display.Rows,
                 _config.Display.Columns);
             int rows = layout.rows, cols = layout.cols, total = layout.windowCount;
-            int gridCells = rows * cols; // 矩阵总格子数（自适应下 ≥ 窗口总数，尾行空余格子留空）
+            int gridCells = rows * cols; // 矩阵总格子数；自适下 ≥ 窗口总数（尾行空余格子留空），
+            // 非自适下 == 窗口总数（全部格子都建窗口，点位不够多出=空窗口）
 
             // 重置容器：先释放旧窗口（热更时旧窗口 PictureBox 持有图片句柄，必须 Dispose 防泄漏），
             // 再清掉设计器默认的 1×1 行列与可能残留的子控件。

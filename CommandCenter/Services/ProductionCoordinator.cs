@@ -161,7 +161,8 @@ namespace CommandCenter.Services
                                      ImageStore imageStore,
                                      List<bool> windowEnabled,
                                      string productModel,
-                                     List<ModelWindowPointMap> windowPointMaps)
+                                     List<ModelWindowPointMap> windowPointMaps,
+                                     int windowCount)
         {
             _plc = plc;
             _cameras = cameras ?? new List<KeyenceIV4Camera>();
@@ -171,8 +172,10 @@ namespace CommandCenter.Services
             _productModel = productModel ?? "";
             // V2.13：窗口↔点位独立映射（按型号分表）。解析当前型号的映射（缺表/长度不对回退
             // 默认铺排），PLC 请求点位据此反查唯一窗口（见 TryResolveActiveWindow）。
+            // V2.14.18：映射表长度 = 布局窗口总数 windowCount（非自适=行列乘积、含空窗口），
+            // 空窗口（null 条目）合法、不参与反查。
             _windowPointMap = Models.DisplayConfig.ResolveWindowPointMap(
-                _cameraCfgs, _productModel, windowPointMaps);
+                _cameraCfgs, _productModel, windowPointMaps, windowCount);
 
             // V2.13.6：为每台相机准备一个"FTP 新图到达"信号（数组至少 1 个防越界），
             // 订阅 ImageStore 的新图事件——相机推图到目录的瞬间即可唤醒等图流程，不必等下一个轮询周期。
@@ -795,9 +798,9 @@ namespace CommandCenter.Services
             && cfg.ImageSource.Trim().Equals("Tcp", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
-        /// 把"某台相机拍到某个点位"解析成显示窗口编号（V2.12.1 起统一相机表驱动，不再分自适应/非自适应；
-        /// V2.13 起支持手动编辑的"窗口↔(相机,点位)"独立映射，见 DisplayConfig.WindowPointMaps；
-        /// V2.13.4 起关联键 = 相机ID CameraId，不再用列表下标）。
+        /// 把"某台相机拍到某个点位"解析成显示窗口编号（V2.12.1 起统一相机表驱动；V2.13 起支持
+        /// 手动编辑的"窗口↔(相机,点位)"独立映射，见 DisplayConfig.WindowPointMaps；V2.13.4 起关联键
+        /// = 相机ID CameraId，不再用列表下标）。
         ///
         /// 点位由相机点位表唯一决定：上下相机点位号各自从 1 起会重复（如上相机 1~20、下相机 1~4）。
         /// 定位方式（V2.13 起）：
@@ -805,6 +808,9 @@ namespace CommandCenter.Services
         ///     （= DisplayConfig.DefaultWindowPointMap 的铺排，与旧逻辑等价）；
         ///   - 手动编辑/交换过（WindowPointForm）：查该型号的 WindowPointMaps 表，
         ///     找"相机=本相机ID且点位=请求点位"的唯一窗口（同一"相机+点位"只分配给一个窗口）。
+        /// 【空窗口（V2.14.18）】映射表长度 = 布局窗口总数（非自适=行列乘积），多余格子的条目为
+        ///   null（空窗口，未配置点位）——遍历时 `it != null` 已跳过，空窗口不会被反查到，
+        ///   即"空窗口不归任何相机所属点位的显示位"，其点位是用户后续手动分配过去的。
         /// 找不到窗口：
         ///   - 该点位不归本相机拍（另一台相机的点位）→ 返回 false，调用方按"跳过"处理（写结果 3）；
         /// 该窗口被禁用（WindowEnabled=false）→ 返回 false（同样是跳过，不拍照不计数）。
@@ -851,14 +857,6 @@ namespace CommandCenter.Services
             if (_windowEnabled == null) return true;
             if (w < 1 || w > _windowEnabled.Count) return true;
             return _windowEnabled[w - 1];
-        }
-
-        /// <summary>显示窗口总数（V2.12.1 统一）：各相机按当前型号点位表条目数之和（至少 1），
-        /// 与主窗体 BuildWindowGrid / WindowPointForm / 设置页预览走同一套（DisplayConfig.WindowCountFor，
-        /// 自适应与否都一样——点位由相机点位表唯一决定，窗口只是把点位条目顺序铺排）。</summary>
-        private int _windowCount()
-        {
-            return DisplayConfig.WindowCountFor(_cameraCfgs, _productModel);
         }
 
         /// <summary>

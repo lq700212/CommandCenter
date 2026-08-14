@@ -1,5 +1,75 @@
 # 版本改动记录
 
+## V2.14.18（2026-08-14）非自适应窗口总数=行列乘积（含"空窗口"），主界面/点位配置全链路支持
+
+> 现场诉求：未勾选"自适应"时，主窗体窗口矩阵应**填满显示区**——手填的行×列应就是窗口总数
+> （如 3×7=21、4×7=28），与操作员看到"设置几行几列就像铺满几行几列"一致；此前非自适下窗口
+> 总数被统一算成"各相机点位和"（U171=24），导致手填的大矩阵只铺出点位数、右/下残留大块空白。
+> 之前"自适应才填满"正好掩盖了这一点。本次把非自适改为 **窗口总数 = 手填行×列**（点位不够多出的
+> 格子=**空窗口**，照常建窗占满显示区、只是不接图），并把主界面、协调器、ConfigStore、配置
+> 窗体、窗口/点位配置窗体全链路改成按"每个型号各自的窗口总数"工作。
+
+### 改动范围
+
+- **核心模型（`Models/AppConfig.cs`）**：
+  - `DisplayConfig.ResolveLayout`：自适应窗口总数 `total`（各相机按当前型号点位表和）恒原地保留
+    （`return total`，舍掉 `rows*cols` 换算）；**非自适应 `windowCount = 手填行×列`**（放不下点位
+    自动补行后取 `rows*cols`，不再退回点位和）——主界面/协调器/配置/点位窗体拿到的窗口总数两模式
+    语义统一按 ResolveLayout 走。
+  - **`ResolveWindowPointMap(cameras, windowCount, model, maps)` 新增 `windowCount` 参数**：默认铺排
+    （长度=windowCount）前 N（=点位数)张按"前上相机后下相机"填 `WindowPointItem`，**尾部多出的
+    条目 = null（空窗口占位）**；`WindowPointMaps` 已存在且长度=windowCount 时原样返回。这是"空窗口"
+    唯一来源与唯一口径（协调器反查、点位窗体、ConfigStore 对齐全部共用）。
+  - `DisplayConfig.WindowCountFor` 保留（内部一次等价换算，非自适返回值=行×列），旧调用点统一改走
+    ResolveLayout。
+- **协调器（`Services/ProductionCoordinator.cs`）**：删除 `_windowCount()` 轻量方法，改用构造传入
+  `DisplayConfig.ResolveLayout(cameras, model, display).windowCount`；构造与 `Resolve`（热更）头注释
+  同步"非自适=行列乘积、含空窗口"。空窗口（映射条目为 null）不参与 PLC 轮询/匹配，天然被跳过。
+- **ConfigStore（`Utils/ConfigStore.cs`）**：`EnsureStationMap` / `EnsureWindowPointMaps` 由
+  `WindowCountFor` 改走 `ResolveLayout`（带各型号），旧映射长度不符时重建默认铺排，**加载/保存两端
+  保证 WindowEnabled/映射长度对齐到行列乘积**（空窗口也在 WindowEnabled 里占位）。
+- **主窗体（`Views/MainForm.cs`）**：`BuildWindowGrid` 用 `layout.windowCount` 建窗，空窗口照常创建
+  （深灰空态、占满显示区），仅"选中窗格变大图"的 CellDoubleClick 对空窗口跳过；头注释更新
+  V2.14.18 窗口总数语义。
+- **配置窗体（`Views/SettingsForm.cs`）**：`AutoFitLayout()` 自适应窗口总数说明与提示文案更新
+  （非自适=行×列、多出为空窗口）；`AutoFitDisabledHint` 明示"点位不够多出的格子是空窗口，主界面
+  照常建窗占满，可在窗口/点位配置里用交换位置分配点位"。
+- **窗口/点位配置窗体（`Views/WindowPointForm.cs`，本版本核心交互）**：窗口总数统一取
+  `DisplayConfig.ResolveLayout(cameras, model, display).windowCount`（自适应=点位和、非自适=行×列），
+  并支持**空窗口（null 条目）**：
+  - **交互按钮**上支持：选中空窗口时【编辑点位】【禁用/启用】自动**置灰**（无点位可编辑、无"点位坏
+    了停用"语义），仅【交换位置】【恢复默认】可用；
+  - **【交换位置】支持空窗口**：可在"空窗口 ↔ 有点位的窗口"间互换点位（把点位搬进空窗口的唯一入口；
+    空↔空交换无效果），此处是 V2.14.2"编辑副本深拷贝"扩到 null 条目的天然延续（SwapCells 直接互换
+    槽位引用）；
+  - **【恢复默认】** 重置为"尾部多出的格子=空窗口（null）"的出厂铺排并全部启用；
+  - **防御**：`EditSelectedPoint` / `ToggleWindowDisabled` 遇空窗口弹提示直接返回（界面置灰只是第一道）；
+  - `UpdateActionButtons` / `IsEmptyWindow` / `RefreshCells`（空窗口浅灰底+"空窗口（无点位）"标注）/
+    `ResolveWindowSource`（空窗口→"空窗口（无点位）"文案）成套实现；类头注释与常驻提示 `LocalHeaderHint`
+    更新空窗口用法说明。
+- **安全复查（走"删除旧代码自检纪律"）**：非自适改走 `ResolveLayout` 后确认 `DisplayConfig` 恒非空
+  （ConfigStore.ApplyDefaults 已兜底）才引用 `display.AutoFit/Rows/Columns`；`DefaultWindowPointMap`
+  去掉了 API 变更后多余的内部重算，`ResolveWindowSource` 空窗口分支优先于越界兜底。
+
+### 为什么这么改
+
+- 非自适的行列本来就是"排列宽度/期望行数"，与"窗口总数=点位和"并存时二者互相矛盾——手填大矩阵只铺
+  出点位数、残留大片空白，操作员显然期待"设几行几列就铺满几行几列"；改为"行×列即窗口总数"后所见
+  **即所得**，填满显示区，且主界面、协调器、点位配置三者窗口数天然一致。
+- 空窗口不是"没用的格子"：它让现场在点位不够时仍能**先把显示区铺满**，之后用【交换位置】把点位搬进
+  任意位置（点位先后顺序可重排），比"点位不够就列表留空"更直接——这是设置窗体提示明示的用法。
+- 各型号点位不同（U171=24、Z121=29…），非自适行×列对每个型号算出的窗口总数、空窗口位置不同，
+  全部按型号分表（WindowPointMaps）保存，切型号立即正确。
+- 自适应保持行业习惯（点位和=窗口总数、自动铺排缺格少），仍与旧版完全一致，不引入回归。
+
+### 验证
+
+- 构建通过（MSBuild Debug/AnyCPU），冒烟启动 exe 进程存活。
+- 逻辑推演：U171（24 点）非自适 3×7=21<24 → 自动补行得 4×7=28，28 窗（4 空窗）填满；4×7=28 恰好
+  24 点+4 空窗；5×5=25（25≥24）→ 25 窗（1 空窗）；自适应仍 24 窗不变。WindowEnabled/WindowStationMap
+  /WindowPointMaps 在 28/25/24 下均按 ResolveLayout 对齐，空窗口参与交换、不参与编辑/禁用，反查唯一性
+  不受影响。
+
 ## V2.14.16（2026-08-14）U171 上相机"点位→程序号"对应关系现场定稿
 
 > 现场核对发现型号 U171 上相机的点位与视觉程序对应不对，按实际工艺调整：

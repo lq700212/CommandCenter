@@ -345,9 +345,11 @@ namespace CommandCenter.Utils
 
         /// <summary>
         /// 保证 WindowStationMap（历史兼容字段）与 WindowEnabled（窗口启用列表）都和
-        /// 显示窗口总数对齐（V2.12.1 统一）：窗口总数 = 各相机按当前型号点位表条目数之和
-        /// （DisplayConfig.WindowCountFor，自适应/非自适应一致——点位由相机点位表唯一决定）。
-        /// Rows/Columns 仅决定排列宽度、不决定窗口数；WindowStationMap 已退役，
+        /// 显示窗口总数对齐（V2.12.1 统一；V2.14.18 窗口总数改按 ResolveLayout.windowCount）：
+        /// 窗口总数 = 主界面要创建的窗口控件数（自适应=各相机按当前型号点位表条目数之和；
+        /// 非自适=行列乘积、含空窗口）。WindowEnabled 覆盖全部窗口（含空窗口，默认启用），
+        /// 禁用任意窗口（含空窗口）主界面就少一格。
+        /// Rows/Columns 仅决定排列形状、不决定点位数；WindowStationMap 已退役，
         /// 只按"点位=窗口编号"补齐对齐留档，不参与任何运行逻辑。
         /// 对齐规则不变：长度不足 → 点位按"点位=窗口编号"补上、启用按 true 补上（默认规则）；
         /// 长度超出 → 多余截断（窗口数改小后，超出部分丢弃）。
@@ -355,7 +357,12 @@ namespace CommandCenter.Utils
         /// </summary>
         private static void EnsureStationMap(Models.AppConfig cfg)
         {
-            int windowCount = Models.DisplayConfig.WindowCountFor(cfg.Cameras, cfg.ProductModel);
+            // V2.14.18：窗口总数 = 布局窗口数（自适应=点位数；非自适=行列乘积、含空窗口），
+            // 与主窗体 BuildWindowGrid / WindowPointForm / 协调器走同一套 ResolveLayout。
+            var layout = Models.DisplayConfig.ResolveLayout(
+                cfg.Cameras, cfg.ProductModel,
+                cfg.Display.AutoFit, cfg.Display.Rows, cfg.Display.Columns);
+            int windowCount = layout.windowCount;
 
             var map = cfg.Display.WindowStationMap ?? new List<int>();
             while (map.Count < windowCount) map.Add(map.Count + 1);
@@ -373,11 +380,12 @@ namespace CommandCenter.Utils
         /// 保证"窗口↔点位独立映射"（DisplayConfig.WindowPointMaps，V2.13）与窗口总数对齐。
         /// 【为什么需要】V2.13 起允许手动编辑窗口↔(相机,点位) 的对应（WindowPointForm 的
         ///   编辑点位/交换位置/恢复默认）。映射按产品型号分表（ModelWindowPointMap），
-        ///   每张表长度必须 = 该型号窗口总数（各相机点位表条目和，见 WindowCountFor），
-        ///   否则运行时 ResolveWindowPointMap 因长度不匹配回退默认铺排、用户编辑白改。
+        ///   每张表长度必须 = 该型号布局窗口总数 windowCount（ResolveLayout：自适应=点位数；
+        ///   非自适=行列乘积、含空窗口），否则运行时 ResolveWindowPointMap 因长度不匹配回退
+        ///   默认铺排、用户编辑白改。
         /// 【做法】为每个候选型号（ProductModels ∪ 当前 ProductModel）补一张表：
-        ///   - 型号没配表 → 新建默认铺排表（DefaultWindowPointMap，前上相机后下相机）；
-        ///   - 已有表长度 ≠ 窗口总数（相机点位表增删点位后没跟着改）→ 整表重置为默认铺排
+        ///   - 型号没配表 → 新建默认铺排表（DefaultWindowPointMap，前上相机后下相机 + 尾部空窗口）；
+        ///   - 已有表长度 ≠ 窗口总数（相机点位表增删点位/行列改动后没跟着改）→ 整表重置为默认铺排
         ///     （点位由相机点位表唯一决定，数量变了只能回默认，避免"窗口↔点位"错位越界）；
         ///   - 已有表含"孤儿 CameraId"（V2.13.10）：某条目的 CameraId 不再是任何相机的真编号
         ///     （相机被改号）/旧格式遗留（CameraId<=0，V2.13.4 前 windowPointItem 存
@@ -388,8 +396,8 @@ namespace CommandCenter.Utils
         ///     反查永远找不到窗口 → 该相机全部点位被判跳 3（整台相机罢工）。
         ///     重置以"当前相机列表"重新生成，天然用上新编号，改号即刻生效。
         ///     校验统一走 DisplayConfig.PointMapValidForCameras（与 ResolveWindowPointMap 同一套，
-        ///     两端规则绝不漂移）。注意：不能覆盖"长度恰好匹配且 ID 全有效"的用户自定义表
-        ///     ——那是现场手动编辑的结果，保留。
+        ///     两端规则绝不漂移；空窗口 null 条目合法跳过）。注意：不能覆盖"长度恰好匹配且 ID
+        ///     全有效"的用户自定义表——那是现场手动编辑的结果，保留。
         /// </summary>
         private static void EnsureWindowPointMaps(Models.AppConfig cfg)
         {
@@ -410,8 +418,12 @@ namespace CommandCenter.Utils
 
             foreach (var model in models)
             {
-                // 每个型号一张默认铺排表（长度=该型号窗口总数）
-                var def = Models.DisplayConfig.DefaultWindowPointMap(cfg.Cameras, model);
+                // 每个型号一张默认铺排表。窗口总数 = 该型号 ResolveLayout.windowCount
+                // （自适应=点位和；非自适=行列乘积、含空窗口），见 EnsureStationMap 注释。
+                var layout = Models.DisplayConfig.ResolveLayout(
+                    cfg.Cameras, model,
+                    cfg.Display.AutoFit, cfg.Display.Rows, cfg.Display.Columns);
+                var def = Models.DisplayConfig.DefaultWindowPointMap(cfg.Cameras, model, layout.windowCount);
                 Models.ModelWindowPointMap found = null;          // 手工查找同名型号表（无 Linq）
                 for (int i = 0; i < maps.Count; i++)
                 {
@@ -430,7 +442,7 @@ namespace CommandCenter.Utils
                 else if (found.Points == null || found.Points.Count != def.Count
                     || !Models.DisplayConfig.PointMapValidForCameras(cfg.Cameras, found.Points))
                 {
-                    // 表存在但长度与窗口总数不一致（点位表增删点位后没跟上）、含孤儿 CameraId
+                    // 表存在但长度与窗口总数不一致（点位表增删点位/行列改动后没跟上）、含孤儿 CameraId
                     // （相机改号后旧 ID 无对应相机）或旧格式条目（V2.13.4 前存 cameraIndex，
                     // 反序列化为 0，PointMapValidForCameras 对 CameraId<=0 一律判无效）：
                     // 点位由相机点位表唯一决定，数量变了/关联键失效只能重置默认，防越界/错位/
