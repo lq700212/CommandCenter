@@ -567,7 +567,7 @@ namespace CommandCenter.Services
             // 随显示事件带给 UI——显示不再等"jpeg+iv4p 归档复制 + 删源"全部完成。null=未加载/失败。
             Image preview = null;
             // 存图点位号（V2.12.1 定稿）：统一用【相机点位号】stationNo 进文件名 {点位}——
-            // 点位由相机点位表唯一决定，上下相机点位号各自从 1 起会重复（如上相机 1~18、下相机 1~4），
+            // 点位由相机点位表唯一决定，上下相机点位号各自从 1 起会重复（如上相机 1~20、下相机 1~4），
             // 同名文件靠 ImageStore 的目录 {相机} 层按相机隔开（见 ImageStore 类注释），不再用全局窗口编号。
             // windowIndex 仅用于"显示窗口定位 / WindowEnabled/是否跳过"判定。
             int storeStation = stationNo;
@@ -799,7 +799,7 @@ namespace CommandCenter.Services
         /// V2.13 起支持手动编辑的"窗口↔(相机,点位)"独立映射，见 DisplayConfig.WindowPointMaps；
         /// V2.13.4 起关联键 = 相机ID CameraId，不再用列表下标）。
         ///
-        /// 点位由相机点位表唯一决定：上下相机点位号各自从 1 起会重复（如上相机 1~18、下相机 1~4）。
+        /// 点位由相机点位表唯一决定：上下相机点位号各自从 1 起会重复（如上相机 1~20、下相机 1~4）。
         /// 定位方式（V2.13 起）：
         ///   - 默认（未手动编辑）：按"前上相机后下相机"分组，窗口 = 相机点位表条目位置
         ///     （= DisplayConfig.DefaultWindowPointMap 的铺排，与旧逻辑等价）；
