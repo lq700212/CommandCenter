@@ -57,6 +57,14 @@ namespace CommandCenter.Services
         private readonly PlcConfig _cfg;
         private readonly object _lock = new object();
 
+        // V2.14.14：当前产品型号（建站即写/切型号即写用）。
+        // 背景：上位机写型号原本只在"收到 PLC 扫码请求→扫码通道推进"时触发，PLC 若不触发扫码
+        // 流程就读不到型号区（40007=0、40008~40012=0）。为让 PLC 随时能读到当前型号，改为：
+        //   ① 从站建站成功（EnsureConnected）后立即把本字段写入型号区（上电/断线重建/热更重建都覆盖）；
+        //   ② MainForm 主界面切型号（SwitchModel）时更新本字段并立即写一次（见 MainForm.SwitchModel）。
+        // 型号为空（配置缺/未设置）时建站即写跳过，避免覆盖 PLC 侧既有型号区。
+        private string _currentModel = "";
+
         /// <summary>已释放标记：Dispose 后后台监听/轮询立即放弃</summary>
         private volatile bool _disposed;
 
@@ -174,6 +182,12 @@ namespace CommandCenter.Services
                     // 显式把扫码结果（40004）与各相机结果（40005/40006…）清 0，PLC 主站上电读到
                     // 的一定是复位态。DataStore 已就绪（建站成功），写 0 一定有效。
                     ResetResultRegisters();
+                    // V2.14.14：从站建站成功后立即把当前型号写进型号区（40007=序号 +
+                    // 40008~40012=字符串）。背景：PLC 若不触发扫码流程,上位机原本只在扫码通道
+                    // 推进时才写型号,PLC 读到的型号区恒为 0；现在建站即写,PLC 随时能读到当前型号。
+                    // 型号为空时跳过（WriteProductModel("") 会写 0,没必要覆盖）。
+                    if (_currentModel.Length > 0)
+                        WriteProductModel(_currentModel);
                     LogHelper.Info($"PLC 从站监听已启动 {ip}:{_cfg.Port}（UnitId={_cfg.UnitId}），等待汇川主站连入");
                     return true;
                 }
@@ -328,6 +342,18 @@ namespace CommandCenter.Services
         {
             ushort addr = (ushort)(cam?.PlcResultAddress > 0 ? cam.PlcResultAddress : 0);
             if (addr > 0) WriteLocalSafe(addr, (ushort)code);
+        }
+
+        /// <summary>
+        /// 设置当前产品型号（V2.14.14）：更新内部 `_currentModel`。
+        /// 【调用时机】MainForm 组装服务时传入初始型号（BuildServices），主界面切型号（SwitchModel）
+        /// 时更新并立即写型号区。从站建站成功（EnsureConnected）时也会用本字段把当前型号写进型号区，
+        /// 让 PLC 在不触发扫码流程的情况下也能读到当前型号（见 EnsureConnected 内建站即写逻辑）。
+        /// </summary>
+        /// <param name="model">当前产品型号（如 "U171"），为空则建站即写跳过（不覆盖 PLC 侧型号区）</param>
+        public void SetCurrentModel(string model)
+        {
+            _currentModel = model ?? "";
         }
 
         /// <summary>

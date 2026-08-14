@@ -77,11 +77,15 @@
   在前、不足补 0x00、最多 10 字符，超长从 40013 向后扩展；PLC 优先用 40007 序号区分型号）。**三拍流程**：PLC 写请求≠0 → 上位机处理完
   写结果≠0 → PLC 读走并复位请求=0 → 上位机看请求清零再复位结果=0 → 进入下一拍。**新一轮清窗（V2.14.11）**：`ProductionCoordinator.BeginScanChannel`（收到 40001=1 扫码请求、本轮生产启动）触发 `RoundStarted` 事件，MainForm 订阅后清空各窗口图片（`SetImage(null)` 回深灰空态）——新的一轮第一个动作就是扫码，上一轮图片已过时，提前清掉避免与新结果混淆；事件在轮询后台线程触发、UI 侧 BeginInvoke 回 UI 线程再遍历 `_windowControls` 清空。**上电/开机初始化复位（V2.13.8）**：PLC 与上位机各把各的结果寄存器先写 0，防断电重启残留旧值（上次 1/2/3）被误当新结果——PLC 侧由梯形图上电清 0；上位机侧 `PlcService.EnsureConnected` 每次成功建站（软件启动/断线重建/热更重建）都自动调 `ResetResultRegisters()` 把扫码结果（`ScanResultAddress`）+ 各相机结果（`PlcResultAddress`，MainForm.BuildServices 经 `SetCameraResultAddresses` 注册，0=未配置跳过）清 0，日志见"上电初始化：上位机结果寄存器已全部复位为 0"。**相机结果"判定即写"（V2.13.7 定稿，重要）**：相机 OK/NG 判定在 T2 触发+读判定返回时就已知，`DoCameraShot` 判定一返回**立即** `WriteCameraResult` 落 PLC 结果（1/2），**不等 FTP 取图+归档**（那会让 PLC 陪跑数百 ms~2s 图传输）——取图/归档/显示降级为纯异步补充，图中途没到/归档失败只记日志+报警、**结果不回退**（以相机判定为准，图缺失只影响显示/存图）；同时通道释放必须等"PLC 已复位请求 **且** `_taskDone`（拍照 Task 完全结束）"（`StepCameraChannel` step2 闸门），否则判定即写让 PLC 提前复位请求、通道过早释放，下一拍请求进来会开新 Task 造成**同相机并发取图/删源混图**——改动握手流程必须同步本段与 `docs/CommandCenter.md` §5.3/5.4。**地址约定（V2.12.3 定稿）**：配置里统一存** DataStore 索引**（PLC 协议号 = 索引 + 40000，如协议 40002 上相机请求 → 索引 2，就是汇川 D2/D3/D5 这类数字，填 2 就是 2）；现场实测 PLC 写 40002 → 从站 DataStore[2]（曾误以为"零偏移直接用协议号"导致读 DataStore[40002] 永远读不到请求；V2.12.2 曾做"协议号-40000 换算"中间方案，V2.12.3 起按"改就改干净"删掉 `ProtocolToIndex`，业务层【零换算】）；地址全部收进 `PlcConfig`（`ScanRequestAddress/ScanResultAddress/
 ProductModelIndexAddress/ProductModelAddress/ProductModelLen/ModelIndexes`）+ 顶层 `ProductModel`（**两处可改，同一个值**：① 设置窗体 PLC 区
-   "产品型号" **cmbModel 可编辑下拉**（候选=预置三型号 ∪ 顶层 `ProductModels`，手输新型号保存自动加入）；
+   "产品型号" **cmbModel 可编辑下拉**（候选=预置型号 ∪ 顶层 `ProductModels`，手输新型号保存自动加入），
+   **型号→序号映射在"产品型号配置…"按钮弹窗（ModelIndexEditForm，V2.14.14）里表格维护（两列：序号/型号名称，前几行预载已有映射，确定写回 `plc.modelIndexes`、取消关闭不落盘）**——取代 V2.14.13 的"型号序号"框 nudModelIndex；
    ② **主界面标题栏型号下拉 `cmbModel`（V2.8，操作员日常切型号用，候选恒预置 U171/Z121 不依赖配置
    文件）：`SwitchModel` 更新 ProductModel + 写盘 + 只重建协调器**（PLC/相机/扫码枪复用、设备不断连，
-   新型号随下次扫码写 PLC、按新型号查 `modelStationPrograms` 切程序）），
-   每次扫码 `ProductionCoordinator` 调 `PlcService.WriteProductModel` 写 40007=型号序号 + 40008~40012=型号字符串）。版本化流程：
+   **切型号即写型号区（V2.14.14）：`_plc.SetCurrentModel` + `WriteProductModel` 立即下发新型号**，
+   按新型号查 `modelStationPrograms` 切程序）），
+   **型号写入时机（V2.14.14）**：① 每次扫码 `ProductionCoordinator` 调 `PlcService.WriteProductModel`
+   写 40007=型号序号 + 40008~40012=型号字符串；② **从站建站成功（EnsureConnected）即写当前型号**
+   （`PlcService.SetCurrentModel` 缓存型号，建站成功自动写，PLC 不触发扫码也读得到）。版本化流程：
 `ProductionCoordinator` 是**三通道状态机**（通道①扫码 40001/40004、通道②第1台相机 40002/40005、
    通道③第2台相机 40003/40006），**V2.13.5 起活跃通道=相机 ID**：`_activeCh = cameraId`，
    `PollNewRequest` 按相机表顺序轮询每台相机显式配置的请求通道，读到请求即 `BeginCameraChannel(cameraId,…)`
@@ -147,6 +151,7 @@ ProductModelIndexAddress/ProductModelAddress/ProductModelLen/ModelIndexes`）+ �
 | `CommandCenter/Views/LoginForm.cs` | 账号登录对话框（管理员 admin / 开发者 dev 双账号，按角色分流进设置或功能测试，V1.9.0/V1.12.0） |
 | `CommandCenter/Views/DevTestForm.cs` | 功能测试窗体（开发者专用：相机 T1/T2 触发（T2 取图闪图存图，V1.12.24）+ PLC 寄存器交互 + 扫码枪读码展示/发触发指令，复用主窗体连接，V1.12.0） |
 | `CommandCenter/Views/SerialInputForm.cs` | 手动输入序列号对话框（V2.14.6 恢复；V2.14.7 外观改到 Designer 分部文件 SerialInputForm.Designer.cs，可用 VS 设计器拖拽微调 UI，本类只留业务：预填全选/回车确定/Esc取消/空提交拦截）：外观对齐 LoginForm（顶部蓝色横幅+白面板+蓝主按钮），点标题栏"人工补录"按钮弹出（V2.14.7 起双击序列号框入口已取消） |
+| `CommandCenter/Views/ModelIndexEditForm.cs` | 产品型号配置对话框（V2.14.14，按钮入口在设置窗体 PLC 区"产品型号配置…"）：表格两列（序号/型号名称）维护型号↔PLC序号(40007)映射，前几行预载已有映射、确定才写回 `plc.modelIndexes`（编辑副本深拷贝、取消不影响原配置），由设置窗体【保存】统一写盘；外观对齐 LoginForm 横幅+白面板+蓝主按钮 |
 | `CommandCenter/Controls/CameraDisplayControl.cs` | 相机显示窗 + 右下角自绘 OK/NG 徽标（主界面不显示点位标识，点位只走设置界面查询）；左上角窗口编号显隐由配置 `DisplayConfig.WindowIndexVisible` 控制（V2.10.6） |
 | `CommandCenter/Views/DirTreeEditForm.cs` | 图片存储目录结构可视化配置（逐级目录 + 文件名规则 + 实时预览 + 时间戳后缀开关 + 存图保留天数，V2.14.12） |
 | `CommandCenter/Views/WindowPointForm.cs` | 窗口↔存图点位 + 点位↔相机程序号 可视化配置（格子矩阵编辑点位/交换/恢复默认，V2.13 恢复编辑并按型号存 WindowPointMaps + 相机下拉点位程序表，V1.12.25 同页混排、V1.12.26 两列改下拉选择、V2.12.0 自适应下按相机表铺排矩阵/格子标"相机名·点位号"；**相机↔型号单向联动（V2.14.5）**：cmbCamera 恒列所有相机、选定后 cmbModel 只列该相机有点位的型号、切型号不再反过滤相机——见 `ModelCandidatesFor`/`SyncModelForCamera`/`ApplySelections`） |

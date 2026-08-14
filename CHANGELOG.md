@@ -1,5 +1,50 @@
 # 版本改动记录
 
+## V2.14.14（2026-08-14）PLC 型号写入时机优化 + 产品型号配置弹窗
+
+> ① 上位机写型号区原本只在"收到 PLC 扫码请求→扫码通道推进"时触发，PLC 若不触发扫码流程
+> 就读不到型号（40007/40008~40012 全 0）。改为三时机写：每次扫码推进 + **从站建站成功即写** +
+> **主界面切型号立即下发**，PLC 随时能读到当前型号。
+> ② 设置窗体 PLC 区用"产品型号配置…"按钮弹窗（表格两列：序号/型号名称）取代 V2.14.13 的"型号序号"框。
+
+### 改动范围
+- **型号写入时机（需求：PLC 没走扫码触发也能读到型号）**：
+  - `Services/PlcService.cs`：新增 `SetCurrentModel(string model)`（缓存当前型号到 `_currentModel`）；
+    `EnsureConnected` 从站建站成功后（`ResetResultRegisters()` 之后）若型号非空即调
+    `WriteProductModel(_currentModel)` 把型号区写一遍——覆盖软件启动/断线重建/热更重建，
+    型号为空则跳过（不覆盖 PLC 侧既有型号区）。
+  - `Views/MainForm.cs`：`BuildServices` 建完 `_plc` 即 `SetCurrentModel(_config.ProductModel)`
+    （建站即写的数据源）；`SwitchModel` 切型号时 `SetCurrentModel` + `WriteProductModel` 立即
+    下发新型号（不再等下一拍扫码），日志文案同步改为"PLC 型号区已立即下发"。
+- **产品型号配置弹窗（需求：型号序号不要放在设置窗体单行框里，改成按钮+表格弹窗）**：
+  - `Views/ModelIndexEditForm.cs` + `.Designer.cs`（新）：产品型号配置对话框。表格两列——
+    **序号**（PLC 40007 对应序号，0~65535）、**型号名称**；前几行默认预载 `plc.modelIndexes`
+    已有映射，可增删行/改单元格；【确定】收集表格→校验（型号名非空、不重复、序号合法）→
+    整体写回 `_cfg.Plc.ModelIndexes`；【取消】直接关闭、不保存任何修改。**编辑副本深拷贝**：
+    构造时深拷贝目标列表，表格只动副本，确定才赋回（取消不污染原配置，同 WindowPointForm 红线）。
+    外观对齐 LoginForm/SerialInputForm（蓝色横幅+白面板+蓝主按钮）；确定在右/取消在左、
+    两按钮分别贴表格右/左边缘。
+  - `Views/SettingsForm.cs` + `.Designer.cs`：删除 `nudModelIndex`/`lblModelIndex` 及
+    `SyncModelIndexFromCombo`/`cmbModel.TextChanged` 联动；新增 `btnModelConfig`（"产品型号配置…"，
+    位置=旧型号序号处），点击打开 ModelIndexEditForm（传 `_cfg.Plc.ModelIndexes` 引用）；
+    OnSave 中删掉原"当前型号序号写回映射"段（映射统一由弹窗维护，ConfigStore.EnsureModelIndexes
+    仍兜底补齐候选型号缺失项）。头注释 ASCII 布局图同步。
+  - `CommandCenter.csproj`：登记 ModelIndexEditForm.cs + Designer 分部文件。
+- **DevTestForm**：写产品型号按钮已兼容新格式（40007=序号 + 40008~40012=字符串），无需改动。
+
+### 为什么这么改
+- **型号是 PLC 分型控制的关键输入**：原"只有扫码才写"依赖 PLC 先触发扫码，梯形图想在任何时刻
+  读型号都读到 0。建站即写 + 切型号即写让型号区**始终反映当前型号**，PLC 可在请求扫码之前读走。
+- **表格比单框直观**：型号↔序号是一对多映射（Z121=1/U171=2 还要加新型号），单框只能改当前选中
+  型号、加型号/批量调整都不方便；弹窗表格所见即所得，前几行预载已有映射降低误配。
+- **弹窗不污染配置**：复制一份编辑、确定才写回，点【取消】绝不生效，符合"取消=什么都不做"。
+
+### 验证
+- 构建通过（MSBuild Debug/AnyCPU）。
+- 冒烟：exe 启动 5 秒存活（pid 31004）。
+- 反射实测 `PlcService.SetCurrentModel("U171")` 后 `EnsureConnected` 建站 → `WriteProductModel`
+  被调（型号区写入）；`SwitchModel` 路径经编译验证（写型号前更新 `_currentModel`）。
+
 ## V2.14.13（2026-08-14）PLC 型号区升级：型号序号 + 型号字符串
 
 > 产品型号写入从"40007~40011 全存字符串"改为 **`40007`=型号序号 + `40008~40012`=型号 ASCII 字符串**

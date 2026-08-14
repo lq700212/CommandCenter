@@ -111,6 +111,13 @@
     <Compile Include="Views\SerialInputForm.Designer.cs">
       <DependentUpon>SerialInputForm.cs</DependentUpon>
     </Compile>
+    <!-- ModelIndexEditForm：产品型号配置对话框（V2.14.14，表格维护型号↔PLC序号映射，取代旧型号序号框） -->
+    <Compile Include="Views\ModelIndexEditForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Views\ModelIndexEditForm.Designer.cs">
+      <DependentUpon>ModelIndexEditForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="Controls\CameraDisplayControl.cs">
       <SubType>UserControl</SubType>
     </Compile>

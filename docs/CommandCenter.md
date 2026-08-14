@@ -156,8 +156,12 @@
   候选项=**预置型号 `U171/Z121` ∪ 已保存型号**（手输新型号保存自动加入候选。**切型号即切换
   该型号的相机程序映射**——保存后在"窗口/点位配置…"里按型号配好映射即可；主界面标题栏型号下拉
   与这里同一个值，操作员日常切型号在主界面直接选，无需进设置）；
-  **型号序号**（V2.14.13，与型号同行配置，存 `plc.modelIndexes`，默认 Z121=1、U171=2；
-  每次扫码写 `40007=序号 + 40008~40012=型号字符串`）；
+  **型号→序号映射（V2.14.14 起在"产品型号配置…"弹窗里维护，取代 V2.14.13 的"型号序号"框）**：
+  设置窗体 PLC 区"产品型号配置…"按钮 → ModelIndexEditForm 表格（两列：序号/型号名称，前几行预载
+  已有映射，确定写回 `plc.modelIndexes`、取消关闭不落盘），默认 Z121=1、U171=2；
+  每次扫码写 `40007=序号 + 40008~40012=型号字符串`；**型号写入时机（V2.14.14）**：① 每次扫码
+  推进时写；② **从站建站成功（PlcService.EnsureConnected）即写当前型号**（`SetCurrentModel`
+  缓存型号，建站即写，PLC 不触发扫码也读得到）；③ **主界面切型号（SwitchModel）立即下发**新型号）；
   V2.7 握手寄存器地址（`40001~40012`，现场定稿后只改 `appconfig.json` 的 `plc` 节点）。
 - **相机**：表格最左是**相机ID**列（V2.13.4，=基恩士相机**真正编号**，上=2、下=1，与存图目录号
   一致——上相机→`D:\IV存图\2`=相机2、下相机→`D:\IV存图\1`=相机1；字段 `cameraId`，可编辑，
@@ -718,7 +722,9 @@ FTP 目录取修改时间最新的一对**（`ImageStore.FindLatestPair`），�
 > /scanResultAddress=4/productModelIndexAddress=7/productModelAddress=8/productModelLen`；
 > **V2.14.13 型号区升级**：`40007` 单独存**型号序号**（`plc.productModelIndexAddress`，默认 7），
 > 型号 ASCII 字符串整体后移一位从 `40008` 起写（`plc.productModelAddress`，默认 8）；
-> 型号→序号映射存 `plc.modelIndexes`（默认 Z121=1、U171=2，设置窗体"型号序号"框配置）。
+> 型号→序号映射存 `plc.modelIndexes`（默认 Z121=1、U171=2，设置窗体"产品型号配置…"弹窗
+> ModelIndexEditForm 表格维护，V2.14.14；**型号写入时机：扫码推进 + 建站即写 + 切型号即写**，
+> 见 PlcService.SetCurrentModel / MainForm.SwitchModel）。
 > **相机通道地址 V2.12.6 起在相机表
 > 每台相机单独配**（`cameras[].plcRequestAddress/plcResultAddress`；V2.13.5 起 **0=未配置通道、
 > 不参与轮询**，现场默认上相机=请求2/结果5、下相机=请求3/结果6 已由旧配置迁移固化，见下表）。对外交付 PLC 工程师的完整协议
@@ -950,7 +956,8 @@ PLC → 上位机（PLC只写，上位机读取）：
 **产品型号（序号 + 字符串）编码说明（V2.14.13）**
 
 - **型号序号（`40007`）**：每个产品型号对应一个序号，现场默认 `Z121=1`、`U171=2`（上位机设置窗体
-  "型号序号"框配置，存 `plc.modelIndexes`）。PLC **优先用 40007 的序号**区分型号，速度快、不受
+  "产品型号配置…"弹窗 ModelIndexEditForm 表格配置，V2.14.14，存 `plc.modelIndexes`）。
+  PLC **优先用 40007 的序号**区分型号，速度快、不受
   型号名长度影响；`0`=该型号未配序号。
 - **型号字符串（`40008` ~ `40012`）**：共5个寄存器，最多可传递 **10个ASCII字符**。
 - 每个寄存器存放两个字符：**高字节（Bit 8~15）= 前一字符，低字节（Bit 0~7）= 后一字符**。
@@ -963,8 +970,11 @@ PLC → 上位机（PLC只写，上位机读取）：
 - 不足10个字符的，在最后一个有效字符后面填 `0x00` 表示字符串结束。
 - 若后续发现型号超过10个字符，从 `40013` 开始向后扩展即可。
 - **型号来源（V2.8）**：上位机设置窗体"产品型号"下拉选择（候选=顶部 `productModels`，现场预置
-  `U171`/`Z121`，可手输新型号自动加入）；**型号序号（V2.14.13）**在同行的"型号序号"框配置
-  （与型号联动，存 `plc.modelIndexes`）。保存后每次扫码把"序号+型号字符串"写入型号区。**型号同时
+  `U171`/`Z121`，可手输新型号自动加入）；**型号序号（V2.14.14）**在"产品型号配置…"弹窗
+  ModelIndexEditForm 表格里维护（两列：序号/型号名称，前几行预载已有映射，确定写回
+  `plc.modelIndexes`）。**型号写入时机（V2.14.14）**：① 每次扫码推进写"序号+型号字符串"；
+  ② 从站建站成功即写（PlcService.EnsureConnected，`SetCurrentModel` 缓存型号）；
+  ③ 主界面切型号立即下发（SwitchModel）。**型号同时
   决定相机程序映射**（`modelStationPrograms`，见本文档 4.4/4.5）：切型号即切换对应的"点位→相机程序号"表，
   触发相机时按新型号发 `PW,nnn` 切程序。
 
@@ -1309,6 +1319,18 @@ string model = Encoding.ASCII.GetString(bytes, 0, end);
 
 > 本部分保留原 `通讯接入.md` 的版本演进记录，最新在前。
 
+- V2.14.14（2026-08-14，PLC 型号区写入时机优化 + 产品型号配置弹窗）：
+  ① **型号写入时机**：原实现仅在"收到 PLC 扫码请求→扫码通道推进"时写型号区，PLC 不触发扫码
+  流程就读不到 40007/40008~40012（全 0）。改为三时机写：**每次扫码推进写（原行为）+ 从站建站
+  成功即写（`PlcService.SetCurrentModel` 缓存型号，`EnsureConnected` 建站成功即 `WriteProductModel`，
+  覆盖上电/断线重建/热更重建）+ 主界面切型号立即下发（`SwitchModel` 更新并重写）**——PLC 随时能
+  读到当前型号。涉及：`Services/PlcService.cs`、`Views/MainForm.cs`。
+  ② **产品型号配置弹窗**：设置窗体 PLC 区用"产品型号配置…"按钮（btnModelConfig）取代 V2.14.13 的
+  "型号序号"框（nudModelIndex 删除）。新增 `ModelIndexEditForm`：表格两列（序号/型号名称），前几行
+  预载 `plc.modelIndexes` 已有映射，可增删改；【确定】校验通过后整体写回映射（编辑副本深拷贝、
+  取消关闭不影响原配置），【取消】直接关闭不保存；由设置窗体【保存】统一写盘，重启自动加载。
+  涉及：`Views/ModelIndexEditForm.cs` + `.Designer.cs`（新）、`Views/SettingsForm.cs` +
+  `.Designer.cs`（删 nudModelIndex/lblModelIndex 与联动逻辑，加按钮）。
 - V2.14.13（2026-08-14，PLC 型号区升级：型号序号 + 型号字符串）：
   产品型号写入从"40007~40011 全存字符串"改为 **`40007`=型号序号 + `40008~40012`=型号 ASCII 字符串**
   （字符串整体后移一位）。PLC 读取型号**优先用 40007 的序号**区分型号（数值比较最快最稳、不受型号名
@@ -1322,6 +1344,8 @@ string model = Encoding.ASCII.GetString(bytes, 0, end);
   ③ **设置窗体**：PLC 区新增"型号序号"框（`nudModelIndex`，0~65535），与"产品型号"下拉联动
   （切型号自动带出该型号在映射里的序号，可改）；保存时把当前型号序号写回 `plc.modelIndexes`
   （更新或新增该型号项，序号=0 表示该型号不写序号）。涉及：`Views/SettingsForm.cs` + `.Designer.cs`。
+  ⚠️ **V2.14.14 已用"产品型号配置…"按钮弹窗（ModelIndexEditForm）取代本改动**（nudModelIndex 删除），
+  见 8 版本最新条目。
   ④ **配置兜底**：`ConfigStore` 加载时 `ModelIndexes` 为空/没有则补默认映射，并对 `productModels`
   里所有型号补齐序号（新增型号自动配下一个序号）。涉及：`Utils/ConfigStore.cs`。
   ⑤ **功能测试**：`DevTestForm` 写产品型号按新格式（40007=序号 + 40008~40012=字符串）。

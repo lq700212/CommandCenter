@@ -107,6 +107,9 @@ namespace CommandCenter.Views
         private void BuildServices()
         {
             _plc = new PlcService(_config.Plc);
+            // V2.14.14：把初始型号交给 PLC 服务——从站建站成功后立即写进型号区（40007=序号+
+            // 40008~40012=字符串），PLC 不触发扫码也能读到当前型号（见 PlcService.SetCurrentModel）。
+            _plc.SetCurrentModel(_config.ProductModel);
 
             // 多相机：配置列几台就建几个相机服务实例，各自独立连接/触发/存图
             _cameras = new List<KeyenceIV4Camera>();
@@ -717,12 +720,18 @@ namespace CommandCenter.Views
         ///      coordinator 才生效。只重建协调器：PLC/相机/扫码枪连接参数与型号无关，全部复用，
         ///      比 ApplyRuntimeConfig 全量重建轻量（设备不断连，流程无缝）。
         ///   ③ 保留当前 SN 状态、重挂协调器事件、启动流程，标题栏提示"型号切换完成"（绿字）。
-        /// 说明：PLC 型号区（40007~40011）由协调器在每次扫码时写入当前 _productModel，
-        /// 这里切换后无需立即下发，下一拍扫码自然带上新型号。
+        /// 说明：PLC 型号区（40007=型号序号+40008~40012=字符串）在从站建站成功时已写当前型号
+        /// （V2.14.14，见 PlcService.SetCurrentModel）；这里切换后立即再写一次新型号，PLC 不用等
+        /// 下一拍扫码就能读到切完的型号。
         /// </summary>
         private void SwitchModel(string model)
         {
             _config.ProductModel = model;
+            // V2.14.14：更新 PLC 服务的当前型号并立即写入型号区（切型号即写）。
+            // 背景：PLC 梯形图可能在"请求扫码之前"主动读型号区，若等扫码才写，切换后型号要等一拍
+            // 才下发；现切换即写，PLC 马上读到新型号。型号为空（配置异常）时 SetCurrentModel 吞掉。
+            _plc?.SetCurrentModel(model);
+            _plc?.WriteProductModel(model);
 
             // ① 写盘持久化（try-catch：写盘失败不阻断切换，配置以内存为准）
             try { ConfigStore.Save(_config); }
@@ -748,7 +757,7 @@ namespace CommandCenter.Views
             // ④ 提示 + 日志（成功绿字，遵循现场 OK=绿 习惯）
             lblStatus.ForeColor = Color.FromArgb(46, 158, 107);
             lblStatus.Text = $"型号切换完成: {model}";
-            LogHelper.Info($"产品型号切换：{model}（已生效并写盘，PLC 型号区随下次扫码写入）");
+            LogHelper.Info($"产品型号切换：{model}（已生效并写盘，PLC 型号区已立即下发）");
         }
 
         /// <summary>

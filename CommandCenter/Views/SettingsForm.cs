@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
 using CommandCenter.Models;
+using CommandCenter.Utils;
 
 namespace CommandCenter.Views
 {
@@ -10,7 +11,7 @@ namespace CommandCenter.Views
     /// 系统设置窗体：直接编辑 AppConfig（引用同一实例，保存由上层 ConfigStore 完成）。
     ///
     /// ┌─────────────────────────────────────────────────────────────┐
-    /// │ PLC IP:  [19.87.6.1]  端口:[502]  产品型号:[Z121▾] 型号序号:[nudModelIndex] │
+    /// │ PLC IP:  [19.87.6.1]  端口:[502]  产品型号:[Z121▾] [产品型号配置…] │
     /// │ 显示窗口: 行[4] 列[7] [√自适应]                              │
     /// │ 图片保存根目录: [E:\Images]                                    │
     /// │ 目录结构: [配置目录结构...] {年月日}/{SN}/{OKNG}             │
@@ -112,9 +113,6 @@ namespace CommandCenter.Views
             if (string.IsNullOrWhiteSpace(curModel) && cmbModel.Items.Count > 0)
                 curModel = cmbModel.Items[0].ToString();
             cmbModel.Text = curModel;
-            // V2.14.13：型号序号（40007）与产品型号下拉联动——按当前型号带出该型号的 PLC 序号。
-            // 型号没配序号时显示 0（保存时会补进映射）。详情见 SyncModelIndexFromCombo。
-            SyncModelIndexFromCombo();
             // 显示窗口行列（V2.12.0 自适应开关：勾选后行/列输入框置灰，行列按相机点位表自动算）
             chkAutoFit.Checked = _cfg.Display.AutoFit;
             UpdateAutoFitUi();
@@ -136,27 +134,6 @@ namespace CommandCenter.Views
             // 扫码枪表格：先建列，再逐行填数据（V1.8.1 起支持多台）
             SetupScannerGridColumns();
             LoadScannerRows();
-        }
-
-        /// <summary>
-        /// 型号序号（PLC 40007）与"产品型号"下拉联动（V2.14.13）：
-        /// 按当前下拉型号查 `_cfg.Plc.ModelIndexes` 映射（忽略大小写），命中就把序号填进
-        /// nudModelIndex；型号没配序号时显示 0（表示"不写序号"，保存时会补进映射）。
-        /// 【背景】40007 传的是"型号对应的序号"（默认 Z121=1、U171=2），不是型号字符串，
-        /// 型号字符串整体后移到 40008~40012；用户在设置页选/输型号时应能看到该型号的序号。
-        /// 在 LoadFromConfig（初始填充）与 cmbModel 文本变化（用户切/输型号）时各调用一次。
-        /// </summary>
-        private void SyncModelIndexFromCombo()
-        {
-            string model = cmbModel.Text?.Trim() ?? "";
-            int index = 0;
-            if (model.Length > 0)
-            {
-                var item = (_cfg.Plc.ModelIndexes ?? new List<ModelIndexItem>())
-                    .FirstOrDefault(m => m != null && string.Equals(m.ModelName, model, StringComparison.OrdinalIgnoreCase));
-                if (item != null && item.ModelIndex > 0) index = item.ModelIndex;
-            }
-            nudModelIndex.Value = Math.Max(0, Math.Min(65535, index));
         }
 
         /// <summary>
@@ -512,9 +489,24 @@ namespace CommandCenter.Views
                     tip.Show(AutoFitDisabledHint, chkAutoFit, 150, 28, 9000);
             };
 
-            // V2.14.13：型号下拉变化 → 联动刷新型号序号（40007），用户切/输型号即看到该型号序号。
-            // DropDown 可编辑下拉，TextChanged 覆盖"下拉选择"与"手动输入"两种变化。
-            cmbModel.TextChanged += (s, e) => SyncModelIndexFromCombo();
+            // V2.14.14：产品型号配置按钮 → 打开"产品型号配置"弹窗，
+            // 表格维护"型号名称 ↔ PLC 序号(40007)"映射（确定才写回 _cfg，见 ModelIndexEditForm）。
+            btnModelConfig.Click += (s, e) =>
+            {
+                // 弹窗直接编辑 _cfg.Plc.ModelIndexes 引用（确定/取消见窗体内逻辑），
+                // 保存由设置窗体底部【保存】统一写盘（见 OnSave），取消关窗不落盘。
+                using (var dlg = new ModelIndexEditForm(_cfg.Plc.ModelIndexes))
+                {
+                    if (dlg.ShowDialog(this) == DialogResult.OK)
+                    {
+                        // 弹窗确定后：确认编辑结果已写回 _cfg.Plc.ModelIndexes。
+                        // 无需额外动作——配置引用是同一个对象，保存/热更时自然带上。
+                        LogHelper.Info("产品型号配置已更新：" + string.Join("/",
+                            (_cfg.Plc.ModelIndexes ?? new List<ModelIndexItem>())
+                            .ConvertAll(x => (x.ModelName ?? "") + "=" + x.ModelIndex)));
+                    }
+                }
+            };
 
             // 添加一台相机：直接往表格追加一行默认值（默认取现场相机1：上相机 19.87.6.213 +
             // FTP 目录 D:\IV存图\2，V2.13.3 修正；上/下相机 FTP 目录与安装位置相反配对），
@@ -694,17 +686,9 @@ namespace CommandCenter.Views
                 if (!models.Any(x => string.Equals(x, model, StringComparison.OrdinalIgnoreCase)))
                     models.Add(model);
             }
-            // V2.14.13：型号序号（PLC 40007）写回"型号→序号"映射。当前型号的序号以 nudModelIndex 为准：
-            // 更新或新增该型号的 ModelIndexItem；序号=0 表示"该型号不写序号"（删除映射语义可手动改 json）。
-            // 新增型号（手输新型号）也在此自动配序号，保证 40007 有值可写。
-            {
-                string m = cmbModel.Text?.Trim() ?? "";
-                var map = _cfg.Plc.ModelIndexes ?? (_cfg.Plc.ModelIndexes = new List<ModelIndexItem>());
-                var item = map.FirstOrDefault(x => x != null && string.Equals(x.ModelName, m, StringComparison.OrdinalIgnoreCase));
-                int idx = (int)nudModelIndex.Value;
-                if (item != null) item.ModelIndex = idx;
-                else if (m.Length > 0) map.Add(new ModelIndexItem { ModelName = m, ModelIndex = idx });
-            }
+            // V2.14.14：型号→PLC 序号映射由"产品型号配置"弹窗（btnModelConfig → ModelIndexEditForm）
+            // 统一维护（确定才写回 _cfg.Plc.ModelIndexes）。这里不再对单个型号写序号——保存时
+            // ConfigStore.EnsureModelIndexes 会自动补齐候选型号里缺失的映射，见 ConfigStore.Save。
             // 显示窗口行列与自适应（V2.12.0）：勾选自适应时行列由系统按相机点位表自动算、不落盘
             // （保留用户手动行列作参考，关掉自适应后仍用原手填值；不污染 Rows/Columns）。
             if (!chkAutoFit.Checked)
