@@ -1146,6 +1146,8 @@ namespace CommandCenter.Views
         /// 新一轮开始（V2.14.11）：收到 PLC 扫码请求，清空所有窗口的图片显示。
         /// 新的一轮第一步就是扫码，上一轮的图片已过时；提前清掉，等到新一轮
         /// 相机判定返回后再逐窗口 SetImage 新图，避免新旧两轮画面混在一起。
+        /// V2.14.24：同时复位各窗口的 OK/NG"结果态"（ResetResult）——上一轮的徽标一并清掉，
+        /// 只有本轮相机结果返回（ApplyResultImage → SetOkNgStatus）后才重新显示对应徽标。
         /// 事件来自协调整轮询后台线程，统一 BeginInvoke 回 UI 线程再遍历窗口。
         /// </summary>
         private void OnRoundStarted()
@@ -1158,7 +1160,12 @@ namespace CommandCenter.Views
             }
             foreach (var w in _windowControls.Values)
             {
-                try { w?.SetImage(null); } catch { }
+                try
+                {
+                    w?.ResetResult();   // 徽标结果态复位（无结果不显示徽标，见 CameraDisplayControl）
+                    w?.SetImage(null);  // 图片清空回深灰空态
+                }
+                catch { }
             }
         }
 
@@ -1483,12 +1490,13 @@ namespace CommandCenter.Views
                 }
             }
 
-            // V2.10.1：把主窗体标题栏型号下拉的"当前选中值"传给设置窗体，保证两个 cmbModel 同步。
+            // V2.10.1：把主窗体标题栏型号下拉的"当前选中值"传给设置窗体，作为它的"当前型号"快照。
             // 不传 _config.ProductModel 的原因：标题栏下拉在配置型号为空时会默认选第一个候选，
-            // 但 _config.ProductModel 仍是空，设置页直接读配置会显示空白（见 SettingsForm 的 _titleBarModel）。
+            // 但 _config.ProductModel 仍是空，设置页直接读配置会得到空型号（V2.14.24 起用于
+            // SettingsForm._currentModel 的初始化、自适应铺排计算与 WindowPointForm 打开时的初选型号）。
             // V2.12.x：配置对话框（SettingsForm→WindowPointForm）里切型号【不实时影响主界面】——
-            // 只同步设置页"产品型号"下拉（OnSave 时写 _cfg.ProductModel），用户点【保存】后本方法
-            // 下面的 ApplyRuntimeConfig 才刷新标题栏型号下拉 + 窗口矩阵 + 协调器（见 ApplyRuntimeConfig）。
+            // 只更新设置窗体内的 _currentModel（OnSave 时写 _cfg.ProductModel），用户点【保存】后
+            // 本方法下面的 ApplyRuntimeConfig 才刷新标题栏型号下拉 + 窗口矩阵 + 协调器（见 ApplyRuntimeConfig）。
             using (var dlg = new SettingsForm(_config, cmbModel.SelectedItem?.ToString()))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;

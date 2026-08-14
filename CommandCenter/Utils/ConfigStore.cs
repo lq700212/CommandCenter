@@ -130,10 +130,14 @@ namespace CommandCenter.Utils
         /// <summary>
         /// V2.14.13：把"型号→PLC 序号"映射表补齐到覆盖所有候选型号与当前型号。
         /// 背景：PLC 40007 传的是型号序号（不是型号字符串），WriteProductModel 按型号名查
-        /// `PlcConfig.ModelIndexes`；若某型号（尤其用户在设置页手输的新型号）没配序号，
+        /// `PlcConfig.ModelIndexes`；若某型号（尤其用户在"产品型号配置…"弹窗新增的型号）没配序号，
         /// 40007 会恒写 0、PLC 分不清型号。故加载/保存时自动把候选型号（ProductModels ∪ 当前
         /// ProductModel）里缺失的补一条默认映射，序号取"当前最大序号 + 1"（保证不冲突）。
         /// 已配置的映射保持用户值，只补缺失项，不覆盖。
+        /// V2.14.24：反向回流——`ModelIndexes` 是型号集合的【唯一权威入口】（设置页已删"产品型号"
+        /// 下拉，见 SettingsForm），把映射表里用户新增的型号名并回 ProductModels（候选列表），
+        /// 保证新增型号在主界面标题栏型号下拉 / 窗口点位配置的型号下拉里可选可用。双向闭环：
+        /// ProductModels → 补序号映射，ModelIndexes → 补候选集合。
         /// </summary>
         private static void EnsureModelIndexes(Models.AppConfig cfg)
         {
@@ -154,6 +158,17 @@ namespace CommandCenter.Utils
                 if (map.Any(x => x != null && string.Equals(x.ModelName, m, StringComparison.OrdinalIgnoreCase)))
                     continue;
                 map.Add(new Models.ModelIndexItem { ModelName = m, ModelIndex = ++maxIndex });
+            }
+
+            // V2.14.24 反向回流：映射表里新增的型号名并入 ProductModels（候选列表），
+            // 空安全：cfg.ProductModels 被配置手改成 null 时先建空表，防 NRE。
+            var models = cfg.ProductModels ?? (cfg.ProductModels = new List<string>());
+            foreach (var item in map)
+            {
+                if (item == null || string.IsNullOrWhiteSpace(item.ModelName)) continue;
+                string name = item.ModelName.Trim();
+                if (!models.Any(x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase)))
+                    models.Add(name);
             }
         }
 

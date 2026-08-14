@@ -11,9 +11,12 @@ namespace CommandCenter.Views
     ///   ┌──────────────────────────────────────────────┐
     ///   │▓ 产品型号配置（pnlHeader 蓝色横幅，白字居中）▓│
     ///   ├──────────────────────────────────────────────┤
-    ///   │  ┌────────────────────────────────────────┐  │
-    ///   │  │ grid（DataGridView：两列=序号/型号名称）│  │
-    ///   │  └────────────────────────────────────────┘  │
+    ///   │                                  [btnDelete] │
+    ///   │  ┌─────────┬───────┬──────────────────────┐  │
+    ///   │  │ 选中(□) │ 序号  │ 型号名称（全居中）     │  │
+    ///   │  ├─────────┼───────┼──────────────────────┤  │
+    ///   │  │  ☑/□    │   2   │   U171                │  │
+    ///   │  └─────────┴───────┴──────────────────────┘  │
     ///   │                                              │
     ///   │ [btnCancel 取 消]          [btnOk 确 定]    │
     ///   └──────────────────────────────────────────────┘
@@ -44,10 +47,12 @@ namespace CommandCenter.Views
             this.pnlHeader = new System.Windows.Forms.Panel();
             this.lblBanner = new System.Windows.Forms.Label();
             this.grid = new System.Windows.Forms.DataGridView();
+            this.colSel = new System.Windows.Forms.DataGridViewCheckBoxColumn();
             this.colIndex = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colModel = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.btnOk = new System.Windows.Forms.Button();
             this.btnCancel = new System.Windows.Forms.Button();
+            this.btnDelete = new System.Windows.Forms.Button();
             this.pnlHeader.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.grid)).BeginInit();
             this.SuspendLayout();
@@ -78,41 +83,58 @@ namespace CommandCenter.Views
             this.lblBanner.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
             // 
             // grid
-            // 型号↔PLC序号映射表格（V2.14.14）：两列——序号、型号名称。
+            // 型号↔PLC序号映射表格（V2.14.14）：三列——选中、序号、型号名称。
             //   · 前几行默认预载当前已有型号与序号（LoadFromConfig 填充）；
-            //   · 可编辑单元格、可增删行（Delete 键删选中行、末尾 * 新行回车加行）；
-            //   · 整表单选、禁止添加空行占位（AllowUserToAddRows=false，由确定时统一校验）。
+            //   · 可编辑单元格、可增删行（btnDelete 删勾选/选中行、Delete 键删选中行、
+            //     末尾 * 新行回车加行）；
+            //   · 整行选中（FullRowSelect）+ 支持多选（Ctrl/Shift）、勾选列可快速多选；
+            //   · "全列内容居中"（V2.14.25）：表头与单元格横竖都居中。
             // 确定写回 plc.modelIndexes 并持久化；取消关闭不保存。
             // 
             this.grid.AllowUserToAddRows = true;
             this.grid.AllowUserToDeleteRows = true;
             this.grid.BackgroundColor = System.Drawing.Color.White;
             this.grid.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.grid.ColumnHeadersDefaultCellStyle.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
             this.grid.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.grid.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
+            this.colSel,
             this.colIndex,
             this.colModel});
-            this.grid.Location = new System.Drawing.Point(28, 72);
+            this.grid.DefaultCellStyle.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
+            this.grid.Location = new System.Drawing.Point(28, 104);
+            this.grid.MultiSelect = true;
             this.grid.Name = "grid";
             this.grid.RowHeadersVisible = false;
             this.grid.RowTemplate.Height = 27;
             this.grid.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.grid.Size = new System.Drawing.Size(384, 218);
+            this.grid.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
+            this.grid.Size = new System.Drawing.Size(384, 186);
             this.grid.TabIndex = 1;
+            // 
+            // colSel
+            // 选中列（V2.14.25）：DataGridViewCheckBoxColumn，勾选=待删除的行（多选删除用）。
+            //   · 表头文字"选中"，单元格居中；
+            //   · 只作"删除前标记"用，不参与确定写回（OnOk 只收集序号+型号名）；
+            //   · 另支持单选删除：鼠标/方向键选中行后点 btnDelete 或按 Delete 键。
+            // 
+            this.colSel.HeaderText = "选中";
+            this.colSel.Name = "colSel";
+            this.colSel.Width = 56;
             // 
             // colIndex
             // 序号列：该型号在 PLC 40007 里对应的序号（0~65535，0=不写序号）。
             // 
             this.colIndex.HeaderText = "序号";
             this.colIndex.Name = "colIndex";
-            this.colIndex.Width = 130;
+            this.colIndex.Width = 128;
             // 
             // colModel
             // 型号名称列：与 AppConfig.ProductModel/ProductModels 对应（如 "Z121"）。
             // 
             this.colModel.HeaderText = "型号名称";
             this.colModel.Name = "colModel";
-            this.colModel.Width = 248;
+            this.colModel.Width = 200;
             // 
             // btnOk
             // 确定按钮（蓝色主按钮，对齐 LoginForm.btnLogin/SerialInputForm.btnOk）：
@@ -149,6 +171,24 @@ namespace CommandCenter.Views
             this.btnCancel.Text = "取  消";
             this.btnCancel.UseVisualStyleBackColor = false;
             // 
+            // btnDelete
+            // 删除按钮（V2.14.25，红色系破坏性操作，放表格右上方）：
+            // 浅红底白字、Flat 无边框，一眼区别于蓝/灰按钮。
+            // 点击删除"勾选的行"；没有勾选但有选中行时删除选中行（单选/多选删除）；
+            // 都没有则提示（见 ModelIndexEditForm.cs BtnDelete_Click）。
+            // 
+            this.btnDelete.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(245)))), ((int)(((byte)(108)))), ((int)(((byte)(108)))));
+            this.btnDelete.FlatAppearance.BorderSize = 0;
+            this.btnDelete.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnDelete.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
+            this.btnDelete.ForeColor = System.Drawing.Color.White;
+            this.btnDelete.Location = new System.Drawing.Point(276, 68);
+            this.btnDelete.Name = "btnDelete";
+            this.btnDelete.Size = new System.Drawing.Size(136, 30);
+            this.btnDelete.TabIndex = 5;
+            this.btnDelete.Text = "删除选中";
+            this.btnDelete.UseVisualStyleBackColor = false;
+            // 
             // ModelIndexEditForm
             // 窗体：FixedDialog 固定边框（禁拉伸）、相对父窗体居中弹出、白底、
             // KeyPreview=true 让窗体先收到按键（回车/Esc 兜底）。
@@ -161,6 +201,7 @@ namespace CommandCenter.Views
             this.ClientSize = new System.Drawing.Size(440, 362);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnOk);
+            this.Controls.Add(this.btnDelete);
             this.Controls.Add(this.grid);
             this.Controls.Add(this.pnlHeader);
             this.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
@@ -181,9 +222,11 @@ namespace CommandCenter.Views
         private Panel pnlHeader;
         private Label lblBanner;
         private DataGridView grid;
+        private DataGridViewCheckBoxColumn colSel;
         private DataGridViewTextBoxColumn colIndex;
         private DataGridViewTextBoxColumn colModel;
         private Button btnOk;
         private Button btnCancel;
+        private Button btnDelete;
     }
 }

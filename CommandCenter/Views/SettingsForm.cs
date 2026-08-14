@@ -10,8 +10,8 @@ namespace CommandCenter.Views
     /// <summary>
     /// 系统设置窗体：直接编辑 AppConfig（引用同一实例，保存由上层 ConfigStore 完成）。
     ///
-    /// ┌─────────────────────────────────────────────────────────────┐
-    /// │ PLC IP:  [19.87.6.1]  端口:[502]  产品型号:[Z121▾] [产品型号配置…] │
+    ///     ┌─────────────────────────────────────────────────────────────┐
+    /// │ PLC IP:  [19.87.6.1]  端口:[502] [产品型号配置…]                │
     /// │ 显示窗口: 行[4] 列[7] [√自适应]                              │
     /// │ 图片保存根目录: [E:\Images]                                    │
     /// │ 目录结构: [配置目录结构...] {年月日}/{SN}/{OKNG}             │
@@ -56,11 +56,17 @@ namespace CommandCenter.Views
     public partial class SettingsForm : Form
     {
         private readonly AppConfig _cfg;
-        // V2.10.1：主窗体标题栏型号下拉的"当前选中值"快照（打开时由 MainForm.OpenSettings 传入）。
-        // 目的：保证设置页"产品型号"下拉与主窗体所见一致。背景：主窗体下拉在配置 ProductModel 为空时
-        // 会默认选中第一个候选（U171），但此时 _cfg.ProductModel 仍是空串，若设置页直接用它就会显示空白，
-        // 与标题栏所见型号不一致。故本字段优先级最高：MainForm 当前选中值 > 配置 ProductModel > 首个候选。
-        private readonly string _titleBarModel;
+
+        // V2.14.24：设置页不再摆"产品型号"下拉（lblModel+cmbModel 已删）——当前型号唯一入口是
+        // 主界面标题栏型号下拉 cmbModel（MainForm.SwitchModel 写 _cfg.ProductModel + 写盘），
+        // 型号集合（增删/序号映射）统一在"产品型号配置…"弹窗（btnModelConfig → ModelIndexEditForm）
+        // 维护。本字段 = 设置窗体打开的瞬间拿到的"当前运营型号"快照，作为：
+        //   ① UpdateAutoFitUi 自适应铺排计算用的型号；
+        //   ② 打开"窗口/点位配置"（WindowPointForm）时的初始型号；
+        //   ③ OnSave 写 _cfg.ProductModel 的值（保存不改变当前型号，只原样写回）。
+        // 取值优先级 = MainForm 标题栏当前选中值 > 配置 ProductModel > 预置第一候选（U171）。
+        // WindowPointForm 里切型号经 modelLink 回调更新本字段（延迟生效，点保存才落盘）。
+        private string _currentModel;
 
         /// <summary>
         /// 相机表行 Tag（V2.13.8 排序解耦）：绑定"来源配置对象 + 原始配置下标"。
@@ -82,7 +88,15 @@ namespace CommandCenter.Views
         public SettingsForm(AppConfig cfg, string titleBarModel = null)
         {
             _cfg = cfg;
-            _titleBarModel = titleBarModel;
+            // 当前型号快照（替代已删除的设置页"产品型号"下拉的取值逻辑）：
+            // 主界面标题栏选中值 > 配置 ProductModel > 预置第一候选（保证恒非空、与主界面标题栏一致）
+            _currentModel = (string.IsNullOrWhiteSpace(titleBarModel) ? cfg.ProductModel : titleBarModel) ?? "";
+            if (string.IsNullOrWhiteSpace(_currentModel))
+            {
+                var defs = AppConfig.DefaultProductModels();
+                if (defs != null && defs.Count > 0) _currentModel = defs[0];
+            }
+
             InitializeComponent();          // 先解析设计器里的控件
 
             LoadFromConfig();               // 把当前配置值填进各输入框
@@ -95,24 +109,6 @@ namespace CommandCenter.Views
             // PLC 基础参数
             txtPlcIp.Text = _cfg.Plc.IpAddress;
             nudPlcPort.Value = _cfg.Plc.Port;
-            // 固定产品型号（V2.7 协议，每次扫码写入 PLC 40007~40011，最多 10 字符；V2.8 可编辑下拉）
-            // 下拉候选 = "预置型号 U171/Z121（DefaultProductModels）
-            //             ∪ 配置追加型号（ProductModels）"：
-            // 用户要求"直接预置"，即使 appconfig 缺 productModels 字段/为空，这里也恒能选到型号；
-            // 手输新型号保存后自动加入候选（见 OnSave）。
-            cmbModel.Items.Clear();
-            var modelCandidates = new List<string>();
-            foreach (var m in AppConfig.DefaultProductModels())
-                if (!string.IsNullOrWhiteSpace(m)) modelCandidates.Add(m);
-            foreach (var m in _cfg.ProductModels ?? new List<string>())
-                if (!string.IsNullOrWhiteSpace(m) && !modelCandidates.Contains(m)) modelCandidates.Add(m);
-            foreach (var m in modelCandidates) cmbModel.Items.Add(m);
-            // 默认显示当前型号，优先级：主窗体标题栏选中值 > 配置 ProductModel > 首个候选（V2.10.1，
-            // 前两者都为空时兜底第一候选，避免设置页出现空白下拉与标题栏所见不一致）。
-            string curModel = (string.IsNullOrWhiteSpace(_titleBarModel) ? _cfg.ProductModel : _titleBarModel) ?? "";
-            if (string.IsNullOrWhiteSpace(curModel) && cmbModel.Items.Count > 0)
-                curModel = cmbModel.Items[0].ToString();
-            cmbModel.Text = curModel;
             // 显示窗口行列（V2.12.0 自适应开关：勾选后行/列输入框置灰，行列按相机点位表自动算）
             chkAutoFit.Checked = _cfg.Display.AutoFit;
             UpdateAutoFitUi();
@@ -155,7 +151,7 @@ namespace CommandCenter.Views
             nudCols.Enabled = !fit;
             if (fit)
             {
-                var layout = DisplayConfig.AutoFitLayout(_cfg.Cameras, cmbModel.Text?.Trim() ?? "");
+                var layout = DisplayConfig.AutoFitLayout(_cfg.Cameras, _currentModel ?? "");
                 nudRows.Value = Math.Max(1, Math.Min(10, layout.rows));
                 nudCols.Value = Math.Max(1, Math.Min(7, layout.cols)); // 自适应列数上限 7（V2.14.15 与手填一致）
             }
@@ -577,14 +573,15 @@ namespace CommandCenter.Views
             // 窗口总数=相机点位和、点位编辑锁定则两种模式一致），详见 WindowPointForm。
             btnEditPoints.Click += (s, e) =>
             {
-                // 型号变更（V2.12.x 延迟生效）：WindowPointForm 程序映射区切了型号，只同步设置页
-                // "产品型号"下拉（OnSave 时写 _cfg.ProductModel）——**不实时传给 MainForm 切运营**。
-                // 主界面标题栏型号/窗口矩阵/协调器一律等用户点【保存】后由 MainForm.ApplyRuntimeConfig
-                // 统一刷新（避免配置对话框里翻型号时主界面矩阵跟着乱跳）。
+                // 型号变更（V2.12.x 延迟生效；V2.14.24 设置页已删"产品型号"下拉）：WindowPointForm
+                // 程序映射区切了型号，只更新本窗体 `_currentModel` 字段（OnSave 时写 _cfg.ProductModel）
+                // ——**不实时传给 MainForm 切运营**。主界面标题栏型号/窗口矩阵/协调器一律等用户点
+                // 【保存】后由 MainForm.ApplyRuntimeConfig 统一刷新（避免配置对话框里翻型号时主界面
+                // 矩阵跟着乱跳）。
                 Action<string> modelLink = m =>
                 {
                     if (string.IsNullOrWhiteSpace(m)) return;
-                    if (cmbModel.Text != m) cmbModel.Text = m;   // 设置页顶部产品型号下拉同步
+                    _currentModel = m;
                 };
                 using (var dlg = new WindowPointForm(_cfg.Display.WindowStationMap,
                                                      (int)nudRows.Value, (int)nudCols.Value,
@@ -594,7 +591,7 @@ namespace CommandCenter.Views
                                                          .Union(_cfg.ProductModels ?? new List<string>())
                                                          .ToList(),
                                                      chkAutoFit.Checked,
-                                                     cmbModel.Text?.Trim() ?? "",
+                                                     _currentModel ?? "",
                                                      _cfg.Display.WindowPointMaps,
                                                      modelLink))
                 {
@@ -683,9 +680,12 @@ namespace CommandCenter.Views
             _cfg.Plc.IpAddress = txtPlcIp.Text.Trim();
             _cfg.Plc.Port = (int)nudPlcPort.Value;
             // 固定产品型号（V2.7 协议）：保存后每次扫码上位机把型号写入 PLC 40007~40011；
-            // V2.8：型号同时决定"点位→相机程序号"查哪张表。手输的新型号自动加入候选列表
-            // （ProductModels），供"窗口/点位配置"的型号下拉使用。
-            string model = cmbModel.Text.Trim();
+            // V2.8：型号同时决定"点位→相机程序号"查哪张表。
+            // V2.14.24：设置页已删"产品型号"下拉，_currentModel = 打开时主界面标题栏选中值（或
+            // WindowPointForm 里改过的值）——保存只原样写回、不改变当前型号；型号集合的增删统一
+            // 在"产品型号配置…"弹窗（ModelIndexEditForm → plc.modelIndexes）里做，保存时
+            // ConfigStore.EnsureModelIndexes 会把型号集合与映射表双向对齐（见 ConfigStore）。
+            string model = (_currentModel ?? "").Trim();
             _cfg.ProductModel = model;
             if (model.Length > 0)
             {
@@ -705,7 +705,7 @@ namespace CommandCenter.Views
             }
             _cfg.Display.AutoFit = chkAutoFit.Checked;
             _cfg.Display.TitleOkNgHighlight = chkTitleOkNg.Checked;
-            _cfg.Display.WindowOkNgVisible = chkWindowOkNg.Checked; // V2.10.3：窗口右下角 OK/NG 徽标开关
+            _cfg.Display.WindowOkNgVisible = chkWindowOkNg.Checked; // V2.10.3：窗口右下角 OK/NG 徽标开关（V2.14.24 默认开；徽标"拿到相机结果才显示"见 CameraDisplayControl）
             _cfg.Display.WindowIndexVisible = chkWindowIndex.Checked; // V2.10.4：窗口左上角窗口编号开关
             _cfg.Display.WindowToolTipVisible = chkWindowToolTip.Checked; // V2.10.8：窗口悬停气泡提示开关
             _cfg.Image.SaveRootDir = txtSaveDir.Text.Trim();

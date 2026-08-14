@@ -56,7 +56,9 @@ namespace CommandCenter.Models
         /// 产品型号候选列表（V2.8）：现场可切换的型号清单，默认预置现场型号
         ///   ["U171", "Z121"]（见 DefaultProductModels）。
         /// 用途：
-        ///   ① 设置窗体"产品型号"可编辑下拉的候选项（也可手动输入新型号，保存时自动加入本列表）；
+        ///   ① 主界面标题栏"产品型号"下拉（V2.8，唯一当前型号入口）的候选；型号集合的增删统一走
+        ///     设置页"产品型号配置…"弹窗（PlcConfig.ModelIndexes），ConfigStore.EnsureModelIndexes
+        ///     会把弹窗新增的型号名自动回流进本列表（V2.14.24 起设置窗体已删"产品型号"手输下拉）；
         ///   ② "窗口/点位配置…"里"点位→相机程序号"映射按型号分表编辑时的型号下拉候选。
         /// 【为什么不写成属性初始化器默认值】与 Cameras 同理（V1.9.9）：Newtonsoft 反序列化对
         ///   已有实例的集合是复用并 Add 进 json 元素而非整值替换，预置默认会把 json 里的型号
@@ -900,13 +902,16 @@ namespace CommandCenter.Models
         public bool TitleOkNgHighlight { get; set; } = true;
 
         /// <summary>
-        /// 主界面各显示窗口【右下角 OK/NG 徽标】是否显示（V2.10.3）。
+        /// 主界面各显示窗口【右下角 OK/NG 徽标】是否显示（V2.10.3；V2.14.24 默认开启）。
         /// 徽标为自绘矩形框 + 框内文字（OK 绿、NG 红，颜色随 OkColorName/NgColorName），
         /// 叠加在每格相机画面上方。V1.9.5 曾因"现场嫌占画面"整块移除，
-        /// 现把显隐改为可配置：默认 false（与移除后现状一致，保持画面干净），
-        /// 现场需要醒目 OK/NG 时在系统设置里勾选"窗口徽标"即可。
+        /// 现把显隐改为可配置：默认 true（现场要醒目的 OK/NG 指示），
+        /// 不想要时在系统设置里勾掉"窗口徽标"即可。
+        /// 【V2.14.24 无结果不显示】徽标是否显示由【窗口是否已拿到相机 OK/NG 结果】决定——
+        /// 新的一轮清窗后 / 空窗口未接图时默认隐藏，只有该窗口点位拿到相机判定结果（SetOkNgStatus）
+        /// 才显示对应徽标（见 CameraDisplayControl.UpdateBadgeVisibility）。
         /// </summary>
-        public bool WindowOkNgVisible { get; set; } = false;
+        public bool WindowOkNgVisible { get; set; } = true;
 
         /// <summary>
         /// 主界面各显示窗口【左上角窗口编号】是否显示（V2.10.4）。

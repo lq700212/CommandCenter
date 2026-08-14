@@ -11,7 +11,7 @@ namespace CommandCenter.Views
     /// 这些控件都是固定布局（无运行时紧凑重排需求），设计器坐标即最终坐标。
     /// 【重要】整体顺序请参考 SettingsForm.cs 类注释里的 ASCII 布局图。
     ///   ┌──────────────────────────────────────────────────────────┐
-    ///   │ PLC IP: [txtPlcIp] 端口:[nudPlcPort] 产品型号:[cmbModel] [btnModelConfig 产品型号配置…] │
+    ///   │ PLC IP: [txtPlcIp] 端口:[nudPlcPort] [btnModelConfig 产品型号配置…] │
     ///   │ 显示窗口行:[nudRows] 列:[nudCols]                         │
     ///   │ 图片保存根目录: [txtSaveDir]                               │
     ///   │ 目录结构: [btnEditDirs 配置目录结构…]                     │
@@ -77,8 +77,6 @@ namespace CommandCenter.Views
             this.txtPlcIp = new System.Windows.Forms.TextBox();
             this.lblPlcPort = new System.Windows.Forms.Label();
             this.nudPlcPort = new System.Windows.Forms.NumericUpDown();
-            this.lblModel = new System.Windows.Forms.Label();
-            this.cmbModel = new System.Windows.Forms.ComboBox();
             this.btnModelConfig = new System.Windows.Forms.Button();
             this.lblRows = new System.Windows.Forms.Label();
             this.nudRows = new System.Windows.Forms.NumericUpDown();
@@ -162,34 +160,13 @@ namespace CommandCenter.Views
             this.nudPlcPort.TabIndex = 3;
             this.nudPlcPort.Value = new decimal(new int[] { 502, 0, 0, 0 });
             //
-            // lblModel
-            //
-            this.lblModel.AutoSize = true;
-            this.lblModel.Location = new System.Drawing.Point(446, 21);
-            this.lblModel.Name = "lblModel";
-            this.lblModel.Size = new System.Drawing.Size(61, 19);
-            this.lblModel.TabIndex = 31;
-            this.lblModel.Text = "产品型号:";
-            //
-            // cmbModel
-            // 固定产品型号（V2.7 协议）：每次扫码完成上位机写入 PLC 40007~40011，最多 10 字符。
-            // V2.8 起为可编辑下拉：候选项=预置型号 U171/Z121（DefaultProductModels）∪ 配置已有
-            // ProductModels（去重合并，配置缺字段也能直接选到型号），也可手动输入新型号；
-            // 保存时若不在候选则自动加入。型号同时决定点位→程序号查哪张表。
-            //
-            this.cmbModel.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDown;
-            this.cmbModel.Location = new System.Drawing.Point(521, 18);
-            this.cmbModel.MaxLength = 10;
-            this.cmbModel.Name = "cmbModel";
-            this.cmbModel.Size = new System.Drawing.Size(170, 25);
-            this.cmbModel.TabIndex = 32;
-            this.cmbModel.Text = "";
-            //
             // btnModelConfig（V2.14.14，取代旧"型号序号"框 nudModelIndex）
             // 产品型号配置按钮：弹出 ModelIndexEditForm，用表格维护"型号名称 ↔ PLC 序号(40007)"
             // 的映射关系（确定才写回 plc.modelIndexes，取消关闭不落盘）。位置=旧 nudModelIndex 处。
+            // V2.14.24：设置页"产品型号"下拉（lblModel+cmbModel）已删——当前型号唯一入口是主界面
+            // 标题栏下拉，型号集合的增删与序号映射统一在本按钮弹窗维护。
             //
-            this.btnModelConfig.Location = new System.Drawing.Point(747, 18);
+            this.btnModelConfig.Location = new System.Drawing.Point(446, 18);
             this.btnModelConfig.Name = "btnModelConfig";
             this.btnModelConfig.Size = new System.Drawing.Size(120, 26);
             this.btnModelConfig.TabIndex = 34;
@@ -576,9 +553,7 @@ namespace CommandCenter.Views
             this.pnlScroll.Controls.Add(this.lblRows);
             this.pnlScroll.Controls.Add(this.nudPlcPort);
             this.pnlScroll.Controls.Add(this.lblPlcPort);
-            this.pnlScroll.Controls.Add(this.cmbModel);
             this.pnlScroll.Controls.Add(this.btnModelConfig);
-            this.pnlScroll.Controls.Add(this.lblModel);
             this.pnlScroll.Controls.Add(this.txtPlcIp);
             this.pnlScroll.Controls.Add(this.lblPlcIp);
             this.pnlScroll.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -673,7 +648,7 @@ namespace CommandCenter.Views
             this.tip.SetToolTip(this.chkTitleOkNg,
                 "标题栏的 OK / NG 计数用\"实心彩色色块 + 白字\"高亮（绿底=OK、红底=NG），\r\n比普通彩色文字醒目得多。取消则回退彩色文字样式。保存后即时生效。");
             this.tip.SetToolTip(this.chkWindowOkNg,
-                "主界面每个显示窗口右下角叠加一个【矩形框 OK/NG 徽标】（样子同标题栏色块，\r\n颜色随 \"OK颜色/NG颜色\" 配置）。默认关闭（保持画面干净），需要实时看每格结果时可勾选。\r\n保存后即时生效。");
+                "主界面每个显示窗口右下角叠加一个【矩形框 OK/NG 徽标】（样子同标题栏色块，\r\n颜色随 \"OK颜色/NG颜色\" 配置）。默认开启（V2.14.24）；且只有窗口对应的点位\r\n【拿到相机 OK/NG 结果】才显示对应徽标（新的一轮开始前隐藏），不会空窗口乱显。\r\n保存后即时生效。");
             this.tip.SetToolTip(this.chkWindowIndex,
                 "主界面每个显示窗口左上角是否显示【窗口编号】（半透明白底 + 深蓝灰字，辅助现场定位第几路）。\r\n默认勾选（与历史画面一致）；现场嫌编号碍眼可取消勾选，保存后即时生效。");
             this.tip.SetToolTip(this.chkWindowToolTip,
@@ -717,8 +692,6 @@ namespace CommandCenter.Views
         private TextBox txtPlcIp;
         private Label lblPlcPort;
         private NumericUpDown nudPlcPort;
-        private Label lblModel;
-        private ComboBox cmbModel;
         private Button btnModelConfig;
         private Label lblRows;
         private NumericUpDown nudRows;

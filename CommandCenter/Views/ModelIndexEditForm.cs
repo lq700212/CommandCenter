@@ -28,7 +28,11 @@ namespace CommandCenter.Views
     /// 【交互】
     ///   - 打开即预载当前映射（LoadFromConfig）；
     ///   - 回车 = 【确定】（AcceptButton）、Esc = 【取消】（CancelButton）；
-    ///   - 表格末尾 * 新行可加行、Delete 键删选中行；单元格直接编辑；
+    ///   - 表格末尾 * 新行可加行、单元格直接编辑；
+    ///   - 删除（V2.14.25）：第一列"选中"勾选框标记待删除行，点右上角【删除选中】
+    ///     批量删除（多选）；也可鼠标/方向键选中一行/多行（Ctrl/Shift）后点删除或按
+    ///     Delete 键（单选/多选）。删除只在编辑副本上进行，取消不影响原配置；
+    ///   - 全部内容（表头 + 单元格）居中显示，方便现场点选；
     ///   - 【确定】校验：型号名称非空、同型号名不重复（忽略大小写）、序号 0~65535；
     ///     不合法弹提示留在窗体，合法才关闭并写回。
     /// 本窗体不做任何通讯 IO，只在 UI 主线程使用。
@@ -60,6 +64,7 @@ namespace CommandCenter.Views
             // 回车=确定 / Esc=取消（AcceptButton/CancelButton 在 Designer 已设）。
             btnOk.Click += (s, e) => OnOk();
             btnCancel.Click += (s, e) => OnCancel();
+            btnDelete.Click += (s, e) => BtnDelete_Click();
             LoadFromConfig();
         }
 
@@ -71,14 +76,54 @@ namespace CommandCenter.Views
                 AddRow(item.ModelName, item.ModelIndex);
         }
 
-        /// <summary>向表格追加一行（供 LoadFromConfig 与确定回填复用）。</summary>
+        /// <summary>向表格追加一行（供 LoadFromConfig 与确定回填复用）。
+/// 三列按顺序：选中(默认不勾选)、序号、型号名称。</summary>
         private void AddRow(string modelName, int modelIndex)
         {
-            grid.Rows.Add(modelIndex, modelName);
+            grid.Rows.Add(false, modelIndex, modelName);
+        }
+
+        /// <summary>
+        /// 删除选中行（V2.14.25，右上角【删除选中】按钮）：
+        /// ① 优先删除"选中"列勾选的所有行（勾选=批量标记，多选删除）；
+        /// ② 没有勾选行时，删除当前选中的行（鼠标点选/方向键单选，或 Ctrl/Shift 多选）；
+        /// ③ 两者都没有 → 弹提示提醒先选择。
+        /// 只动编辑副本 _edits 绑定的表格，取消不落盘（与 WindowPointForm 副本式编辑一致）。
+        /// </summary>
+        private void BtnDelete_Click()
+        {
+            // ① 收集"选中"列勾选的行（checkbox 值可能是 bool 或 null，null 视作未勾选）。
+            var toRemove = new List<DataGridViewRow>();
+            foreach (DataGridViewRow row in grid.Rows)
+            {
+                if (row.IsNewRow) continue;
+                if (row.Cells["colSel"]?.Value is bool selected && selected)
+                    toRemove.Add(row);
+            }
+
+            // ② 无勾选 → 回退用当前选中行（单选/多选），与勾选互斥避免误删两套集合。
+            if (toRemove.Count == 0)
+            {
+                foreach (DataGridViewRow row in grid.SelectedRows)
+                    toRemove.Add(row);
+            }
+
+            if (toRemove.Count == 0)
+            {
+                MessageBox.Show(this, "请先勾选要删除的行（左侧复选框），或直接选中一行/多行后再删除。",
+                    "产品型号配置", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // ③ 按行索引从后往前删，避免删行引起索引/遍历错乱。
+            var indexes = toRemove.Select(r => r.Index).OrderByDescending(i => i).ToList();
+            foreach (int idx in indexes)
+                grid.Rows.RemoveAt(idx);
         }
 
         /// <summary>
         /// 确定按钮：收集表格 → 校验 → 整体写回目标列表并关闭。
+        /// 表格三列：colSel(选中，仅删除用不写回) / colIndex(序号) / colModel(型号名)。
         /// 校验规则：① 型号名称不能为空（空白行视为"空行"，跳过不写、不报错）；
         /// ② 同型号名不能重复（忽略大小写，防止 PLC 序号反查歧义）；③ 序号必须在 0~65535。
         /// 校验不通过弹提示并留在窗体（返回 DialogResult.None 撤销默认 OK）。
@@ -92,8 +137,8 @@ namespace CommandCenter.Views
             {
                 if (row.IsNewRow) continue;   // 跳过末尾"* 新行"占位行
 
-                object idxObj = row.Cells[0]?.Value;
-                object nameObj = row.Cells[1]?.Value;
+                object idxObj = row.Cells["colIndex"]?.Value;
+                object nameObj = row.Cells["colModel"]?.Value;
                 string name = nameObj?.ToString()?.Trim() ?? "";
                 if (string.IsNullOrEmpty(name))
                     continue;                 // 型号名空的整行忽略（等同没写这行）

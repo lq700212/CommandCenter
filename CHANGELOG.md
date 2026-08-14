@@ -1,5 +1,87 @@
 # 版本改动记录
 
+## V2.14.25（2026-08-14）产品型号配置弹窗增强：删除按钮 + 全居中 + 选中勾选列
+
+> 现场反馈 ModelIndexEditForm（"产品型号配置…"弹窗）增删型号不够顺手：原来删行只能按 Delete 键、
+> 要删的型号一多就得一行一行删；表格内容默认左对齐不够整齐。本次加"删除选中"按钮（勾选多行批量删 /
+> 单选多选行删），并新增最左"选中"勾选列，列头与单元格全部居中。
+
+### 改动范围
+
+- **`Views/ModelIndexEditForm.Designer.cs`**：
+  - 新增最左列 `colSel`（DataGridViewCheckBoxColumn，HeaderText="选中"，宽 56）——勾选=标记待删除行；
+  - 新增右上角红色系按钮 `btnDelete`（"删除选中"，浅红底白字 Flat，区别于蓝/灰按钮，防误触直观）；
+  - 表格内容全居中：`ColumnHeadersDefaultCellStyle.Alignment` / `DefaultCellStyle.Alignment`
+    = MiddleCenter；`SelectionMode=FullRowSelect`（整行选中易点选）+ `MultiSelect=true`
+    （Ctrl/Shift 多选）—— 表头与单元格横竖都居中；
+  - 布局：表格因上方多了删除按钮下移（y 72→104、高 218→186），列宽 56/128/200 正好填满表格宽 384；
+  - 窗体布局 ASCII 图同步加选中列与删除按钮。
+- **`Views/ModelIndexEditForm.cs`**：
+  - `AddRow` 改填三列（选中默认 false、序号、型号名）；
+  - 新增 `BtnDelete_Click`：优先删"选中"列勾选的行（多选批量），无勾选时回退删当前选中行（单选/
+    Ctrl/Shift 多选），都没有则弹提示；按行索引从后往前删防错乱；只动编辑副本、取消不落盘；
+  - `OnOk` 收集改用列名（colIndex/colModel），勾选列不参与写回（纯编辑工具）；
+  - 类注释更新（删除交互、全居中说明）。
+
+### 验证
+
+- MSBuild Debug/AnyCPU 构建通过；exe 冒烟存活（pid 33728）。
+- "故意破坏输入"推演：checkbox 单元格值为 null 时 `is bool` 判定安全（不算勾选）；
+  colSel/colIndex/colModel 列名固定不会被重排错位；删到只剩新行占位时勾选/选中集合为空 → 弹提示不崩。
+
+### 文档同步
+
+- `docs/CommandCenter.md`：产品型号映射弹窗描述补"删除按钮/选中列/全居中"。
+- `AGENTS.md`：关键文件导航 ModelIndexEditForm 行补一句删除交互说明。
+- `README.md`：产品型号一节补"弹窗内可直接勾选批量删除"。
+
+## V2.14.24（2026-08-14）窗口徽标"拿到相机结果才显示" + 设置页删"产品型号"下拉
+
+> 两项界面整理改动：
+> ① **窗口徽标**：`windowOkNgVisible` 默认 false→true（设置窗体"窗口徽标"默认开启）。但开启后暴露
+> 一个误导问题——窗口刚建/新一轮刚开始时本没有结果，旧逻辑却按上次 `_isOk`（默认 OK）显示徽标，
+> 未拍的空窗口也挂着"OK"。本次改徽标显隐 = 配置开关 && **该窗口点位已拿到相机判定**：清窗/空窗口
+> 不显示，拿到结果才按 OK/NG 显示对应徽标，上一轮结果随新的一轮一起清掉。
+> ② **设置页删"产品型号"下拉**（lblModel+cmbModel）：它与"产品型号配置…"按钮（ModelIndexEditForm
+> 弹窗，维护型号↔PLC序号映射表）功能重复——当前型号切换本来就有主界面标题栏下拉（V2.8 操作员日常
+> 入口），设置页这份下拉只是第二个可手输入口。删掉后型号集合的增删唯一落在"产品型号配置…"弹窗，
+> 由 ConfigStore 把弹窗新增的型号名回流进 `productModels` 候选，主界面标题栏/窗口点位配置即选得到。
+
+### 改动范围
+
+- **`Models/AppConfig.cs`**：`DisplayConfig.WindowOkNgVisible` 默认值 `false`→`true`（注释更新）。
+- **`Controls/CameraDisplayControl.cs`**：徽标"拿到结果才显示"——新增 `_hasResult`（该窗口点位是否
+  已拿到相机结果）+ `_windowOkNgVisible`（配置开关）两字段；`SetOkNgStatus` 标记有结果、
+  `ResetResult()` 复位结果态（新一轮清窗用）、`SetOkNgVisible` 只记开关；显隐统一走
+  `UpdateBadgeVisibility()`（= `_hasResult && _windowOkNgVisible`）。
+- **`Views/MainForm.cs`**：`OnRoundStarted`（新一轮清窗）补 `ResetResult()`，上一轮徽标随图片一起清掉。
+- **`Views/SettingsForm.cs` + `.Designer.cs`**：删除 `lblModel`/`cmbModel`（含候选填充、OnSave 读值、
+  WindowPointForm 的 modelLink 同步）；新增 `_currentModel` 字段（打开时标题栏选中值 > 配置
+  ProductModel > 预置第一候选）用于自适应铺排计算 / WindowPointForm 初选型号 / OnSave 写回；
+  `btnModelConfig` 左移到原 lblModel 位置；ToolTip/布局图同步。
+- **`Utils/ConfigStore.cs`**：`EnsureModelIndexes` 末尾反向回流——`ModelIndexes` 里弹窗新增的型号名
+  合并进 `ProductModels`（候选列表，去重/忽略空/大小写不敏感），加载与保存都覆盖，保证型号集合闭环。
+- 说明：当前型号在设置页保存时不改变（原样写回标题栏选中值），主界面标题栏下拉为唯一切型号入口。
+
+### 验证
+
+- MSBuild Debug/AnyCPU 构建通过；exe 冒烟存活（pid 24540）。
+- "故意破坏输入"推演：`ModelIndexes`/`ProductModels` 手写为 null → `EnsureModelIndexes` 均兜底建表，
+  不 NRE；`_currentModel` 为空 → 兜底预置第一候选；`cmbModel.SelectedItem` 为 null → SettingsForm
+  构造兜底，均安全。
+
+### 文档同步
+
+- `docs/CommandCenter.md`：§3.1 切型号入口、§5 PLC 产品型号/型号→序号映射描述、第二部分窗口徽标
+  开关描述，第八部分版本记录追加 V2.14.24。
+- `docs/上位机PLC通信接口定义文档.md`：§2.4 型号来源描述入口唯一化。
+- `AGENTS.md`：PLC 握手协议段"型号入口唯一化 + 型号集合双向对齐"约定、相机/徽标相关说明更新。
+- `README.md`：可配置项（WindowOkNgVisible 默认值 + 无结果不显示）与切型号入口描述更新。
+- **README 整体重写（同日）**：从"演进史罗列式"改为"通俗读物式"——新增软件架构分层图、
+  生产流程时序图、现场网络拓扑图、三拍握手时序图，可配置项按业务分组改表格（字段/默认值/
+  白话说明），相机对上/下、窗口矩阵与存图目录各配 ASCII 图示意；版本号刺与历史细节移交
+  `docs/CommandCenter.md` 与 `CHANGELOG.md`，README 只留操作性结论。
+
 ## V2.14.23（2026-08-14）热更/保存后 PLC 收不到请求修复：从站重建必须释放旧 master 连接
 
 > 现场血泪：SettingsForm 点保存后必现 PLC 异常——主界面右上角 PLC 灯变黄后一直卡黄，
