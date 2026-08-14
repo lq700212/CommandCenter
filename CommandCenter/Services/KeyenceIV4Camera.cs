@@ -179,10 +179,11 @@ namespace CommandCenter.Services
 
         /// <summary>
         /// 设置判定结果输出格式（V1.12.18，指令 OF,nn[CR]，响应 "OF[CR]"）。
-        /// 现场若把 T2 响应切成"详细格式"，判定解析仍兼容（ParseResult 取逗号前字段），
-        /// 但为对齐《通信指南》，程序主动按 CameraConfig.OutputFormat 发一次 OF 固化格式。
+        /// 程序按 CameraConfig.OutputFormat 发一次 OF 固化格式（对齐《通信指南》）。
         /// nn 固定 2 位：00标准 / 01详细 / 02标准(主控编号) / 03详细(主控编号)。
         /// 设置后连接断开或断电前一直保持；相机断电后需要重新设置（主流程每次触发前会带发）。
+        /// 【V2.14.10】无论相机最终输出哪种格式，ParseResult 均已兼容：详细格式直接认第 2 个
+        /// 逗号字段的明文 OK/NG，标准格式回退逐位判定，不依赖本设置也能正确解析。
         /// </summary>
         /// <param name="format">2 位格式编号；空/非法则不发送（相机维持当前/默认格式）</param>
         /// <returns>true=发送成功（收到 OF 回显）；false=失败或未发送</returns>
@@ -414,7 +415,17 @@ namespace CommandCenter.Services
 
         /// <summary>
         /// 解析 T2/RT 的响应为判定结果。
-        /// 期望形如 "RT,00010200"（标准）或 "RT,0001,12.3,..."（详细，取逗号前 8 位）。
+        /// 基恩士相机响应有【两种实际格式】，必须都要兼容：
+        ///  ① 标准格式：`RT,00000000` —— 8 位判定位，每位对应一个工具（'0'=OK）；
+        ///  ② 详细格式：`RT,00152,OK,01,OK,0000100` —— 总判定为明文 OK/NG，在第【2】个逗号字段，
+        ///     第 1 个逗号字段是递增触发计数（00152/00327…），【绝不能当判定位】（含 1/3/2 等
+        ///     非 '0' 字符逐位检查必然判 NG）。
+        ///
+        /// 【V2.14.10 修复"相机判定 OK 但上位机/PLC/存图全 NG"血泪】
+        /// 现场相机 T2 实测输出详细格式（前 v2.13 只按标准格式解析），旧实现取"第 1 个逗号前字段"
+        /// （触发计数）当判定位逐位检查 → 每次触发计数递增、几乎必含非 '0' 位 → 一切皆判 NG，
+        /// 导致 PLC 收 2、存图全进 NG 目录、界面 OK 计数恒 0。修复：先识别详细格式（字段数>=2 且
+        /// 第 2 字段是明文 OK/NG）直接取结论；识别不到再回退标准格式逐位判定（旧行为不变）。
         ///
         /// 【V1.7.2 修复】
         /// ① 判定内容为空（"RT," / "RT,,..."）时直接判失败——此前空 flags 会因 foreach 不执行
@@ -432,7 +443,21 @@ namespace CommandCenter.Services
                 return TriggerReadOutcome.Fail("响应格式异常：" + line);
 
             string payload = line.Substring(3).Trim();
-            string flags = payload.Split(',')[0].Trim(); // 标准：整段即 8 位；详细：取首个逗号前字段
+            string[] fields = payload.Split(',');
+
+            // 【V2.14.10】详细格式判定：字段数>=2 且第 2 个逗号字段是明文 OK/NG → 直接采用。
+            // 现场实测响应：RT,00152,OK,01,OK,0000100（OK）/ RT,00151,NG,01,NG,0000000（NG）。
+            if (fields.Length >= 2)
+            {
+                string verdict = fields[1].Trim();
+                if (verdict.Equals("OK", StringComparison.OrdinalIgnoreCase))
+                    return TriggerReadOutcome.OkResult(verdict, raw);
+                if (verdict.Equals("NG", StringComparison.OrdinalIgnoreCase))
+                    return TriggerReadOutcome.NgResult(verdict, raw, "相机判定 NG（详细格式）");
+            }
+
+            // 标准格式：整段即 8 位判定位（fields[0]，标准响应只有这一位）
+            string flags = fields[0].Trim();
 
             // 无判定内容：通讯成功但没有结论，按失败处理（绝不默认 OK）
             if (flags.Length == 0)
