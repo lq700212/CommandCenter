@@ -15,6 +15,7 @@ namespace CommandCenter.Views
     ///   │   · 连接线缆 / TCP 是否在线             │
     ///   │   · 激光是否正常、条码是否清晰可读      │
     ///   │  (lblFailText 读到失败文本，小字灰显)   │
+    ///   │  ☐ 今日不再提醒 (chkMuteToday)         │
     ///   │                                        │
     ///   │ [btnLater 稍后处理]  [btnManual 人工补录]│
     ///   └────────────────────────────────────────┘
@@ -44,6 +45,7 @@ namespace CommandCenter.Views
             this.lblBanner = new System.Windows.Forms.Label();
             this.lblMessage = new System.Windows.Forms.Label();
             this.lblFailText = new System.Windows.Forms.Label();
+            this.chkMuteToday = new System.Windows.Forms.CheckBox();
             this.btnLater = new System.Windows.Forms.Button();
             this.btnManual = new System.Windows.Forms.Button();
             this.pnlHeader.SuspendLayout();
@@ -75,9 +77,9 @@ namespace CommandCenter.Views
             // 
             this.lblMessage.Font = new System.Drawing.Font("微软雅黑", 10F);
             this.lblMessage.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
-            this.lblMessage.Location = new System.Drawing.Point(28, 66);
+            this.lblMessage.Location = new System.Drawing.Point(28, 62);
             this.lblMessage.Name = "lblMessage";
-            this.lblMessage.Size = new System.Drawing.Size(364, 70);
+            this.lblMessage.Size = new System.Drawing.Size(364, 72);
             this.lblMessage.TabIndex = 1;
             this.lblMessage.Text = "扫码枪读码失败，请检查扫码枪：\n· 连接线缆 / TCP 是否在线\n· 激光是否正常、条码是否清晰可读";
             // 
@@ -85,10 +87,24 @@ namespace CommandCenter.Views
             // 
             this.lblFailText.Font = new System.Drawing.Font("微软雅黑", 9F);
             this.lblFailText.ForeColor = System.Drawing.Color.Gray;
-            this.lblFailText.Location = new System.Drawing.Point(28, 124);
+            this.lblFailText.Location = new System.Drawing.Point(28, 138);
             this.lblFailText.Name = "lblFailText";
-            this.lblFailText.Size = new System.Drawing.Size(364, 30);
+            this.lblFailText.Size = new System.Drawing.Size(364, 20);
             this.lblFailText.TabIndex = 2;
+            // 
+            // chkMuteToday
+            // "今日不再提醒"复选框（V2.14.32 增强）：勾选后当日后续扫码枪失败不再弹本窗
+            //（MainForm 记录当日全局屏蔽、次日恢复），适合"枪已坏、已安排维修、不想被持续弹窗打扰"。
+            // 
+            this.chkMuteToday.AutoSize = true;
+            this.chkMuteToday.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.chkMuteToday.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
+            this.chkMuteToday.Location = new System.Drawing.Point(28, 160);
+            this.chkMuteToday.Name = "chkMuteToday";
+            this.chkMuteToday.Size = new System.Drawing.Size(90, 17);
+            this.chkMuteToday.TabIndex = 5;
+            this.chkMuteToday.Text = "今日不再提醒";
+            this.chkMuteToday.UseVisualStyleBackColor = true;
             // 
             // btnLater
             // 
@@ -98,7 +114,7 @@ namespace CommandCenter.Views
             this.btnLater.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnLater.Font = new System.Drawing.Font("微软雅黑", 10F);
             this.btnLater.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
-            this.btnLater.Location = new System.Drawing.Point(28, 172);
+            this.btnLater.Location = new System.Drawing.Point(28, 194);
             this.btnLater.Name = "btnLater";
             this.btnLater.Size = new System.Drawing.Size(110, 38);
             this.btnLater.TabIndex = 3;
@@ -113,7 +129,7 @@ namespace CommandCenter.Views
             this.btnManual.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnManual.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
             this.btnManual.ForeColor = System.Drawing.Color.White;
-            this.btnManual.Location = new System.Drawing.Point(282, 172);
+            this.btnManual.Location = new System.Drawing.Point(282, 194);
             this.btnManual.Name = "btnManual";
             this.btnManual.Size = new System.Drawing.Size(110, 38);
             this.btnManual.TabIndex = 4;
@@ -125,7 +141,8 @@ namespace CommandCenter.Views
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 19F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.White;
-            this.ClientSize = new System.Drawing.Size(420, 222);
+            this.ClientSize = new System.Drawing.Size(420, 246);
+            this.Controls.Add(this.chkMuteToday);
             this.Controls.Add(this.btnLater);
             this.Controls.Add(this.btnManual);
             this.Controls.Add(this.lblFailText);
@@ -147,10 +164,11 @@ namespace CommandCenter.Views
 
         #endregion
 
-        private Panel pnlHeader;
+private Panel pnlHeader;
         private Label lblBanner;
         private Label lblMessage;
         private Label lblFailText;
+        private CheckBox chkMuteToday;
         private Button btnLater;
         private Button btnManual;
     }

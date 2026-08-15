@@ -23,6 +23,7 @@ namespace CommandCenter.Views
     /// │   · 连接线缆 / TCP 是否在线             │
     /// │   · 激光是否正常、条码是否清晰可读      │
     /// │  (lblFailText 读到失败文本，小字灰显)   │
+    /// │  ☐ 今日不再提醒 (chkMuteToday)         │
     /// │                                        │
     /// │ [btnLater 稍后处理]  [btnManual 人工补录]│
     /// └────────────────────────────────────────┘
@@ -34,11 +35,17 @@ namespace CommandCenter.Views
     ///     调用方（MainForm）收到 OK 后打开 SerialInputForm 手动录入序列号接手处理；
     ///   - 【稍后处理】（btnLater，白底次按钮）→ DialogResult.Cancel 关闭，
     ///     仅提醒、不补录（本条已报扫码 NG，等下一拍扫码）。
+    ///   - **【今日不再提醒】（chkMuteToday）**：勾选后点任一按钮关闭，MainForm 记录
+    ///     "今日已屏蔽"，当天后续扫码枪失败都不再弹本窗（跨多个弹窗实例全局生效、次日恢复）。
+    ///     适合"枪坏了但已安排维修、不想被持续弹窗打扰"的现场场景；屏蔽期间业务照跑——
+    ///     扫码 NG 判定照旧、日志照记，只是不弹窗。
     ///   - 回车/Esc 兜底：AcceptButton=btnManual、CancelButton=btnLater。
     /// 本窗体不做任何通讯 IO，只提醒 + 返回用户选择，永远在 UI 主线程使用。
     /// </summary>
     public partial class ScannerFailForm : Form
     {
+        /// <summary>用户是否勾选了"今日不再提醒"（【人工补录】/【稍后处理】关闭后由调用方读取，当日全局屏蔽）。</summary>
+        public bool MuteToday => chkMuteToday.Checked;
         /// <summary>
         /// 创建扫码枪异常提醒对话框。
         /// </summary>

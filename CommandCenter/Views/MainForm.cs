@@ -79,6 +79,10 @@ namespace CommandCenter.Views
         private static readonly TimeSpan ScannerFailPromptThrottle = TimeSpan.FromSeconds(30);
         private DateTime _lastScannerFailPromptUtc = DateTime.MinValue;
 
+        // 扫码枪异常弹窗"今日不再提醒"（V2.14.32 增强）：操作员在 ScannerFailForm 勾选后，
+        // 记录当天日期，当日后续扫码枪失败一律不弹窗（业务 NG 判定照旧、日志照记），次日自动恢复。
+        private DateTime _scannerFailMuteDate = DateTime.MinValue;
+
         /// <summary>
         /// 显示窗口集合（V1.12.28 起按"窗口编号"索引，不再用数组下标）：
         /// 禁用的窗口（DisplayConfig.WindowEnabled=false）不在矩阵显示、不建控件，
@@ -1210,6 +1214,9 @@ namespace CommandCenter.Views
         /// 【节流防轰炸】扫码枪持续失败会连发事件，若每次都弹窗会打断生产。用
         /// _lastScannerFailPromptUtc 记录上次真实弹窗时刻，30 秒内重复失败只在日志体现、
         /// 不再弹窗——给操作员留出处理时间，又不会因持续故障刷屏。
+        /// 【今日不再提醒（V2.14.32 增强）】操作员在弹窗勾选"今日不再提醒"后，_scannerFailMuteDate
+        /// 记录当天日期，当日后续失败一律不弹窗（业务 NG 判定、日志照旧），次日自动恢复。
+        /// 屏蔽与否与 30 秒节流是两级：今日已屏蔽 → 全部跳过；否则再按节流窗口判断。
         /// 【线程安全】事件来自后台线程，先 BeginInvoke 切回 UI 线程再弹模态窗（红线：UI 禁 IO、
         /// 后台线程禁碰 UI 控件）。模态弹窗只在 UI 线程排队，后台协调器/扫码枪不受阻塞。
         /// </summary>
@@ -1222,17 +1229,30 @@ namespace CommandCenter.Views
                 return;
             }
 
+            // 今日已勾选"不再提醒" → 当天后续失败只记日志、不再弹窗（业务判定与日志照常，次日恢复）
+            if (_scannerFailMuteDate == DateTime.Today)
+            {
+                LogHelper.Warn("扫码枪读码失败（今日已设置不再提醒，跳过弹窗，业务照常）：" + text);
+                return;
+            }
+
             // 节流：距上次真实弹窗不足 30 秒 → 只记日志、不打扰（防持续失败刷屏）
             if ((DateTime.UtcNow - _lastScannerFailPromptUtc) < ScannerFailPromptThrottle) return;
             _lastScannerFailPromptUtc = DateTime.UtcNow;
             LogHelper.Warn("扫码枪读码失败，弹窗提醒操作员检查（已上报扫码 NG）：" + text);
 
             // 弹提醒窗：点【人工补录】→ 顺手打开手动录入对话框（复用现有补录流程），
-            // 点【稍后处理】→ 仅提醒、本条按扫码 NG 处理，等下一拍。
+            // 点【稍后处理】→ 仅提醒、本条按扫码 NG 处理，等下一拍；
+            // 关闭后若勾选【今日不再提醒】→ 记录当天日期，当日后续失败不再弹窗（跨弹窗实例全局生效）。
             using (var dlg = new ScannerFailForm(text))
             {
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                     PromptManualSerial();
+                if (dlg.MuteToday)
+                {
+                    _scannerFailMuteDate = DateTime.Today;
+                    LogHelper.Info("操作员勾选扫码枪异常弹窗【今日不再提醒】——当日后续扫码枪失败不再弹窗（业务判定与日志照常），次日自动恢复");
+                }
             }
         }
 

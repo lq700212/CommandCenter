@@ -153,9 +153,6 @@
     <EmbeddedResource Include="Views\MainForm.resx">
       <DependentUpon>MainForm.cs</DependentUpon>
     </EmbeddedResource>
-    <EmbeddedResource Include="Views\ScannerFailForm.resx">
-      <DependentUpon>ScannerFailForm.cs</DependentUpon>
-    </EmbeddedResource>
     <EmbeddedResource Include="Views\WindowPointForm.resx">
       <DependentUpon>WindowPointForm.cs</DependentUpon>
     </EmbeddedResource>
