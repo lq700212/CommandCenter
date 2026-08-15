@@ -1,5 +1,38 @@
 # 版本改动记录
 
+## V2.14.26（2026-08-14）窗口徽标显隐还原：只随开关走（保留 V2.14.24 的默认开启）
+
+> 需求：主界面窗口矩阵里，空窗口/还没接到图像的窗口右下角 **OK/NG 徽标也要一直显示**——
+> V2.14.24 把徽标显隐改成"拿到相机结果才显示"（`_hasResult` 判定），但现场反馈图是异步 FTP
+> 取的（判定先到、图片要几百 ms~2s 才到，甚至可能失败），那段"有判定没图"的时间里徽标被藏掉、
+> 空窗口从头到尾没徽标，视觉上像缺了状态指示，反而更不直观。还原为 V2.14.24 之前逻辑：
+> **徽标显隐只跟配置开关走**（`WindowOkNgVisible` 默认 true 不开回），无需管有没有图/有没有结果。
+
+### 改动范围
+
+- **`Controls/CameraDisplayControl.cs`**：
+  - 删除 `_hasResult` 字段与 `ResetResult()` 方法（V2.14.24 引入的结果态判定全部移除）；
+  - `UpdateBadgeVisibility()` 改回 `_badge.Visible = _windowOkNgVisible;`（唯一判定点，只看开关）；
+  - `SetOkNgStatus` 仍更新 `_isOk` 并给徽标变色（拿到判定按结果 OK/NG 变色）；
+  - 未判定时默认 `_isOk=true` → 徽标显示绿 OK（与 V2.14.23 及更早行为一致）；
+  - 类注释同步（V2.14.26 说明）。
+- **`Views/MainForm.cs`**：`OnRoundStarted`（新一轮清窗）删掉 `ResetResult()` 调用，只保留
+  `SetImage(null)` 清图——徽标由开关常驻、不清（上一轮结果颜色保留到本轮判定回来再更新）。
+
+### 验证
+
+- MSBuild Debug/AnyCPU 构建通过；冒烟 exe 存活。
+- 反射验证（焦距到徽标显隐判定点）：新建 CameraDisplayControl → `SetOkNgVisible(true)` →
+  私有 `_badge.Visible == true`（无任何结果/图片时徽标也显示，符合"开关开就显示"）。
+
+### 文档同步
+
+- `docs/CommandCenter.md`：第一部分窗口徽标开关描述改"只随开关走"；第八部分 V2.14.24 条目补
+  ⚠️ V2.14.26 已还原说明。
+- `AGENTS.md`：关键文件导航 CameraDisplayControl 行改回"徽标显隐只随开关走"约定。
+- `README.md`：可配置项 `windowOkNgVisible` 描述同步。
+- `CHANGELOG.md`：本版本（V2.14.26）。
+
 ## V2.14.25（2026-08-14）产品型号配置弹窗增强：删除按钮 + 全居中 + 选中勾选列
 
 > 现场反馈 ModelIndexEditForm（"产品型号配置…"弹窗）增删型号不够顺手：原来删行只能按 Delete 键、

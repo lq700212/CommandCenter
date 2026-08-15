@@ -22,9 +22,10 @@ namespace CommandCenter.Controls
     ///     主流程记录（IsOk/SetOkNgStatus 保留接口，只是不再叠加显示在画面上）。
     ///   - V2.10.3：OK/NG 徽标改为【可配置显隐】——由 MainForm 按 DisplayConfig.WindowOkNgVisible
     ///     控制（V2.14.24 起默认开启），勾选后右下角叠加自绘矩形框 OK/NG，颜色随配置 OK/NG 色。
-    ///   - V2.14.24：徽标【拿到相机结果才显示】——新的一轮清窗/空窗口未接图时隐藏（宁缺毋滥），
-    ///     只有本窗口点位拿到相机 OK/NG 判定（SetOkNgStatus）才显示对应徽标；新一轮开始（ResetResult）
-    ///     复位结果态、徽标随图片一起清掉，杜绝上一轮结果残留误报。
+    ///   - V2.14.26：徽标显隐还原为【只随开关走】——只要设置里勾了"窗口徽标"，本窗口
+    ///     无论有没有图片/有没有拿到相机判定都显示徽标（未判定时按默认 OK 绿显示，
+    ///     拿到判定后随结果变色）；撤销 V2.14.24"拿到相机结果才显示"（_hasResult）逻辑——
+    ///     现场反馈空窗口/未接图时徽标也应在，不能因为图还没异步取到就整个藏掉。
     /// </summary>
     public class CameraDisplayControl : UserControl
     {
@@ -34,23 +35,17 @@ namespace CommandCenter.Controls
         /// <summary>窗口编号（从 1 开始，辅助现场定位第几路）</summary>
         private readonly Label _windowIndexLabel;
 
-        /// <summary>当前结果：true=OK，false=NG</summary>
+        /// <summary>当前结果：true=OK，false=NG（未判定时默认 OK，徽标显示绿 OK）</summary>
         private bool _isOk = true;
 
         /// <summary>
-        /// 本窗口点位是否已拿到相机 OK/NG 结果（V2.14.24）。
-        /// false（新一轮清窗后/空窗口未接图）= 徽标隐藏——宁可不显示，也不能拿"上上轮"的结果冒充；
-        /// true 表示最近一轮相机判定已回到本窗口（SetOkNgStatus 最后一次调用后）。
-        /// </summary>
-        private bool _hasResult = false;
-
-        /// <summary>
-        /// 是否开启"窗口徽标"的显示开关（V2.14.24，由 MainForm 按 DisplayConfig.WindowOkNgVisible 注入）。
-        /// 徽标最终显隐 = 本开关 && _hasResult（见 UpdateBadgeVisibility）。
+        /// 是否开启"窗口徽标"的显示开关（由 MainForm 按 DisplayConfig.WindowOkNgVisible 注入）。
+        /// 徽标最终显隐 = 本开关（V2.14.24 前逻辑，V2.14.26 还原）：只要开关开，本窗口
+        /// 无论有没有图片/有没有拿到结果都显示徽标，未判定时显示默认绿 OK。
         /// </summary>
         private bool _windowOkNgVisible = false;
 
-        /// <summary>右下角 OK/NG 徽标（V2.10.3，默认隐藏，由"开关 && 已拿到结果"共同决定显隐）</summary>
+        /// <summary>右下角 OK/NG 徽标（V2.10.3，默认隐藏，由"开关"决定显隐）</summary>
         private readonly OkNgBadge _badge;
 
         /// <summary>窗口编号（1 起）</summary>
@@ -94,9 +89,10 @@ namespace CommandCenter.Controls
             };
             Controls.Add(_windowIndexLabel);
 
-            // ③ 右下角 OK/NG 徽标（V2.10.3；V2.14.24 起"拿到结果才显示"）：叠加在画面上方、
-            //    初始隐藏，由 MainForm 按配置调用 SetOkNgVisible 注入开关，本窗口拿到相机判定
-            //    （SetOkNgStatus）后才显示对应徽标。Anchor=Bottom|Right → 控件缩放时始终贴右下角且间距固定。
+            // ③ 右下角 OK/NG 徽标（V2.10.3；V2.14.26 起显隐只随开关）：叠加在画面上方、
+            //    初始隐藏，由 MainForm 按配置调用 SetOkNgVisible 注入开关，开关开着就显示徽标
+            //    （未拿到相机判定时默认绿 OK，SetOkNgStatus 拿到后随结果变色）。
+            //    Anchor=Bottom|Right → 控件缩放时始终贴右下角且间距固定。
             _badge = new OkNgBadge
             {
                 Size = new Size(52, 24),
@@ -199,14 +195,14 @@ namespace CommandCenter.Controls
         }
 
         /// <summary>
-        /// 设置检测结果（V2.10.3；V2.14.24 起"拿到结果才显示徽标"）：
-        /// 记录本窗口点位已拿到相机判定，并同步到 OK/NG 徽标——有结果后徽标随开关显示、随结果变色。
+        /// 设置检测结果（V2.10.3；V2.14.26 还原"开关开即显示徽标"）：
+        /// 记录本窗口点位的 OK/NG 判定并同步到徽标颜色；徽标显隐只由开关决定，
+        /// 不因"图还没取到/拿没拿到结果"而隐藏。
         /// </summary>
         /// <param name="isOk">true=OK，false=NG</param>
         public void SetOkNgStatus(bool isOk)
         {
             _isOk = isOk;
-            _hasResult = true;          // 本窗口点位拿到相机结果：解除"无结果隐藏"状态
             _badge.IsOk = isOk;
             UpdateBadgeVisibility();
         }
@@ -215,19 +211,8 @@ namespace CommandCenter.Controls
         public bool IsOk => _isOk;
 
         /// <summary>
-        /// 复位"结果态"（V2.14.24，新一轮开始清窗时由 MainForm 调用）：
-        /// 本窗口点位还没拿到新一轮的相机结果，徽标隐藏——避免上一轮的 OK/NG 残留误导现场。
-        /// 注意只复位结果态、不影响 _isOk 与已显示的图片（清图由调用方 SetImage(null) 负责）。
-        /// </summary>
-        public void ResetResult()
-        {
-            _hasResult = false;
-            UpdateBadgeVisibility();
-        }
-
-        /// <summary>
         /// 设置右下角 OK/NG 徽标开关（V2.10.3，由主窗体按配置调用）。
-        /// 最终显隐 = 本开关 && 本窗口已拿到结果（_hasResult）——没结果时开关开了也不显示。
+        /// 最终显隐 = 本开关（V2.14.26 还原，撤销 V2.14.24 的"&& 已拿到结果"限制）。
         /// </summary>
         public void SetOkNgVisible(bool visible)
         {
@@ -235,10 +220,10 @@ namespace CommandCenter.Controls
             UpdateBadgeVisibility();
         }
 
-        /// <summary>按"开关 && 已拿到相机结果"刷新徽标显隐（V2.14.24 唯一判定点）。</summary>
+        /// <summary>按"开关"刷新徽标显隐（V2.14.26 还原为只看开关，不再加结果态条件）。</summary>
         private void UpdateBadgeVisibility()
         {
-            _badge.Visible = _hasResult && _windowOkNgVisible;
+            _badge.Visible = _windowOkNgVisible;
         }
 
         /// <summary>设置徽标 OK/NG 颜色（V2.10.3，跟随 display.okColorName/ngColorName）。</summary>

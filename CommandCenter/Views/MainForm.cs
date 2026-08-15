@@ -1146,8 +1146,6 @@ namespace CommandCenter.Views
         /// 新一轮开始（V2.14.11）：收到 PLC 扫码请求，清空所有窗口的图片显示。
         /// 新的一轮第一步就是扫码，上一轮的图片已过时；提前清掉，等到新一轮
         /// 相机判定返回后再逐窗口 SetImage 新图，避免新旧两轮画面混在一起。
-        /// V2.14.24：同时复位各窗口的 OK/NG"结果态"（ResetResult）——上一轮的徽标一并清掉，
-        /// 只有本轮相机结果返回（ApplyResultImage → SetOkNgStatus）后才重新显示对应徽标。
         /// 事件来自协调整轮询后台线程，统一 BeginInvoke 回 UI 线程再遍历窗口。
         /// </summary>
         private void OnRoundStarted()
@@ -1162,8 +1160,7 @@ namespace CommandCenter.Views
             {
                 try
                 {
-                    w?.ResetResult();   // 徽标结果态复位（无结果不显示徽标，见 CameraDisplayControl）
-                    w?.SetImage(null);  // 图片清空回深灰空态
+                    w?.SetImage(null);  // 图片清空回深灰空态（徽标显隐只随开关，不清）
                 }
                 catch { }
             }
