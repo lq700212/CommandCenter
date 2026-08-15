@@ -1,5 +1,63 @@
 # 版本改动记录
 
+## V2.14.31（2026-08-15）代码混淆防反编译（Obfuscar 一键发布）
+
+> 需求（安全）：发布版 exe 没做任何混淆，用 dnSpy/ILSpy 打开就能看到全部类名/方法名/IP地址/
+> 寄存器号/相机指令，等于把整套业务逻辑和现场参数原样送人，反向破解零门槛。
+> 要求：给发布版加代码混淆，让反编译工具只能看到无意义的名字，提高逆向成本。
+
+### 改动范围
+
+- **新增 `CommandCenter/tools/Obfuscar/Obfuscar.Console.exe`**：免费开源混淆器本体（离线版，
+  直接拷入项目，不依赖 NuGet——与"第三方库拷 libs 离线引用"同一依赖策略）。
+- **新增 `CommandCenter/obfuscar.xml`** 混淆配置：
+  - `KeepPublicApi=false`：公开/私有类型、方法、字段、属性、事件**全部重命名**成 A.a/A.b 类乱码名；
+  - `HideStrings=true`：所有字符串字面量加密（运行时解密），反编译看不到设备 IP、PLC 寄存器地址、
+    相机指令、密码逻辑等明文；
+  - **`SkipNamespace name="CommandCenter.Models*"`**：配置模型命名空间**整体跳过**（含全部成员）——
+    原因：`ConfigStore.Save` 用小驼峰（CamelCasePropertyNamesContractResolver）把 AppConfig 序列化为
+    `appconfig.json`，**属性名 = json 字段名**；若混淆属性名，新程序写出的 json 字段名与现场既有配置
+    对不上、旧配置读不回、再保存格式错乱。这是混淆**唯一必须豁免**的业务命名空间（铁律）;
+  - 只混淆主程序集 exe，第三方 dll（Newtonsoft.Json/NModbus）不列入不混淆。
+- **新增 `CommandCenter/build-obfuscated.ps1`** 一键发布脚本（UTF-8 BOM，PowerShell 5.1 中文安全）：
+  ① MSBuild Release 构建 → ② 跑 Obfuscar 混淆 → ③ 把第三方 dll + exe.config 拷进发布目录 →
+  ④ 启动混淆版 exe 做 6 秒"进程存活"冒烟。产物：`bin\Obfuscated\`（含混淆后
+  CommandCenter.exe + Newtonsoft.Json.dll + NModbus.dll + CommandCenter.exe.config + Mapping.txt）。
+  日常 Debug 构建**不受影响**（照旧直接出 bin\Debug）。
+- **`Views/MainForm.cs`**（`SendMessage`）：`[DllImport("user32.dll")]` 补显式
+  `EntryPoint = "SendMessage"`——P/Invoke 默认按【C# 方法名】找 user32 导出函数，混淆把方法名改成
+  乱码后不加显式 EntryPoint 会在调用时直接 DllNotFoundException（标题栏滚动见不到）。
+
+### 为什么这么改
+
+- **选 Obfuscar**：主流开源、.NET Framework 原生支持、命令行零配置部署（单体 exe，拷进 tools 就能用）、
+  对 WinForms 兼容性好，符合项目"离线可编译、不依赖 NuGet restore"的硬约束。ConfuserEx 强度更大但
+  依赖 NuGet 包/命令行参数多、对新 .NET 版本坑多，本项目离线场景不适用。
+- **只混淆发布版、Debug 版留原名**：现场/开发调试靠 Debug 版 + 日志定位问题（混淆版 PDB 失配无法
+  正常断点），所以混淆做成独立发布脚本，不进常规构建。
+- **豁免 Models 是"双保险"**：appconfig 字段名兼容 + 现场已有 json 不受影响；`HideStrings` 对字符串
+  是可逆加密（运行时解密），不解决"机密硬编码"问题——本项目无硬编码机密，安全。
+
+### 验证
+
+- Release 构建通过（两次）；Obfuscar 混淆产物生成成功（类型名 95 个全变 A.a 乱码，`Program` 已被重命名，
+  `CommandCenter.Models.AppConfig` 及其属性名 `Cameras/Plc/ProductModel/...` 原样保留）。
+- 冒烟：混淆版 exe 启动 6 秒存活 + 日志正常（BuildServices 建 2 台相机、扫码头 TCP 连接、PLC 从站建站
+  全部走通）。
+- **配置兼容性端到端验证**：准备一份含独特 IP `10.1.1.99:8500` 的 `appconfig.json`，分别用未混淆版与
+  混淆版启动，两个版本日志都正确读到 `BuildServices 共 1 台相机：10.1.1.99:8500`——证明 json 反序列化、
+  字段名兼容性在混淆前后一致，现场旧配置可无缝升级。
+- P/Invoke 加固：`SendMessage` 显式 EntryPoint 编译通过，混淆后程序启动/运行正常（冒烟存活即验证
+  user32 调用链未断）。
+
+### 文档同步
+
+- `docs/CommandCenter.md`：第八部分版本记录新增 V2.14.31；README.md 增混淆章节；
+- `AGENTS.md`：构建命令补混淆发布脚本、依赖策略补 tools/Obfuscar、新增"混淆豁免 Models 命名空间"红线；
+- `CHANGELOG.md`：本版本（V2.14.31）。
+
+---
+
 ## V2.14.30（2026-08-15）扫码枪读码失败文本过滤 + 读码失败快速上报扫码 NG
 
 > 需求（现场）：基恩士 SR 扫码枪在**读码失败/读取超时**时，会按扫码枪自身配置把错误字符串

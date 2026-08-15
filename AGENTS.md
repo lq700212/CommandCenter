@@ -13,6 +13,7 @@
 - 通讯：**NModbus 3.0.83**（汇川 PLC Modbus TCP）；相机走基恩士 TCP 无协议通信（自写 TcpClient）
 - 序列化：**Newtonsoft.Json**（配置/型号）
 - **依赖策略（重要）**：第三方库拷在 `CommandCenter/libs/` 目录由 csproj `<Reference HintPath>` 直接引用，**不依赖 NuGet restore**，离线可编译。新增第三方库请同样"拷 dll 进 libs 再引用"。
+- **代码混淆（V2.14.31）**：发布版必须过混淆再部署（防反编译拿类名/方法名/IP/寄存器号/相机指令），工具 `CommandCenter/tools/Obfuscar/Obfuscar.Console.exe`（离线单体 exe，策略同 libs 离线），配置 `CommandCenter/obfuscar.xml`（全量重命名 + HideStrings 字符串加密），一键脚本 `CommandCenter/build-obfuscated.ps1`（Release 构建 → 混淆 → 补 dll/config → 冒烟），产物 `bin/Obfuscated/`。**混淆豁免红线：配置模型 `CommandCenter.Models*` 命名空间必须 SkipNamespace 跳过**——`ConfigStore.Save` 用小驼峰序列化，属性名=appconfig.json 字段名，混淆属性名会让现场旧配置读不回、新配置字段错乱（改 obfuscar.xml 前先想这条）。新增/修改 P/Invoke（`DllImport`）必须显式写 `EntryPoint="..."`（混淆改方法名后默认按方法名找导出函数会 DllNotFound）。混淆版 PDB 失配不能断点，排查用 Debug 版 + 日志。**改动混淆相关逻辑必须同步 `docs/CommandCenter.md` 第八部分与 `AGENTS.md` 本节**。
 
 ## 铁律（违反即返工）
 
@@ -194,6 +195,9 @@ ProductModelIndexAddress/ProductModelAddress/ProductModelLen/ModelIndexes`）+ �
 | `CommandCenter/Views/WindowPointForm.cs` | 窗口↔存图点位 + 点位↔相机程序号 可视化配置（格子矩阵编辑点位/交换/恢复默认，V2.13 恢复编辑并按型号存 WindowPointMaps + 相机下拉点位程序表，V1.12.25 同页混排、V1.12.26 两列改下拉选择、V2.12.0 自适应下按相机表铺排矩阵/格子标"相机名·点位号"；**相机↔型号单向联动（V2.14.5）**：cmbCamera 恒列所有相机、选定后 cmbModel 只列该相机有点位的型号、切型号不再反过滤相机——见 `ModelCandidatesFor`/`SyncModelForCamera`/`ApplySelections`） |
 | `docs/CommandCenter.md` | **项目文档（V2.10 合并版）**：① 用户使用说明（操作手册）② 系统总览与设备清单 ③ 扫码枪对接 ④ 相机对接 ⑤ PLC 通讯对接与对外协议定义（§5.5）⑥ 计数与结果流转 ⑦ IP/参数速查 ⑧ 版本演进 |
 | `docs/上位机通讯封装范式.md` | 通讯架构技术总结（连接/心跳/重连/UI 解耦范式，跨项目可复用，独立保留） |
+| `CommandCenter/tools/Obfuscar/Obfuscar.Console.exe` | 代码混淆器本体（V2.14.31，离线单体 exe，发布时由 build-obfuscated.ps1 调用） |
+| `CommandCenter/obfuscar.xml` | 混淆配置（全量重命名 + 字符串加密；**Models 命名空间必须跳过**，见技术栈红线） |
+| `CommandCenter/build-obfuscated.ps1` | 一键混淆发布脚本（Release 构建→混淆→补 dll→冒烟），产物 bin/Obfuscated/ |
 | `CHANGELOG.md` | 版本改动记录（最新在前） |
 
 ## 构建与验证命令
@@ -205,6 +209,15 @@ ProductModelIndexAddress/ProductModelAddress/ProductModelLen/ModelIndexes`）+ �
 
 - 构建成功标准：输出 `CommandCenter -> ...\bin\Debug\CommandCenter.exe` 且无 error。
 - 无单元测试框架；以构建通过 + 冒烟测试为验证手段（`Start-Process` 启动 exe，等几秒确认进程存活再 `Stop-Process`）。
+
+### 混淆发布命令（V2.14.31，部署前必跑）
+
+```powershell
+& ".\CommandCenter\build-obfuscated.ps1"
+```
+
+- 产物：`CommandCenter\bin\Obfuscated\`（混淆后 exe + 第三方 dll + config + Mapping.txt），整个目录拷去现场。
+- 混淆不改功能；日常 Debug 构建（上面那条）不受影响。混淆版 PDB 失配不能断点，排查用 Debug 版 + 日志。
 
 ## 文档同步（铁律：每次任务必须主动完成，不许等用户提醒）
 

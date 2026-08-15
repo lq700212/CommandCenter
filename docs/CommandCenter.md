@@ -1413,6 +1413,18 @@ SubDirs 为空时用模型默认含 `{相机}` 的四层 `{年月日}/{SN}/{相�
 
 > 本部分保留原 `通讯接入.md` 的版本演进记录，最新在前。
 
+- V2.14.31（2026-08-15，代码混淆防反编译）：发布版新增 Obfuscar 代码混淆，一键脚本
+  `CommandCenter\build-obfuscated.ps1`（Release 构建 → 混淆 → 补 dll/config → 冒烟）产出
+  `bin\Obfuscated\` 混淆版：类名/方法名/字段/属性/事件全部重命名成 A.a 乱码，字符串字面量加密
+  （设备 IP、PLC 寄存器地址、相机指令、密码逻辑不再是明文）。**唯一豁免=配置模型 `Models` 命名空间**
+  （属性名就是 appconfig.json 字段名，混淆后字段名对不上、现场旧配置读不回）；第三方 dll 不混淆。
+  `MainForm.SendMessage` 补显式 P/Invoke `EntryPoint="SendMessage"`（防混淆改方法名后 user32 找不到
+  入口点 DllNotFound）。混淆版仅用于现场部署，调试排查仍用 Debug 版 + 日志。验证：混淆后 95 个类型
+  全变乱码、`Models.AppConfig` 属性名原样保留；同一份含独特 IP 的 appconfig 未混淆版/混淆版启动日志
+  读取完全一致（json 兼容无缝升级）；混淆版启动 6 秒存活。同步 CHANGELOG（V2.14.31）/README.md
+  （构建→发布章节新增混淆说明）/AGENTS.md（构建命令补混淆脚本、依赖策略补 tools/Obfuscar、新增
+  "混淆豁免 Models 命名空间"红线）。
+
 - V2.14.30（2026-08-15，扫码枪读码失败文本过滤 + 快速 NG）：基恩士 SR 无协议模式读码失败时会把
   错误字符串（`ERROR`/`ER,READ,00`/`NG` 等）当条码推上来，此前上位机把它当真 SN——标题栏显示
   ERROR、上报扫码 OK(1)、存图出 `{SN}=ERROR` 脏目录，一个坏码污染整个检测件。新增

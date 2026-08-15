@@ -125,6 +125,22 @@ CommandCenter/
 
 产物：`CommandCenter\bin\Debug\CommandCenter.exe`，启动后等几秒进程存活即冒烟通过。
 
+## 发布（代码混淆，V2.14.31）
+
+现场部署用**混淆版**，防止反编译拿到类名/方法名/设备 IP/寄存器号/相机指令等业务细节：
+
+```powershell
+& ".\CommandCenter\build-obfuscated.ps1"
+```
+
+- 流程：Release 构建 → Obfuscar 混淆 → 补第三方 dll + config → 启动冒烟。
+- 产物：`CommandCenter\bin\Obfuscated\`，整个目录拷去现场即可运行。
+- 混淆只改名字/字符串（类名变 A.a 乱码、字符串运行时解密），**不改功能**；`Models` 配置模型除外——
+  属性名必须保留（`appconfig.json` 字段名依赖它），保证现场旧配置可无缝升级。
+- 混淆版 PDB 失配、无法断点调试；现场/开发排查问题请用 Debug 版 + `Logs/` 日志。
+- `bin\Obfuscated\Mapping.txt` 是"原名↔混淆名"对照表，仅内部反查崩溃栈用，勿随安装包发放。
+- 依赖工具 `tools\Obfuscar\Obfuscar.Console.exe` 已随仓库入库（离线可用，策略同 `libs/`）。
+
 ## 现场设备对表
 
 生产现场的接线关系（默认值，都可在系统设置里改）：

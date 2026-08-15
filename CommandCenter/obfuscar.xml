@@ -1,0 +1,52 @@
+<?xml version='1.0'?>
+<!-- ============================================================
+     CommandCenter 代码混淆配置（Obfuscar）
+     ============================================================
+     作用：把发布版 exe 的类名/方法名/字段名/字符串全部打乱，
+           让反编译工具（dnSpy/ILSpy）只能看到 A.a、A.b 之类无意义
+           的名字，提高逆向门槛，防止 0 成本复制业务逻辑。
+
+     用法：不要手动运行本配置文件，请用一键脚本
+           CommandCenter\build-obfuscated.ps1（内部会先构建 Release，
+           再调用 tools\Obfuscar\Obfuscar.Console.exe 本配置）。
+           命令："& .\CommandCenter\build-obfuscated.ps1"
+           产物目录：CommandCenter\bin\Obfuscated\
+
+     铁律【不能混淆的范围】（改这里前先想清楚，混淆错会出大 bug）：
+       1) Models 命名空间（配置模型）：ConfigStore 用小驼峰把 AppConfig
+          序列化成 appconfig.json，属性名 = json 字段名。混淆属性名后，
+          新程序存出来的 json 字段名和旧配置文件对不上。现场旧配置
+          读不回来、再保存格式就全乱。所以 Models 整体跳过（含其全部
+          成员变量）。这就是下面 SkipNamespace 的作用。
+       2) 第三方 dll（Newtonsoft.Json.dll / NModbus.dll）：不放在 Module
+          列表里，Obfuscar 不会碰它们（它们内部有自己的反射/序列化，
+          混淆了必崩）。
+       3) Program 入口 / MainForm 等窗体类型：Obfuscar 自动保留入口
+          点方法（Program.Main），窗体之间是编译期 new 加事件绑定，
+          改成乱码名不影响编译期已解析的引用，可放心混淆。
+
+     调优项：
+       - 想保留 public API 名（方便对端反射对接）= 把 KeepPublicApi
+         改回 true；本项目无外部反射调用方，保持 false（全混淆）更强。
+       - HideStrings=true（默认本版也开）会把所有字符串加密，运行时
+         解密，日志/界面/协议文本不再是明文，反编译看不到 IP/指令/
+         密码逻辑；代价是少量运行时开销。
+     ============================================================ -->
+<Obfuscator>
+  <!-- 输入 = Release 构建产物目录；输出 = 混淆发布目录（脚本会先清空重建） -->
+  <Var name="InPath" value="bin\Release" />
+  <Var name="OutPath" value="bin\Obfuscated" />
+
+  <!-- 混淆开关：把所有类型/成员（含 public）全部打乱重命名 -->
+  <Var name="KeepPublicApi" value="false" />
+  <Var name="HidePrivateApi" value="true" />
+  <Var name="HideStrings" value="true" />
+  <Var name="ReuseNames" value="true" />
+
+  <!-- 只混淆本程序集；第三方 dll 不列入，保持原样 -->
+  <Module file="$(InPath)\CommandCenter.exe">
+    <!-- 配置模型必须保留原名：属性名就是 appconfig.json 的字段名。
+         name 用通配符（不以 ^ 开头按通配符处理），* 匹配含子命名空间全部 -->
+    <SkipNamespace name="CommandCenter.Models*" />
+  </Module>
+</Obfuscator>

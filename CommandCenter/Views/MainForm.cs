@@ -582,8 +582,11 @@ namespace CommandCenter.Views
             base.WndProc(ref m);
         }
 
-        /// <summary>发送 WM_* 消息给指定窗口（V2.14 滚动转发用；user32 原生 API）。</summary>
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        /// <summary>发送 WM_* 消息给指定窗口（V2.14 滚动转发用；user32 原生 API）。
+        /// 【混淆兼容】显式指定 EntryPoint="SendMessage"，与 C# 方法名解耦——
+        /// 代码混淆器会重命名方法名，若不显式写 EntryPoint，P/Invoke 默认按方法名
+        /// 找 user32 导出函数就会"找不到入口点"直接抛 DllNotFoundException。</summary>
+        [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SendMessage")]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
         /// <summary>
