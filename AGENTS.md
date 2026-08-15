@@ -150,9 +150,16 @@ ProductModelIndexAddress/ProductModelAddress/ProductModelLen/ModelIndexes`）+ �
    ② 置位该相机 `ManualResetEventSlim`** → 等图流程立即醒来（消除纯轮询最长 200ms 的被动延迟）；
    事件漏报/失效靠 200ms 轮询 + `ImageWaitMs` 超时重扫兜底，不失图）。**取图（V2.14.37）改为"事件路径
    优先"：`WaitForFtpImage` 先 `TryResolveArrivedPair`（用事件文件主名找同名 jpeg+iv4p 配对 + jpeg
-   `IsNewerThanTrigger` mtime 校验新于本枪触发时刻）命中即取**——外源高频推图堆叠时照片不再被
-   `ImageStore.FindLatestPair(dir)`"按目录修改时间取最新"顶成别的枪/旧图（现场实测取到 ≈18 枪前的图）、
-   照片与 PLC 判定配对错乱；**事件路径为空/配对缺失/早于触发时刻才回退扫目录取最新对**（`FindLatestPair`），
+`IsNewerThanTrigger` mtime 校验新于本枪触发时刻）命中即取**——外源高频推图堆叠时照片不再被
+    `ImageStore.FindLatestPair(dir)`"按目录修改时间取最新"顶成别的枪/旧图（现场实测取到 ≈18 枪前的图）、
+    照片与 PLC 判定配对错乱；**事件路径为空/配对缺失/早于触发时刻才回退扫目录取图
+    （V2.14.39 红线：jpeg 优先 + 同主名随附）**：基恩士每次触发生成的 jpeg+iv4p **必然同主名**
+    （`0084.jpeg`+`0084.iv4p` 一对），`FindLatestPair` **必须先取写时间最新的一张 jpeg，再按同主名配对
+    .iv4p、jpeg 一到立即返回**——两线缺一不可：① 旧版"jpeg 组取最新 + iv4p 组取最新、不要求同名"在目录
+    堆叠多拍文件时把**不同两次触发硬凑成一队**（现场实测触发33 归档 `00032.jpeg | 00031.iv4p`，跨拍错配
+    +误删配套 iv4p）；② 若先等 iv4p 才返回，jpeg 先到 iv4p 迟到的现场画面会被拖到超时（显示要的是
+    jpeg、不是 iv4p）——iv4p 迟到/缺失时返回 iv4p=null + WARN，只少归档复盘副本、不丢图主体。
+    改动取图配对逻辑先读这段再动，禁止各层各写一套。
    调 `ImageStore.SaveImageFilePair` 双格式原样归档
    （jpeg 显示/归档主体、iv4p 基恩士私有格式原样复制；**归档文件名（V2.14.11 定稿）= 相机源文件名 +
    "_" + 时间戳**，如 FTP 里的 `0084.jpeg/iv4p` → 归档 `0084_20260814_164022_461.jpeg` + 同名 `.iv4p`，

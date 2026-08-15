@@ -231,8 +231,16 @@ namespace CommandCenter.Services
         /// 【背景】基恩士相机推图文件名不保证恒为 0000.jpeg / 0000.iv4p，
         ///   现场实测可能是 0084.jpeg、0084.iv4p 等任意编号。旧实现依赖 FileSystemWatcher
         ///   事件记路径（事件本身兼容任意文件名），但若事件漏报/错过、或归档用的路径写死
-        ///   文件名，就会取不到图。本方法【不写死任何文件名】，按扩展名分组后分别取
-        ///   LastWriteTimeUtc 最新的一张——不管相机命名成什么样，都能拿到"最近这一张"。
+        ///   文件名，就会取不到图。本方法【不写死任何文件名】。
+        ///
+        /// 【V2.14.39 同主名成对红线】基恩士相机每次触发生成的 jpeg 与 iv4p **必然同主名**
+        /// （0084.jpeg ↔ 0084.iv4p 是一对）。历史上本方法按扩展名分组"jpeg 取最新 + iv4p 取最新
+        ///   ＊＊各取各的、不要求同名＊＊"，当目录里同时堆叠多拍文件（相机推图有先后、或上一拍
+        ///   没删净）时会把 **不同两次触发的文件硬凑成一队**（现场实况：触发33 归档了
+        ///   00032.jpeg + 00031.iv4p，jpeg 与 iv4p 根本不含同一张图，且误删了本应配套的 iv4p）。
+        ///   现在**只按"同主名成对"挑选**：先按主文件名分组，每组只有当 jpeg 与 iv4p 都存在时
+        ///   才算候选对，最后返回"组内最新写时间"最大的一组。目录里只有孤 jpeg（iv4p 还没推到 /
+        ///   被删了一半）时回退返回最新孤 jpeg（iv4p 置 null，宁可少存 iv4p 也不硬凑错配）。
         ///   调用时机在协调器收尾归档前（ProductionCoordinator.FinishAll）与功能测试窗体
         ///   取图（DevTestForm），事件路径仅作为目录扫描失败时的兜底。
         /// </summary>
@@ -245,30 +253,42 @@ namespace CommandCenter.Services
             if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir)) return result;
             try
             {
-                // 遍历目录顶层文件（不递归），按扩展名分组，各组取修改时间最新的那一个。
-                // jpeg 组收 .jpeg/.jpg（都算显示主体）；iv4p 组收 .iv4p（基恩士复盘私有格式）。
-                string jpeg = null, iv4p = null;
-                DateTime jpegTime = DateTime.MinValue, iv4pTime = DateTime.MinValue;
+                // 【V2.14.39】取图以 jpeg 为主体（显示/归档主体），iv4p 只是"同主名随附"：
+                //   ① 先从目录里选出"写时间最新的一张 jpeg"（不管 iv4p 到没到）——jpeg 一到即能返回，
+                //      显示/预览立刻可用，绝不等 iv4p 慢慢推（否则 jpeg 先到、iv4p 迟到时 MainForm
+                //      显示会被拖到超时）；② 配对只认"与这张 jpeg **同主名**的 .iv4p"，找到就带上、
+                //      没找到/目录里只有孤 jpeg（iv4p 未推完/被误删）就 iv4p=null 并记 WARN——
+                //      绝不拿别的拍的 iv4p 硬凑（旧版"各扩展名各取最新不认同名"会把两次触发的
+                //      文件凑成一队：现场实测触发33 归档 00032.jpeg | 00031.iv4p，jpeg/iv4p 编号恒差）。
+                string jpeg = null;
+                DateTime jpegTime = DateTime.MinValue;
                 foreach (var f in Directory.EnumerateFiles(dir))
                 {
                     string ext = Path.GetExtension(f);
+                    if (!ext.Equals(".jpeg", StringComparison.OrdinalIgnoreCase)
+                        && !ext.Equals(".jpg", StringComparison.OrdinalIgnoreCase)) continue;
                     DateTime lastWrite;
                     try { lastWrite = File.GetLastWriteTimeUtc(f); }
                     catch { continue; } // 个别文件读时间失败（被占用/瞬间删除）跳过，不影响整体
-                    if (ext.Equals(".iv4p", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (lastWrite > iv4pTime) { iv4pTime = lastWrite; iv4p = f; }
-                    }
-                    else if (ext.Equals(".jpeg", StringComparison.OrdinalIgnoreCase)
-                          || ext.Equals(".jpg", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (lastWrite > jpegTime) { jpegTime = lastWrite; jpeg = f; }
-                    }
+                    if (lastWrite > jpegTime) { jpegTime = lastWrite; jpeg = f; }
                 }
+                if (jpeg == null) return result; // 目录里连 jpeg 都没有（只有孤 iv4p/空）→ 返回空，调用方提示
                 result.JpegPath = jpeg;
-                result.IvpPath = iv4p;
-                if (jpeg != null)
-                    LogHelper.Info($"从 FTP 取图目录取到最近图片：{jpeg}" + (iv4p != null ? " | " + iv4p : "（无 iv4p）"));
+                // 配对只认同主名 .iv4p（.IV4P 大小写兼容）：jpeg 先到而 iv4p 未到 → 取不到，iv4p=null。
+                string iv4pCand = Path.Combine(
+                    Path.GetDirectoryName(jpeg),
+                    Path.GetFileNameWithoutExtension(jpeg) + ".iv4p");
+                if (!string.IsNullOrWhiteSpace(iv4pCand) && File.Exists(iv4pCand))
+                {
+                    result.IvpPath = iv4pCand;
+                    LogHelper.Info($"从 FTP 取图目录取到最近图片（同主名成对）：{jpeg} | {iv4pCand}");
+                }
+                else
+                {
+                    // jpeg 到了但配套 iv4p 没到（相机推图有先后）/被误删：只带走 jpeg，记 WARN 供排查，
+                    // 显示/归档 jpeg 不受影响（SaveImageFilePair 对 iv4p=null 只归档 jpeg）。
+                    LogHelper.Warn($"从 FTP 取图目录取到最近 jpeg（同主名 iv4p 未到，仅归档 jpeg）：{jpeg}");
+                }
                 return result;
             }
             catch (Exception ex)

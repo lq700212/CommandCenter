@@ -630,16 +630,18 @@ IV4 系列内置以太网，支持：EtherNet/IP、PROFINET CC-B、**TCP/IP 无�
      **多相机（V1.1.0）**：每台相机的 FTP 上传目录独立配置（`CameraConfig.FtpUploadDir`，
      为空则回退全局 `ImageConfig.FtpRootDir`）——多台务必分开，否则新图归属无法区分。
      上位机为每台相机各建一个 `FileSystemWatcher`，新图事件带相机索引。
-**双文件约定（V1.12.18；V1.12.24 起取图改"扫目录取最新"，V2.14.37 起"事件路径优先"）**：
+**双文件约定（V1.12.18；V1.12.24 起取图改"扫目录取最新"，V2.14.37 起"事件路径优先"；V2.14.39 兜底改"jpeg 优先+同主名随附"）**：
       基恩士每次拍照必然生成两个文件——jpeg（显示/归档主体）+ iv4p（基恩士私有复盘格式，上位机不解析、
       **原样复制归档**）。**文件名不保证恒为 `0000`**（现场实测可能推 `0084.jpeg`/`0084.iv4p` 等任意编号），
+      但**同一次触发推送的两文件必然同主名**（如 `0084.jpeg`+`0084.iv4p`）。
       程序**不写死文件名**：`MainForm.BuildServices` 为每台相机 `ImageStore.AddMonitor` 各建一个
       `FileSystemWatcher`，相机一推图触发 `FtpFileArrived` → ① 记住**事件实际到达的文件路径**
       （V2.14.37，`_ftpArrivedPath[相机下标]`）② 置位该相机 `ManualResetEventSlim`（信号加速）；
       等图流程 `WaitForFtpImage` **优先用事件实际文件配对 jpeg+iv4p 并校验 mtime**（`TryResolveArrivedPair`，
       命中即取——外源高频推图堆叠时照片不再被"目录取修改时间最新"顶成别的枪/旧图），
 
-      **事件路径失效才回退重扫相机 FTP 目录取修改时间最新的一对**（`ImageStore.FindLatestPair`），
+      **事件路径失效才回退重扫相机 FTP 目录**（`ImageStore.FindLatestPair`，V2.14.39 起"先取最新 jpeg、
+      再按同主名随附 iv4p"——jpeg 一到即返回、iv4p 迟到则 iv4p=null，显示绝不等 iv4p），
       无论文件名如何都能拿到；归档成功后删除**实际归档的那对** FTP 源文件（中转暂存区逻辑，处理即删，
       防同点位重复触发时新旧图混淆）。
 9. 断线处理：TCP 连接 `BeginConnect+WaitOne` 强制超时，失败自动重连；
@@ -692,7 +694,8 @@ IV4 系列内置以太网，支持：EtherNet/IP、PROFINET CC-B、**TCP/IP 无�
 **④ `SwitchProgram` 程序号越界自动夹取**：配置 128+ 不报错，而是 `Math.Max(0, Min(127, n))` 夹到
 0~127（如配 200 → 实际切到 127）。想验证配置是否真的切对程序，用 `ReadProgramNo()`（PR 指令）读回核对。
 
-**⑤ FTP 双文件到达顺序不保证 + 取图"事件路径优先"（V2.14.37）**：`FileSystemWatcher` 对 jpeg/iv4p
+**⑤ FTP 双文件到达顺序不保证 + 取图"事件路径优先"（V2.14.37）+ 兜底"同主名成对"（V2.14.39）**：
+`FileSystemWatcher` 对 jpeg/iv4p
 各触发一次 Created/Renamed，谁先到不一定。**V2.13.6 信号加速**：事件同时做两件事——① 记住"事件实际
 到达的文件路径"（`ProductionCoordinator.OnFtpFileArrived` 写 `_ftpArrivedPath[相机下标]`）；
 ② 置位该相机 `ManualResetEventSlim` 提前唤醒等图。**V2.14.37 起取哪一对以"事件路径优先"为准**：
@@ -701,8 +704,17 @@ IV4 系列内置以太网，支持：EtherNet/IP、PROFINET CC-B、**TCP/IP 无�
 "目录取修改时间最新"顶成别的枪/旧图；事件路径为空/配对文件缺失/早于触发时刻才回退"重扫目录取最新对"
 （`ImageStore.FindLatestPair`）。只来一个文件时照常回退扫目录（拿到半对则继续等下一拍），最终由
 `ImageWaitMs`（默认 10s）超时兜底。
-**V1.12.24 放错机制（V2.13.6/V2.14.37 不变）**：即使事件漏报/文件名非 0000（如 0084），等图时会重扫
-相机 FTP 目录取修改时间最新的一对（`ImageStore.FindLatestPair`），目录里有图照样归档——超时兜底不再
+**⚠️ V2.14.39 兜底取图"jpeg 优先 + 同主名随附"红线（排障必读）**：`ImageStore.FindLatestPair`（兜底路径）
+**先按写时间选出最新的一张 jpeg（显示/归档主体），再以"同主名"配对 `.iv4p`**——jpeg 与 iv4p 必然出自
+同一次触发（基恩士每次触发生成同名文件对，如 `0084.jpeg`+`0084.iv4p`）。两条红线缺一不可：
+① **只认同主名配对**：旧版"jpeg 组取最新 + iv4p 组取最新、不要求同名"在目录堆叠多拍文件时会把
+**不同两次触发的文件硬凑成一队**（现场实测触发33 归档了 `00032.jpeg | 00031.iv4p`，jpeg 编号=触发计
+数−1、iv4p=触发计数−2 恒定错位，照片与判定错配）；② **jpeg 一到即返回、绝不等 iv4p**：相机推图
+jpeg 先到 iv4p 迟到（或未推/被误删）时返回 `iv4p=null` 记 WARN，直接带走 jpeg——显示要的是 jpeg，
+不能因等 iv4p 把 MainForm 画面拖到超时（iv4p 只影响归档复盘副本，缺失不丢图主体）。连 jpeg 都没有
+（只有孤 iv4p/空）才返回空。
+**V1.12.24 放错机制（V2.13.6/V2.14.37/V2.14.39 不变）**：即使事件漏报/文件名非 0000（如 0084），等图时会重扫
+相机 FTP 目录取同主名的成对文件（`ImageStore.FindLatestPair`），目录里有图照样归档——超时兜底不再
 "有图不存"。
 
 **⑥ 归档与删除顺序硬约束**：`DoCameraShot` 里**先** `SaveImageFilePair` 复制归档、**成功后才**
@@ -1506,6 +1518,18 @@ SubDirs 为空时用模型默认含 `{相机}` 的四层 `{年月日}/{SN}/{相�
   `TriggerReadOutcome.TriggerNo`，`TriggerAndRead` 维护每相机 `_lastTriggerNo` 并对照——跳变 >1 记
   WARN（含"被外部额外触发 N 次"），计数回退记 WARN（断电重启/复位）。正常每次 +1 不刷日志，节拍无感。
   同步 CHANGELOG（V2.14.38）、docs 第四部分（判定格式段落）。
+
+- V2.14.39（2026-08-15，FTP 兜底取图"jpeg 优先 + 同主名随附"，杜绝 jpeg/iv4p 跨拍错配且显示不等 iv4p）：
+  现场日志暴露
+  同一相机三拍归档的 jpeg 与 iv4p 命名恒差（触发33 → `00032.jpeg | 00031.iv4p`，jpeg=触发计数−1、
+  iv4p=触发计数−2），而基恩士相机每次触发生成的照片对**必然同主名**（如 `0084.jpeg`+`0084.iv4p`）。
+  根因：`ImageStore.FindLatestPair`（兜底取图路径）旧实现"jpeg 组取最新 + iv4p 组取最新、不要求同名"，
+  相机推图 jpeg/iv4p 到达有先后且目录堆叠多拍文件时，各扩展名各自取最新就硬凑出跨拍错配对（V2.14.37
+  事件路径 TryResolveArrivedPair 按同主名配对但未命中，全程走兜底路径→错配必现）。修复（`ImageStore.cs`）：
+  `FindLatestPair` 改为**先取最新一张 jpeg（显示/归档主体）、再按同主名随附 `.iv4p`**——jpeg 一旦到位
+  立即返回（iv4p 迟到/缺失则 iv4p=null + WARN），显示/预览绝不等 iv4p（避免 MainForm 画面被拖到超时），
+  同时杜绝跨拍错配与误删配套 iv4p；连 jpeg 都没有才返回空。DevTestForm.ResolveLatestFtpPair 复用同一
+  方法同步修正。同步 CHANGELOG（V2.14.39）、docs 第四部分（⑤取图段落）。
 
 - V2.14.37（2026-08-15，相机 FTP 取图"事件路径优先"，缓解第二触发源导致的照片错配）：上相机存在
   第二个触发源（非上位机 T2）高频并发拍照，外源把图高速堆进 FTP 后 `WaitForFtpImage` 原有"重扫目录

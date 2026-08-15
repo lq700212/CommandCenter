@@ -848,39 +848,69 @@ namespace CommandCenter.Services
                     // 与功能测试窗体一致避免刚触发就扫到旧图；超时兜底取最新一对。
                     DateTime triggerUtc = DateTime.UtcNow;
                     string iv4p;
-                    string jpeg = WaitForFtpImage(cfg, triggerUtc, out iv4p);
+                    string jpeg = WaitForFtpImage(cfg, triggerUtc, out iv4p, out int jpegWaitMs);
                     if (string.IsNullOrEmpty(jpeg))
                     {
                         LogHelper.Warn($"相机[{camName}] 点位{stationNo} FTP 取图目录未找到新图");
                         ErrorRaised?.Invoke($"相机[{camName}] 点位{stationNo} FTP 取图目录未找到新图");
+                        return;
+                    }
+                    // 【V2.13.2 显示提速 + V2.14.39 显示不等归档】jpeg 一到位立刻加载内存缩略图并
+                    // 【立即抛显示事件】（不等 iv4p、不等归档复制）——UI 毫秒级出图，现场画面不被
+                    // iv4p 迟到的等待拖住（显示要的是 jpeg、不是 iv4p）。源文件此刻尚未被删、
+                    // SaveImageFilePair 用 FileShare.ReadWrite，即使相机仍在写也最多加载失败为 null，
+                    // 失败则 UI 回退按 ImagePath（此处暂用源 jpeg 路径）加载，无副作用。
+                    preview = ProductionCoordinator.LoadThumbnailSafe(jpeg);
+                    _seqNo++;
+                    var ftpData = new WindowData
+                    {
+                        SeqNo = _seqNo,
+                        IsOk = isOk,
+                        ImagePath = jpeg,            // 回退显示用源 jpeg 路径（归档前源尚在）
+                        PreviewImage = preview,
+                        CapturedAt = DateTime.Now,
+                        SerialNumber = LatestSerialNumber,
+                        ResultText = resultText,
+                        StationNo = stationNo
+                    };
+                    InspectionFinished?.Invoke(ftpData, windowIndex);
+                    // 归档（显示之后做，尽力成对）：补等 iv4p 同主名文件（相机推图通常 jpeg 先到、
+                    // iv4p 紧随其后几十~几百 ms），攒齐才 SaveImageFilePair 双格式一起归档——
+                    // 显示已出图不受影响，只保证归档副本成对、不丢 iv4p 复盘文件。
+                    // 【窗口=剩余预算】现场相机触发后 3~5s 图才推到 FTP 目录，等 jpeg 已耗时不短；
+                    // 补等窗口用"整体预算（ImageWaitMs，默认10s）的剩余部分"，保证 jpeg+iv4p 合计
+                    // 不超预算，iv4p 与 jpeg 享有同等等待配额，不被固定 1.5s 短窗砍掉。
+                    if (string.IsNullOrEmpty(iv4p))
+                    {
+                        int ivpWaitMs = Math.Max(2000, cfg.ImageWaitMs) - jpegWaitMs;
+                        iv4p = WaitForPairIvp(camIdx, jpeg, ivpWaitMs);
+                    }
+                    archived = _imageStore.SaveImageFilePair(jpeg, iv4p, storeStation, isOk, LatestSerialNumber, camName);
+                    if (archived != null)
+                    {
+                        // 归档成功 → 删除 FTP 源文件（"处理即删"，防同点位新旧图混淆）；删失败不阻断。
+                        // 注意：preview 已提前发给 UI（内存副本），删源不影响显示。
+                        ImageStore.DeleteSourceFile(jpeg, $"相机[{camName}] 点位{stationNo}");
+                        ImageStore.DeleteSourceFile(iv4p, $"相机[{camName}] 点位{stationNo}");
                     }
                     else
                     {
-                        // 【V2.13.2 显示提速】jpeg 一到位立刻从 FTP 源加载内存缩略图（异步显示链路，
-                        // 不等归档）。源文件此刻尚未被删、且 SaveImageFilePair 用 FileShare.ReadWrite，
-                        // 即使相机仍在写也最多加载失败为 null——失败则由 UI 回退按归档副本加载，无副作用；
-                        // 若读到半截文件，LoadThumbnailSafe 解码失败返回 null，同样回退。归档不受影响。
-                        preview = ProductionCoordinator.LoadThumbnailSafe(jpeg);
-                        archived = _imageStore.SaveImageFilePair(jpeg, iv4p, storeStation, isOk, LatestSerialNumber, camName);
-                        if (archived != null)
-                        {
-                            // 归档成功 → 删除 FTP 源文件（"处理即删"，防同点位新旧图混淆）；删失败不阻断。
-                            // 注意：preview 已在归档前读完并持有内存副本，删源不影响显示。
-                            ImageStore.DeleteSourceFile(jpeg, $"相机[{camName}] 点位{stationNo}");
-                            ImageStore.DeleteSourceFile(iv4p, $"相机[{camName}] 点位{stationNo}");
-                        }
-                        hasImage = archived != null;
+                        LogHelper.Warn($"相机[{camName}] 点位{stationNo} 图像归档失败（FTP 取图，显示已出图）");
                     }
+                    LogHelper.Info($"点位{stationNo} 检测完成：{(isOk ? "OK" : "NG")} → {archived}（窗口{windowIndex}）");
+                    return; // FTP 分支已"显示先行"并就地收尾，不再走下方 TCP 的 hasImage/显示段
                 }
                 if (!hasImage)
                 {
-                    preview?.Dispose(); // 归档失败：提前加载的预览图没被显示事件带走，立即释放防句柄泄漏
+                    preview?.Dispose(); // TCP 归档失败：提前加载的预览图没被显示事件带走，立即释放防句柄泄漏
                     // 无图 → 结果已在"判定即写"阶段落 PLC（1/2），这里直接返回不改变结果：
                     // code 保持判定值（isOk?1:2），finally 落 _chanResult 与已写值一致（幂等）。
                     return;
                 }
 
-                // ④ 显示 + 计数（抛给 UI 线程刷新对应窗口）
+                // ④ 显示 + 计数（抛给 UI 线程刷新对应窗口）——TCP 分支（内存写图，取样/归档/显示
+                // 一气呵成极快）在归档完成后统一走到这里；FTP 分支已在上面"显示先行、归档后做"
+                // 提前显示并 return，不走本段。
                 _seqNo++;
                 var data = new WindowData
                 {
@@ -924,10 +954,12 @@ namespace CommandCenter.Services
         /// 注意：外源若在本枪 T2 之后持续推图，事件路径的 mtime 校验仍可能放开——那是外源问题的
         /// 固有局限（根因仍需现场停掉第二触发源），本处只做"尽量贴合本枪"的缓解。
         /// </summary>
-        /// <returns>jpeg 完整路径（无则空字符串），iv4p 通过 out 返回（可为 null）</returns>
-        private string WaitForFtpImage(CameraConfig cfg, DateTime triggerUtc, out string iv4p)
+        /// <returns>jpeg 完整路径（无则空字符串），iv4p 通过 out 返回（可为 null），
+        /// elapsedMs 为 out：实际等图耗时（供调用方用整体预算给 iv4p 补等窗口）</returns>
+        private string WaitForFtpImage(CameraConfig cfg, DateTime triggerUtc, out string iv4p, out int elapsedMs)
         {
             iv4p = null;
+            elapsedMs = 0;
             int waitMs = Math.Max(2000, cfg.ImageWaitMs); // 至少 2s，防配置过小立刻判失败
             int camIdx = _cameraCfgs.IndexOf(cfg);        // 相机在下标 → 对应信号/事件路径
             bool hasSignal = camIdx >= 0 && camIdx < _ftpArrive.Length;
@@ -965,6 +997,7 @@ namespace CommandCenter.Services
                     ? ev
                     : _imageStore.FindLatestPair(FtpDirFor(cfg));
             }
+            elapsedMs = (int)stopwatch.ElapsedMilliseconds; // V2.14.39：等 jpeg 实际耗时 → iv4p 补等窗口用剩余预算
             iv4p = pair.IvpPath;
             return pair.JpegPath;
         }
@@ -1024,7 +1057,41 @@ namespace CommandCenter.Services
             }
         }
 
-        /// <summary>判断文件是否是"本次触发之后新推的图"：修改时间（UTC）不早于触发时刻即视为新图。
+        /// <summary>
+        /// 归档前"补等 iv4p"（V2.14.39 两全方案：显示不等归档、归档尽力成对）。
+        /// 相机推图 jpeg 通常先到、iv4p 紧随其后（几十~几百 ms）；显示要在 jpeg 到手时立即出图，
+        /// 但不能因此牺牲归档成对。本方法在已拿到 jpeg 的前提下，等【同主名】的 .iv4p 在给定短窗内
+        /// 出现（jpeg 同主名唯一，找到即必然同一触发，无需再验 mtime）——攒齐才允许 SaveImageFilePair
+        /// 成对归档。实在等不到（极端：iv4p 未推/被误删）返回 null，调用方退而只归档 jpeg。
+        /// 【注意窗口取值】现场实测相机触发后 3~5s 图才推到 FTP 目录：等 jpeg 已耗时不短，
+        /// 若补等窗口只给固定 1.5s，jpeg 与 iv4p 到达间隔稍长就会被砍掉 iv4p——窗口应由调用方
+        /// 用"整体等待预算（ImageWaitMs）+ 短窗富余"减去已耗时间来算（见 DoCameraShot）。
+        /// </summary>
+        /// <param name="camIdx">相机列表下标（信号索引，-1/越界退化轮询）</param>
+        /// <param name="jpegPath">已拿到的 jpeg 源路径（空则直接返回 null）</param>
+        /// <param name="waitMs">补等窗口（毫秒）：等 jpeg 后的剩余预算，保证 jpeg+iv4p 合计不超预算</param>
+        /// <returns>同主名 iv4p 完整路径；等不到返回 null</returns>
+        private string WaitForPairIvp(int camIdx, string jpegPath, int waitMs)
+        {
+            if (string.IsNullOrWhiteSpace(jpegPath)) return null;
+            string stem = Path.GetFileNameWithoutExtension(jpegPath);
+            string cand = Path.Combine(Path.GetDirectoryName(jpegPath), stem + ".iv4p");
+            if (File.Exists(cand)) return cand; // 已齐（jpeg 到达时 iv4p 同批就到了）
+            if (waitMs < 200) waitMs = 200; // 至少 200ms：iv4p 可能就差一拍，别立刻放弃
+            var stopwatch = Stopwatch.StartNew();
+            bool hasSignal = camIdx >= 0 && camIdx < _ftpArrive.Length;
+            while (stopwatch.ElapsedMilliseconds < waitMs)
+            {
+                if (File.Exists(cand)) return cand;
+                // 等"该相机 FTP 有新文件"信号：iv4p 到达立即醒来重查（事件漏报靠 200ms 轮询兜底）
+                if (hasSignal) _ftpArrive[camIdx].Wait(200);
+                else Thread.Sleep(200);
+            }
+            return File.Exists(cand) ? cand : null;
+        }
+
+        /// <summary>
+        /// 判断文件是否是"本次触发之后新推的图"：修改时间（UTC）不早于触发时刻即视为新图。
         /// 文件读取失败视为"不是新图"（防把正在写入/被占用打不开的半成品图当成新图）。容差 1 秒。</summary>
         private static bool IsNewerThanTrigger(string path, DateTime triggerUtc)
         {
