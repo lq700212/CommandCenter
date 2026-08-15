@@ -30,8 +30,14 @@ namespace CommandCenter.Services
     ///   └───────────────────────────────────────────────────────────────────────┘
     ///   结果值：0=默认/复位，1=OK，2=NG，3=点位禁用跳过（V1.12.28：禁用点位不拍照、
     ///   不显示、不计数，直接回 3 让 PLC 走下一工位）。
-    ///   所有通道互斥串行（一次只处理一个，_activeCh），符合 PLC 串行时序；
-    ///   请求只有被"认领"的通道处理，其余通道的请求在活动通道完成前不抢占。
+///     所有通道互斥串行（一次只处理一个，_activeCh），符合 PLC 串行时序；
+    ///     请求只有被"认领"的通道处理，其余通道的请求在活动通道完成前不抢占。
+    ///     【V2.14.41 复位确认"边沿记忆"】三拍握手中"PLC 复位请求=0"是即逝中间态（PLC 读到
+    ///     结果后写 0、随即写下一拍新请求）。PLC 轮询周期缩短时"0"窗口可能小于上位机轮询周期，
+    ///     用"当前读到==0"判定会永久错过 → 通道锁死、后续请求不受理（现场"PLC 轮询改快拿不到
+    ///     相机 OK/NG"）。故通道释放改为：观察到一次"请求==0"即记下（_reqResetSeen/_scanReqResetSeen
+    ///     边沿记忆），相机通道另加"请求推进到另一点位=PLC 必已复位"兜底；详见 StepScanChannel
+    ///     步骤1 / StepCameraChannel 步骤2。
     ///
     ///     【相机通道 ↔ 相机（V2.13.4 定稿，取代 V2.12.6 的"通道号=下标+1"）】：每个相机通道的
     ///     PLC 请求/结果地址显式配在该相机自己的配置里（PlcRequestAddress/PlcResultAddress，不再按
@@ -121,6 +127,25 @@ namespace CommandCenter.Services
         // 防止"上一拍还在归档、下一拍请求已进来"导致同相机并发取图/混图（见 StepCameraChannel）。
         private volatile bool _taskDone;
         private int _pendStation;         // 相机通道当前点位（轮询线程读写）
+        // V2.14.41："PLC 已复位请求"的边沿确认标志（仅轮询线程读写）。
+        // 背景：三拍握手中的"复位请求=0"是一个【即逝中间态】——PLC 读到结果≠0 后把请求写 0、
+        // 随即立刻写下一拍的新请求（≠0）。PLC 扫描周期（轮询时间）越短，"请求=0"保持窗口越窄，
+        // 而上位机按 PollMs(100ms) 轮询、StepCameraChannel 释放又多卡在 _taskDone（FTP 取图 3~5s），
+        // 旧逻辑"当前读到请求==0"这种瞬态判定必被错过（读到的已是 PLC 写入的下一个请求≠0）→
+        // 通道永不复位、后续请求一律不受理 → PLC 拿不到 OK/NG（现场：PLC 轮询改小就丢结果、
+        // 改回大值正常）。修复：一旦观察到请求==0 就【永久记下】此标志（PLC 写 0 本身就是"已读走
+        // 本拍结果"的回执），并配"点位推进兜底"（Task 结束且请求变成另一个点位=PLC 必已复位过）。
+        // 扫码/相机两通道各一个（见 StepScanChannel/StepCameraChannel 步骤1/2）。
+        private bool _scanReqResetSeen;    // 扫码通道（40001）复位确认
+        private bool _reqResetSeen;        // 相机通道（40002/40003…）复位确认
+        // V2.14.42：本拍相机结果寄存器"已提前清零"标志（仅轮询线程读写）。
+        // 背景：V2.13.7 判定即写把 1/2 落进结果寄存器后，通道要等 _taskDone（FTP 取图+归档 3~5s）
+        // 才 WriteCameraResult(0)，中间存在 3~5s 的"残留窗口"——PLC 快轮询时下一拍请求来得早，
+        // 会读到上一拍残留值把它当本拍结果消费，本拍真实的 NG 写入后 PLC 已推进、再也读不到
+        // （现场："OK 正常、NG 收不到"、log 有写但 PLC 读不到）。修复：观察到"PLC 已读走本拍结果"
+        // （_reqResetSeen，复位回执）就【立即】清 0，把残留窗口缩到 ~100ms；_taskDone 仍保留作
+        // 通道释放闸门（V2.13.7 防同相机并发取图，见 StepCameraChannel 步骤2）。
+        private bool _resultCleared;       // 相机通道：本拍结果已提前清零
 
         // ── 扫码通道 ──
         private readonly List<IScanner> _scanners = new List<IScanner>();
@@ -483,6 +508,7 @@ namespace CommandCenter.Services
             _scanArriveUtc = DateTime.UtcNow;   // 超时基准：本轮扫码请求到达时刻（30s 判 NG 用）
             _serialErrorSeen = false;       // V2.14.30：新一轮开始清"读码失败"标志，防上一轮残留误判
             _scanResultWritten = 0;         // V2.14.33：新一轮开始时本轮扫码结果尚未写入
+            _scanReqResetSeen = false;      // V2.14.41：新一轮开始时"PLC 已复位请求"尚未观察（边沿确认）
 
             // V2.14.11：新一轮开始，通知 UI 清空上一轮各窗口图片（新的一轮第一个动作就是扫码，
             // 上一轮的图片已过时，提前清掉避免与新结果混淆）。事件在轮询线程触发，
@@ -580,11 +606,19 @@ namespace CommandCenter.Services
                 SetState("扫码 OK（人工补录），等待 PLC 复位请求");
                 LogHelper.Info($"人工补录完成，扫码结果已由 2 覆盖为 1：SN={LatestSerialNumber}");
             }
-            if (_plc.ReadScanRequest(out bool still) && !still)
+            // 【V2.14.41 复位确认改"边沿记忆"】PLC 扫描加快后，"请求=0"可能只保持极短窗口、
+            // 上位机 100ms 轮询可能错过（读到的是 PLC 已写入的下一拍请求=1）。"PLC 把请求写 0"
+            // 这个动作本身就是"已读走本拍结果"的回执：一旦观察到过 0 就永久记下，之后无论请求被
+            // PLC 改成 1 与否都在这里执行"复位结果+释放通道"（下一拍请求由 PollNewRequest 受理）。
+            bool scanOk = _plc.ReadScanRequest(out bool still);
+            if (scanOk && !still)
+                _scanReqResetSeen = true;         // 观察到一次"请求复位为 0"即视为已复位（边沿记忆）
+            if (_scanReqResetSeen)
             {
                 _plc.WriteScanResult(0);
                 _scanResultWritten = 0;           // V2.14.33：结果已复位
                 _activeCh = ChNone;
+                _scanReqResetSeen = false;        // V2.14.41：通道释放，下一轮 BeginScanChannel 重新初始化
                 SetState("等待 PLC 请求");
                 LogHelper.Info("PLC 已复位扫码请求，上位机复位扫码结果");
             }
@@ -614,6 +648,8 @@ namespace CommandCenter.Services
 
             _activeCh = cameraId;   // 相机通道标识 = 相机ID（V2.13.4，见类头注释）
             _pendStation = stationNo;
+            _reqResetSeen = false;  // V2.14.41：新一轮开始时"PLC 已复位请求"尚未观察（边沿确认，见 StepCameraChannel 步骤2）
+            _resultCleared = false; // V2.14.42：新一轮开始时"本拍结果已提前清零"尚未发生（见 StepCameraChannel 步骤2）
 
             string camLabel = CameraLabel(camIdx);
             if (skip)
@@ -713,12 +749,51 @@ namespace CommandCenter.Services
             // 判定即写后 PLC 可能很快读走结果并复位请求，但取图/归档/显示可能还在后台进行；
             // 若此刻就释放通道，PLC 下一拍请求进来会再开一个 Task，同一相机两个 Task 并发取图/删源
             // （"处理即删"会互相删掉对方刚归档的图），窗口错乱。等 Task 收尾再放行。
-            bool reqReset = _plc.ReadCameraRequest(cfg, out int still) && still == 0;
-            if (reqReset && _taskDone)
+            // 【V2.14.41 复位确认改"边沿记忆 + 点位推进"，根治"PLC 轮询改快后拿不到结果"】
+            //   根因：三拍握手的"复位请求=0"是【即逝中间态】——PLC 读到结果≠0 后写 0 复位请求、
+            //   随即立刻写下一拍的新请求（新点位≠0）。PLC 扫描周期（轮询时间）越短，"0"保持窗口
+            //   越窄；而本通道释放又受 _taskDone 约束（现场 FTP 取图+归档 3~5s，远晚于 PLC 复位）。
+            //   于是旧判定"当前读到请求==0"在按 PollMs(100ms) 轮询时几乎必被错过（taskDone 完成那拍
+            //   读到的已是 PLC 写入的下一个请求≠0）→ 通道被拖住、结果清除被推迟。
+            //   修复：
+            //    ① 边沿记忆 _reqResetSeen：一旦观察到请求==0 就永久记下——"PLC 把请求写 0"本身就是
+            //       "已读走本拍结果"的回执，观察过一次即长期可信，不再要求"当前值恰好为 0"；
+            //    ② 点位推进兜底：请求变成【另一个点位】（still > 0 且 != 本拍点位）→ PLC 必然已：
+            //       读过本拍结果 → 复位请求=0 → 进入下一拍并写入新请求，期间复位【确实发生过】→
+            //       同样视为已复位（不再要求 _taskDone：点位推进本身就是"PLC 已放弃本拍、进入下一拍"
+            //       的硬证据）；still==0 或 still==本拍点位（同点位连拍）时继续等真实复位——PLC 可能
+            //       还没读走本拍结果，此时绝不清零，防"把 PLC 没读的结果清掉"（V2.12.5 丢结果红线）。
+            // 【V2.14.42 结果尽早清零，根治"OK 正常、NG 收不到"（残留窗口）】
+            //   V2.13.7 判定即写把 1/2 落进结果寄存器后，旧实现要等 _taskDone（FTP 取图+归档 3~5s）
+            //   才清 0 —— 结果寄存器存在 3~5s 的"残留窗口"。PLC 快轮询时下一拍请求来得早（<1s），
+            //   在此窗口内读到上一拍残留值 → 把残留当本拍结果消费 → 本拍真实判定（尤其 NG，基恩士
+            //   判定耗时比 OK 长、写入更晚）写进来时 PLC 已推进复位、再也不会读 → NG 丢失。
+            //   修复：拿到"PLC 已读走本拍结果"的回执（_reqResetSeen）就【立即】写 0、_resultCleared=true，
+            //   残留窗口从 3~5s 缩到 -100ms（观察到复位的下个轮询周期）；结果只清一次，通道仍由
+            //   _taskDone 闸门控制释放（防并发取图，V2.13.7 红线不回退），释放时不再重复写 0。
+            if (!_reqResetSeen)
             {
-                _plc.WriteCameraResult(cfg, 0);
+                bool resetOk = _plc.ReadCameraRequest(cfg, out int still);
+                if (resetOk && still == 0)
+                {
+                    _reqResetSeen = true;   // ① 观察到 PLC 已把请求复位为 0（边沿记忆）
+                }
+                else if (resetOk && still > 0 && still != _pendStation)
+                {
+                    _reqResetSeen = true;   // ② 请求已推进到另一点位：PLC 已读走本拍结果并进入下一拍
+                }
+            }
+            if (_reqResetSeen && !_resultCleared)
+            {
+                _plc.WriteCameraResult(cfg, 0);   // V2.14.42：本拍结果已被 PLC 读走 → 立即清 0 杜绝残留误读
+                _resultCleared = true;
+            }
+            if (_taskDone && _resultCleared)
+            {
                 _activeCh = ChNone;
                 _chStep = 0;
+                _reqResetSeen = false;      // 通道释放：下一轮 BeginCameraChannel 重新初始化各标志
+                _resultCleared = false;
                 SetState("等待 PLC 请求");
             }
         }
