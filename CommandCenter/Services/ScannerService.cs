@@ -19,7 +19,8 @@ namespace CommandCenter.Services
         /// <summary>
         /// 扫码枪"读码失败/状态错误"通知（V2.14.30）：收码层遇到"错误文本过滤名单"
         /// （ScanConfig.IgnoreScanTexts，如基恩士 SR 读码失败的 ERROR 输出）命中时触发，
-        /// 参数=命中的原始文本。协调器订阅后**立即上报扫码 NG(2)**（不必等 ScanWaitMs 超时），
+        /// 参数=命中的原始文本。协调器订阅后**立即把扫码结果写 2 通知 PLC**（V2.14.30/33：
+        /// PLC 拿到 2 会死等人工补录，不必等 ScanWaitMs 超时），
         /// 让 PLC 那拍不用空等。工作线程触发，UI 不需要此事件。
         /// </summary>
         event EventHandler<string> ScanFailed;
@@ -69,7 +70,8 @@ namespace CommandCenter.Services
 
         /// <summary>
         /// 扫码枪"读码失败/状态错误"通知（V2.14.30，实现 IScanner）：收码层命中
-        /// ScanConfig.IgnoreScanTexts 名单时触发（见 OnDataReceived），协调器据此立即报扫码 NG(2)。
+        /// ScanConfig.IgnoreScanTexts 名单时触发（见 OnDataReceived），协调器据此立即把扫码结果写 2
+        /// 通知 PLC（V2.14.33：PLC 拿到 2 会死等人工补录）。
         /// </summary>
         public event EventHandler<string> ScanFailed;
 
@@ -136,7 +138,8 @@ namespace CommandCenter.Services
                                 // 【V2.14.30 读码失败文本过滤】基恩士扫码枪读码失败时可能把错误字符串
                                 // （如 ERROR）当条码推出；命中 IgnoreScanTexts 名单的行不是真码——
                                 // 不抛 SerialNumberScanned（避免污染序列号/存图目录），改抛 ScanFailed
-                                // 让协调器立即上报扫码 NG(2)。精确匹配不误伤同前缀真实条码。
+                                // 让协调器立即把扫码结果写 2 通知 PLC（死等补录，详见 StepScanChannel）。
+                                // 精确匹配不误伤同前缀真实条码。
                                 if (_cfg.IsIgnoredScanText(line))
                                 {
                                     LogHelper.Warn($"扫码枪(串口)读码失败/状态文本「{line}」已忽略（命中 IgnoreScanTexts），上报扫码失败信号");

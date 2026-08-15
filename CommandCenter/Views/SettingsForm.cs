@@ -427,7 +427,7 @@ namespace CommandCenter.Views
                 // 触发指令（V1.12.0）：基恩士 SR 连接后需发 LON 才读码，留空则不发
                 //（对应扫码枪设成"上电自动读码"模式）
                 gridScannersTcp.Columns.Add("TriggerCommand", "触发指令");
-                // 读码失败文本过滤名单（V2.14.30）：逗号分隔、忽略大小写，命中=丢弃不当条码并快速报扫码 NG(2)
+                // 读码失败文本过滤名单（V2.14.30）：逗号分隔、忽略大小写，命中=丢弃不当条码，并把扫码结果写 2 通知 PLC（死等补录）
                 gridScannersTcp.Columns.Add("IgnoreScanTexts", "忽略文本");
             }
 

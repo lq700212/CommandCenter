@@ -19,6 +19,9 @@ namespace CommandCenter.Services
     ///   ┌─ 通道① 扫码（40001 请求 → 40004 结果 + 40007~40011 型号）─────────────┐
     ///   │ PLC 写 40001=1 → 上位机触发扫码枪/等手动 SN → 写型号 + 写结果(1=OK/2=NG) │
     ///   │ → PLC 读到结果后写 40001=0 → 上位机看到 40001 归 0 → 写 40004=0 复位     │
+    ///   │ 【V2.14.33 人工补录覆盖】产品必须有 SN：扫码失败/超时上位机写 2，PLC      │
+    ///   │  拿到 2 会死等补录（不复位请求、不判 NG），操作员补录完成上位机把 2      │
+    ///   │  覆盖成 1，PLC 读到 1 才复位请求继续（见 StepScanChannel 步骤1）。      │
     ///   └───────────────────────────────────────────────────────────────────────┘
     ///   ┌─ 相机通道（V2.12.6 起【每台相机一路】，见相机表 PlcRequestAddress/PlcResultAddress）─┐
     ///   │ 第1台 40002 请求→40005 结果；第2台 40003→40006；第3台起 40008…/40012…（显式配置后）│
@@ -97,11 +100,17 @@ namespace CommandCenter.Services
         // V2.14.30：扫码枪"读码失败"标志（协调器感知 ScanFailed 事件）。
         // 基恩士扫码枪读码失败会把错误文本（如 ERROR）当条码推上来，收码层已按 IgnoreScanTexts
         // 过滤（不当 SN），这里再记一个"本件扫码失败"信号，让 StepScanChannel 在等 SN 阶段
-        // 见到它就**立即上报扫码 NG(2)**——否则过滤后协调器只干等 ScanWaitMs 超时才 NG，
-        // PLC 那一拍会空等 30s（现场节拍拖死）。真码（_serialReceived）优先于失败信号。
+        // 见到它就**立即把结果写 2 通知 PLC（PLC 死等人工补录，V2.14.33）**——否则过滤后协调器
+        // 只干等 ScanWaitMs 超时才报，PLC 那一拍会干等 30s（现场节拍拖死）。真码（_serialReceived）
+        // 优先于失败信号。
         private volatile bool _serialErrorSeen;
         private bool _scanHooked;               // 是否已订阅扫码枪事件（防重复订阅）
         private DateTime _scanArriveUtc;        // 扫码请求受理时刻（判断 SN 等待超时）
+        // V2.14.33：本轮扫码结果已写入 PLC 的值（0=未写/已复位，1=OK，2=NG）。
+        // 用于"人工补录覆盖"判断：扫码失败/超时写了 2 后，PLC 死等补录（不复位请求、
+        // 不判 NG），操作员补录完成（_serialReceived 置位）时把 2 覆盖为 1，PLC 读到
+        // 1 才继续 OK 流程。仅轮询线程读写，无需加锁。
+        private volatile int _scanResultWritten;
 
         // ── FTP 取图信号加速（V2.13.6 恢复事件驱动）──
         // ImageStore 为每台相机 FTP 目录挂 FileSystemWatcher（MainForm.BuildServices 里 AddMonitor 启动），
@@ -275,11 +284,11 @@ namespace CommandCenter.Services
         /// <summary>
         /// 扫码枪"读码失败"信号（V2.14.30，ScanFailed 事件，扫码枪工作线程触发）：
         /// 收码层已按 IgnoreScanTexts 把错误文本（ERROR 等）过滤掉不当 SN，这里仅置"本件扫码失败"
-        /// 标志 _serialErrorSeen——StepScanChannel 等 SN 阶段见到它即**立即上报扫码 NG(2)**，
-        /// 不必干等 ScanWaitMs 超时。
-        /// 【为什么分两个信号】真码 _serialReceived=false 意味着"没扫到码→超时 NG"；
-        /// 而扫码枪明确报告了"读码失败"（推了 ERROR 文本），我们其实**已知**失败，直接 NG 更快。
-        /// 【不清标志】BeginScanChannel 新一轮开始才清；StepScanChannel 写 NG 消费后也清，
+        /// 标志 _serialErrorSeen——StepScanChannel 等 SN 阶段见到它即**立即把结果写 2 通知 PLC**
+        /// （V2.14.33：PLC 拿到 2 会死等人工补录，直到上位机补录后覆盖成 1），不必干等 ScanWaitMs 超时。
+        /// 【为什么分两个信号】真码 _serialReceived=false 意味着"没扫到码→超时报 2"；
+        /// 而扫码枪明确报告了"读码失败"（推了 ERROR 文本），我们其实**已知**失败，直接报 2 更快。
+        /// 【不清标志】BeginScanChannel 新一轮开始才清；StepScanChannel 报 2 消费后也清，
         /// 防止残留失败信号误判下一轮。
         /// </summary>
         private void OnScannerFail(object sender, string text)
@@ -380,6 +389,7 @@ namespace CommandCenter.Services
             _chStep = 0;                    // 步骤0：等 SN
             _scanArriveUtc = DateTime.UtcNow;   // 超时基准：本轮扫码请求到达时刻（30s 判 NG 用）
             _serialErrorSeen = false;       // V2.14.30：新一轮开始清"读码失败"标志，防上一轮残留误判
+            _scanResultWritten = 0;         // V2.14.33：新一轮开始时本轮扫码结果尚未写入
 
             // V2.14.11：新一轮开始，通知 UI 清空上一轮各窗口图片（新的一轮第一个动作就是扫码，
             // 上一轮的图片已过时，提前清掉避免与新结果混淆）。事件在轮询线程触发，
@@ -426,6 +436,7 @@ namespace CommandCenter.Services
                 {
                     _plc.WriteProductModel(_productModel);
                     _plc.WriteScanResult(1);      // 扫码 OK
+                    _scanResultWritten = 1;       // V2.14.33：记录本轮已写入的结果值（供补录覆盖判断）
                     _serialReceived = false;      // V2.14.9：码已消费即清零，防止残留 true 污染下一轮
                                                  // （否则下一轮 BeginScanChannel 不清，会把上一轮的码
                                                  //  当成新一轮的 SN 误报 OK——见 BeginScanChannel 注释）
@@ -435,33 +446,51 @@ namespace CommandCenter.Services
                 }
                 else if (_serialErrorSeen)
                 {
-                    // 【V2.14.30 扫码枪读码失败 → 立即 NG】扫码枪已明确报告"读码失败"（推了 ERROR
+                    // 【V2.14.30 扫码枪读码失败 → 立即报 2】扫码枪已明确报告"读码失败"（推了 ERROR
                     // 等错误文本，收码层过滤不当 SN、置了 _serialErrorSeen）——不等 ScanWaitMs 超时
-                    // 立刻上报扫码 NG(2)，让 PLC 那拍不必空等 30s。清标志防残留误判下一轮。
+                    // 立刻把结果写 2 通知 PLC：PLC 拿到 2 会死等人工补录（V2.14.33 协议，见步骤1），
+                    // 不会空等 30s。清标志防残留误判下一轮。
                     _plc.WriteProductModel(_productModel);
-                    _plc.WriteScanResult(2);      // 扫码 NG（扫码枪读码失败）
+                    _plc.WriteScanResult(2);      // 扫码结果=2（通知 PLC：扫码失败，等待人工补录）
+                    _scanResultWritten = 2;       // V2.14.33：记录本轮已写入的结果值（供补录覆盖判断）
                     _serialErrorSeen = false;     // 已消费，清理失败标志
                     _chStep = 1;
-                    LogHelper.Warn("扫码枪读码失败，上报扫码 NG(2)（不等超时）");
-                    ErrorRaised?.Invoke("扫码枪读码失败：未取得序列号，已上报扫码 NG");
-                    SetState("扫码 NG（读码失败），等待 PLC 复位请求");
+                    LogHelper.Warn("扫码枪读码失败，结果已写 2 通知 PLC（PLC 死等人工补录）");
+                    ErrorRaised?.Invoke("扫码枪读码失败：未取得序列号，请人工补录");
+                    SetState("扫码失败，等待人工补录");
                 }
                 else if ((DateTime.UtcNow - _scanArriveUtc).TotalMilliseconds >= ScanWaitMs)
                 {
                     _plc.WriteProductModel(_productModel);
-                    _plc.WriteScanResult(2);      // 扫码 NG（超时）
+                    _plc.WriteScanResult(2);      // 扫码结果=2（通知 PLC：超时无码，等待人工补录）
+                    _scanResultWritten = 2;       // V2.14.33：记录本轮已写入的结果值（供补录覆盖判断）
                     _chStep = 1;
-                    LogHelper.Warn($"扫码等待 SN 超时（{ScanWaitMs}ms），上报扫码 NG(2)");
-                    ErrorRaised?.Invoke("扫码等待 SN 超时：未取得序列号，已上报扫码 NG");
-                    SetState("扫码超时上报 NG，等待 PLC 复位请求");
+                    LogHelper.Warn($"扫码等待 SN 超时（{ScanWaitMs}ms），结果已写 2 通知 PLC（等待人工补录）");
+                    ErrorRaised?.Invoke("扫码等待 SN 超时：未取得序列号，请人工补录");
+                    SetState("扫码超时，等待人工补录");
                 }
                 return;
             }
 
             // 步骤1：等 PLC 把请求 40001 复位为 0（说明已读走结果/型号）→ 复位结果 40004=0
+            // 【V2.14.33 人工补录覆盖（协议配合点）】PLC 侧协议：上位机只写 1/2，PLC 拿到 2
+            // 会"死等补录"——不复位请求、不判 NG，直到上位机把 40004 覆盖成 1 才走 OK 流程。
+            // 因此这里必须先检查：本轮结果写了 2（扫码失败/超时）且操作员已补录（SetManualSerial
+            // 置 _serialReceived）→ 立即把 40004 从 2 覆盖成 1，PLC 读到 1 才复位请求继续。
+            // ⚠️ 此前缺这段覆盖：补录只置标志，结果寄存器仍是 2，PLC 永远等不到 1 → 流程卡死
+            // （现场实测"补录完 PLC 收不到 1"）。覆盖只发生在 PLC 死等期间，语义安全。
+            if (_scanResultWritten == 2 && _serialReceived)
+            {
+                _plc.WriteScanResult(1);          // 覆盖：2(NG) → 1(OK)
+                _scanResultWritten = 1;
+                _serialReceived = false;          // 补录的码已消费，防残留污染下一轮
+                SetState("扫码 OK（人工补录），等待 PLC 复位请求");
+                LogHelper.Info($"人工补录完成，扫码结果已由 2 覆盖为 1：SN={LatestSerialNumber}");
+            }
             if (_plc.ReadScanRequest(out bool still) && !still)
             {
                 _plc.WriteScanResult(0);
+                _scanResultWritten = 0;           // V2.14.33：结果已复位
                 _activeCh = ChNone;
                 SetState("等待 PLC 请求");
                 LogHelper.Info("PLC 已复位扫码请求，上位机复位扫码结果");

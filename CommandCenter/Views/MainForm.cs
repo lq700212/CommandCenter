@@ -1207,9 +1207,10 @@ namespace CommandCenter.Views
 
         /// <summary>
         /// 扫码枪"读码失败"弹窗提醒（V2.14.32，ScanFailed 事件，扫码枪工作线程触发）。
-        /// 收码层已按 IgnoreScanTexts 把 ERROR 等错误文本过滤不当 SN，协调器也借此立即上报
-        /// 扫码 NG(2)（OnScannerFail）；这里专职"人看的提醒"：弹 ScannerFailForm 提示操作员
-        /// 检查扫码枪或点【人工补录】直接手动输入本条序列号接手处理。
+        /// 收码层已按 IgnoreScanTexts 把 ERROR 等错误文本过滤不当 SN，协调器也已把扫码结果写 2
+        /// 通知 PLC（V2.14.30/33：PLC 拿到 2 会死等人工补录，直到上位机把 40004 覆盖成 1 才继续）；
+        /// 这里专职"人看的提醒"：弹 ScannerFailForm 提示操作员检查扫码枪或点【人工补录】
+        /// 直接手动输入本条序列号接手处理。
         ///
         /// 【节流防轰炸】扫码枪持续失败会连发事件，若每次都弹窗会打断生产。用
         /// _lastScannerFailPromptUtc 记录上次真实弹窗时刻，30 秒内重复失败只在日志体现、
@@ -1239,10 +1240,11 @@ namespace CommandCenter.Views
             // 节流：距上次真实弹窗不足 30 秒 → 只记日志、不打扰（防持续失败刷屏）
             if ((DateTime.UtcNow - _lastScannerFailPromptUtc) < ScannerFailPromptThrottle) return;
             _lastScannerFailPromptUtc = DateTime.UtcNow;
-            LogHelper.Warn("扫码枪读码失败，弹窗提醒操作员检查（已上报扫码 NG）：" + text);
+            LogHelper.Warn("扫码枪读码失败，弹窗提醒操作员检查（结果已写 2，PLC 死等人工补录）：" + text);
 
             // 弹提醒窗：点【人工补录】→ 顺手打开手动录入对话框（复用现有补录流程），
-            // 点【稍后处理】→ 仅提醒、本条按扫码 NG 处理，等下一拍；
+            // 点【稍后处理】→ 仅提醒、暂不补录（V2.14.33：PLC 死等 2，操作员稍后经主界面
+            // 【人工补录】按钮 btnManualSerial 补录，协调器把 40004 从 2 覆盖成 1 流程才继续）；
             // 关闭后若勾选【今日不再提醒】→ 记录当天日期，当日后续失败不再弹窗（跨弹窗实例全局生效）。
             using (var dlg = new ScannerFailForm(text))
             {

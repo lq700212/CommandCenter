@@ -1055,8 +1055,9 @@ namespace CommandCenter.Models
         /// 污染整个检测件。
         ///
         /// 【命中规则】每条扫码文本收码后 trim，命中任一名单项即丢弃（不触发 SerialNumberScanned、
-        /// 不进协调器 LatestSerialNumber），并触发 IScanner.ScanFailed 事件让协调器**立即上报
-        /// 扫码 NG(2)**（不必等 ScanWaitMs 超时，PLC 那一拍不用空等）：
+        /// 不进协调器 LatestSerialNumber），并触发 IScanner.ScanFailed 事件让协调器**立即把扫码结果
+        /// 写 2 通知 PLC**（V2.14.30/33：PLC 拿到 2 会死等人工补录、上位机补录后覆盖成 1，
+        /// 不必等 ScanWaitMs 超时，PLC 那一拍不用干等）：
         ///   - 默认模式：忽略大小写**精确相等**（如名单项 "ERROR"，只匹配文本 "ERROR"，不会误伤
         ///     以 ERROR 开头的真实条码如 "ERROR123"）；
         ///   - 以 "*" 结尾的项 = **前缀匹配**（如 "ER,*" 可命中 "ER,READ,00"），用于扫码枪输出
