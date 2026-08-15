@@ -144,11 +144,16 @@ ProductModelIndexAddress/ProductModelAddress/ProductModelLen/ModelIndexes`）+ �
    窗口矩阵，宁可这半拍无存档图）。换代与重入是【两道互补防线】：V2.14.35 防单协调器内回调重入、
    V2.14.36 防协调器重建丢认领，缺一不可。
    改动 PLC 或相机通讯或握手流程必须同步 `docs/CommandCenter.md`。
-- **相机 FTP 双文件归档 + 点位程序号（V1.12.18；V1.12.24 起取图改"扫目录取最新"）**：现场方案是"一台相机=一个 FTP 目录、所有点位图混放"——FTP 目录只当**中转暂存区**：基恩士每次拍照生成 jpeg+iv4p 两个文件（**文件名不保证恒为 `0000`（现场实测有 `0084` 等任意编号），上位机取图一律 `ImageStore.FindLatestPair(dir)` 扫目录取"修改时间最新"的一对、不写死文件名**），上位机等图 = `WaitForFtpImage`（**V2.13.6 起事件信号加速 + 轮询兜底双保险**：
+- **相机 FTP 双文件归档 + 点位程序号（V1.12.18；V1.12.24 起取图改"扫目录取最新"，V2.14.37 起"事件路径优先"）**：现场方案是"一台相机=一个 FTP 目录、所有点位图混放"——FTP 目录只当**中转暂存区**：基恩士每次拍照生成 jpeg+iv4p 两个文件（**文件名不保证恒为 `0000`（现场实测有 `0084` 等任意编号），上位机不写死文件名**），上位机等图 = `WaitForFtpImage`：**V2.13.6 起事件信号加速 + 轮询兜底双保险**：
    MainForm.BuildServices 为每台相机 `ImageStore.AddMonitor` 启动 FileSystemWatcher，相机一推图触发
-   `FtpFileArrived` → 置位该相机 `ManualResetEventSlim` → 等图流程立即醒来重扫目录（消除纯轮询最长
-   200ms 的被动延迟）；事件漏报/失效靠 200ms 轮询 + `ImageWaitMs` 超时重扫兜底，不失图），取图一律
-   `ImageStore.FindLatestPair(dir)` 扫目录取最新对，调 `ImageStore.SaveImageFilePair` 双格式原样归档
+   `FtpFileArrived` → **① 记住"事件实际到达的文件路径"（`_ftpArrivedPath[相机下标]`，V2.14.37）
+   ② 置位该相机 `ManualResetEventSlim`** → 等图流程立即醒来（消除纯轮询最长 200ms 的被动延迟）；
+   事件漏报/失效靠 200ms 轮询 + `ImageWaitMs` 超时重扫兜底，不失图）。**取图（V2.14.37）改为"事件路径
+   优先"：`WaitForFtpImage` 先 `TryResolveArrivedPair`（用事件文件主名找同名 jpeg+iv4p 配对 + jpeg
+   `IsNewerThanTrigger` mtime 校验新于本枪触发时刻）命中即取**——外源高频推图堆叠时照片不再被
+   `ImageStore.FindLatestPair(dir)`"按目录修改时间取最新"顶成别的枪/旧图（现场实测取到 ≈18 枪前的图）、
+   照片与 PLC 判定配对错乱；**事件路径为空/配对缺失/早于触发时刻才回退扫目录取最新对**（`FindLatestPair`），
+   调 `ImageStore.SaveImageFilePair` 双格式原样归档
    （jpeg 显示/归档主体、iv4p 基恩士私有格式原样复制；**归档文件名（V2.14.11 定稿）= 相机源文件名 +
    "_" + 时间戳**，如 FTP 里的 `0084.jpeg/iv4p` → 归档 `0084_20260814_164022_461.jpeg` + 同名 `.iv4p`，
    **不再用 FileNameTemplate 模板渲染**，模板仅旧版 TCP/BR 取图兼容）后 **`DeleteSourceFile` 删除"实际归档的那对"
@@ -193,8 +198,13 @@ ProductModelIndexAddress/ProductModelAddress/ProductModelLen/ModelIndexes`）+ �
   ③ 读不到匹配行而超时 → 返回失败 + 断连标记，走既有"失败=NG"路径。
   **`ParseResult` 判定同步红线**：详细格式扫描响应**全部**字段，任一明文 `NG` 即判 NG（复合工具
   判定"任一工具不良=整体不良"，绝不因只认第 2 字段漏 NG）；无 NG 且有明文 OK 才判 OK；完全无明文
-  OK/NG 才回退标准格式逐位判定。改动相机读应答/判定逻辑必须同步 `docs/CommandCenter.md` 第四部分
-  "应答-指令匹配与残留排空"段落与默认配置说明。
+OK/NG 才回退标准格式逐位判定。改动相机读应答/判定逻辑必须同步 `docs/CommandCenter.md` 第四部分
+   "应答-指令匹配与残留排空"段落与默认配置说明。
+   **触发计数跳变检测（V2.14.38 排查辅助约定）**：详细格式 `RT,计数,OK,...` 第 1 字段=相机合计
+   触发编号（每次实际触发 +1，含外部触发源）。`TriggerReadOutcome.TriggerNo` 透出该值，`TriggerAndRead`
+   对照每相机 `_lastTriggerNo`——跳变 >1 记 WARN"检测到触发计数跳变：X→Y（两次T2之间被外部额外触发
+   N次）"、计数回退记 WARN（断电重启/复位），正常每次 +1 不刷日志（节拍无感，仅现场远程定位"外部
+   第二触发源"用）。改动此检测须同步 docs 第四部分与 CHANGELOG。
 
 - **删除/清理旧代码的自检纪律（必须遵守，2026-08 血泪总结）**：删除"旧配置兼容/冗余判断"这类代码时，先分清两类再动手：
   - **真·旧配置兼容**（可删）：为"旧版本缺字段/旧格式"写的兜底，项目未上线时是死代码；

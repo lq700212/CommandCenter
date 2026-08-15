@@ -101,6 +101,15 @@ namespace CommandCenter.Services
         private int _lastProgramNo = -1;
 
         /// <summary>
+        /// 上次 T2 读到的相机合计触发编号（V2.14.38 排查辅助）。用于在 TriggerAndRead 里对照
+        /// "两次上位机触发之间相机自己被外部触发了多少次"——正常每次只 +1；若两次之间夹着外部
+        /// 第二触发源（现场狂拍/定时连拍/其他程序连相机触发），本次读数会比上次大很多
+        /// （跳变 = +N 说明中间有 N-1 次外部触发）。为 0 表示"还没取过/跳过判断"。
+        /// 仅 TriggerRead 线程读写，无需加锁。
+        /// </summary>
+        private long _lastTriggerNo;
+
+        /// <summary>
         /// 触发＋读取判定结果（T2）。
         /// 返回 TriggerReadOutcome：Succeeded=true 表示通讯成功并拿到判定；
         /// IsOk=true 表示判 OK（全部判定位为合格位）。
@@ -115,7 +124,25 @@ namespace CommandCenter.Services
                 // 期望应答前缀：T2/RT 指令的应答固定以 "RT," 开头（判定帧）；"ER" 是本指令错误回执。
                 string raw = SendCommandAndReadLine(_cfg.TriggerAndReadCommand, _cfg.ResponseTimeoutMs,
                     new[] { "RT", "ER" });
-                return ParseResult(raw);
+                var outcome = ParseResult(raw);
+                // 【V2.14.38 排查辅助】触发计数跳变检测：上位机每次 T2 相机计数只 +1；
+                // 若本次读数相对上次跳变 >1，说明两次上位机触发之间相机被**外部第二触发源**额外
+                // 触发了 N-1 次（现场"相机连拍/NG 拍错图/结果错配"根因），记 WARN 供现场直接定位。
+                // 只在"本次有有效计数"时判断；首次触发/读取失败不误报。
+                if (outcome.Succeeded && outcome.TriggerNo >= 0 && _lastTriggerNo > 0)
+                {
+                    long jump = outcome.TriggerNo - _lastTriggerNo;
+                    if (jump > 1)
+                        LogHelper.Warn($"相机[{_cfg.IpAddress}] 检测到触发计数跳变：{_lastTriggerNo}→{outcome.TriggerNo}"
+                            + $"（两次上位机T2之间被外部额外触发 {jump - 1} 次，疑似第二触发源/定时连拍，"
+                            + "请现场检查相机触发设置与其他连相机程序）");
+                    else if (jump < 0)
+                        LogHelper.Warn($"相机[{_cfg.IpAddress}] 触发计数回退：{_lastTriggerNo}→{outcome.TriggerNo}"
+                            + "（相机可能断电重启/计数复位，下一次触发正常对齐）");
+                }
+                if (outcome.Succeeded && outcome.TriggerNo >= 0)
+                    _lastTriggerNo = outcome.TriggerNo;
+                return outcome;
             }
             catch (Exception ex)
             {
@@ -545,6 +572,16 @@ namespace CommandCenter.Services
             string payload = line.Substring(3).Trim();
             string[] fields = payload.Split(',');
 
+            // 【V2.14.38 排查辅助】详细格式第 1 个字段 = 相机合计触发编号（每次实际触发 +1，
+            // 含外部第二触发源）。上位机拿"上次之后的跳变量"即可量化外部触发强度（见 TriggerAndRead）。
+            // 字段0 若可解析为数字则取值；标准格式/异常字段时为 -1（不参与跳变判断）。
+            long triggerNo = -1;
+            if (fields.Length > 0)
+            {
+                long v;
+                if (long.TryParse(fields[0].Trim(), out v)) triggerNo = v;
+            }
+
             // 【V2.14.10】详细格式判定：字段数>=2 且第 2 个逗号字段是明文 OK/NG → 直接采用。
             // 现场实测响应：RT,00152,OK,01,OK,0000100（OK）/ RT,00151,NG,01,NG,0000000（NG）。
             //
@@ -560,9 +597,9 @@ namespace CommandCenter.Services
                 else if (t.Equals("OK", StringComparison.OrdinalIgnoreCase)) anyOk = true;
             }
             if (anyNg)
-                return TriggerReadOutcome.NgResult("NG", raw, "相机判定 NG（详细格式）");
+                return TriggerReadOutcome.NgResult("NG", raw, "相机判定 NG（详细格式）", triggerNo);
             if (anyOk)
-                return TriggerReadOutcome.OkResult("OK", raw);
+                return TriggerReadOutcome.OkResult("OK", raw, triggerNo);
 
             // 标准格式：整段即 8 位判定位（fields[0]，标准响应只有这一位）
             string flags = fields[0].Trim();
@@ -779,6 +816,14 @@ namespace CommandCenter.Services
         /// <summary>相机原始响应行</summary>
         public string Raw { get; private set; }
 
+        /// <summary>
+        /// 相机合计触发编号（V2.14.38 排查辅助）：即 RT 详细格式响应 `RT,计数,OK,...` 的第 1 个字段，
+        /// 相机每次被触发（含外部触发源）都 +1。上位机对比"上次触发后该值跳变多少"即可判定有没有
+        /// 第二个触发源在并发拍照（正常 T2 每次只 +1，跳变为 +n 说明中间被外部额外触发了 n-1 次）。
+        /// 标准格式/无响应/解析失败时为 -1。
+        /// </summary>
+        public long TriggerNo { get; private set; }
+
         /// <summary>失败原因/非合格位说明</summary>
         public string Detail { get; private set; }
 
@@ -787,6 +832,12 @@ namespace CommandCenter.Services
 
         public static TriggerReadOutcome NgResult(string resultText, string raw, string detail) =>
             new TriggerReadOutcome { Succeeded = true, IsOk = false, ResultText = resultText, Raw = raw, Detail = detail };
+
+        public static TriggerReadOutcome OkResult(string resultText, string raw, long triggerNo) =>
+            new TriggerReadOutcome { Succeeded = true, IsOk = true, ResultText = resultText, Raw = raw, TriggerNo = triggerNo };
+
+        public static TriggerReadOutcome NgResult(string resultText, string raw, string detail, long triggerNo) =>
+            new TriggerReadOutcome { Succeeded = true, IsOk = false, ResultText = resultText, Raw = raw, Detail = detail, TriggerNo = triggerNo };
 
         public static TriggerReadOutcome Fail(string detail) =>
             new TriggerReadOutcome { Succeeded = false, Detail = detail };

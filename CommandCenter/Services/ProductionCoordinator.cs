@@ -150,6 +150,9 @@ namespace CommandCenter.Services
         // （消除了纯轮询最长 200ms 的被动延迟）；事件漏报/失效时 200ms 超时轮询照常兜底，两者互补。
         // 每拍（WaitForFtpImage）开始前 Reset 一次，保证"本次触发后的新图事件"才唤醒本拍。
         private ManualResetEventSlim[] _ftpArrive = new ManualResetEventSlim[0];
+        private string[] _ftpArrivedPath = new string[0];  // V2.14.37②：本相机 watcher 事件报告的"实际文件路径"
+        //   （按相机列表下标对齐 _ftpArrive）。外源高频推图堆叠时，"取目录修改时间最新"会被
+        //   别的枪/旧图顶掉，故取图优先用"事件真正到达的那个文件"，事件路径再靠 mtime 校验兜底。
         private bool _ftpHooked;                // 是否已订阅 FtpFileArrived（防重复订阅）
 
         /// <summary>扫码等待 SN 的超时（毫秒）：扫码请求到位后产品迟迟没被扫到（没贴码/扫码枪没读到），
@@ -232,6 +235,7 @@ namespace CommandCenter.Services
             // 订阅 ImageStore 的新图事件——相机推图到目录的瞬间即可唤醒等图流程，不必等下一个轮询周期。
             int n = Math.Max(1, _cameraCfgs.Count);
             _ftpArrive = new ManualResetEventSlim[n];
+            _ftpArrivedPath = new string[n];   // V2.14.37②：形态与 _ftpArrive 对齐，记录"事件实际到达的文件"
             for (int i = 0; i < n; i++) _ftpArrive[i] = new ManualResetEventSlim(false);
             if (!_ftpHooked && _imageStore != null)
             {
@@ -251,13 +255,21 @@ namespace CommandCenter.Services
 
         /// <summary>
         /// ImageStore 的 FTP 新图事件回调（V2.13.6 恢复信号加速）。运行在 FileSystemWatcher 监听线程，
-        /// 只做"置位对应相机信号"这一件非阻塞的事——真正的取图/归档仍在等图的 Task 线程里做。
+        /// 只做两件非阻塞的事：① 记住"事件实际到达的文件路径"（V2.14.37②，取图优先用它，见
+        /// TryResolveArrivedPair——避免外源高频推图堆叠时"按目录修改时间取最新"取到别的枪/旧图）；
+        /// ② 置位对应相机信号。真正的取图/归档仍在等图的 Task 线程里做。
         /// <paramref name="cameraIndex"/> = 相机列表下标（AddMonitor 注册时相机的下标），与 _ftpArrive 对齐。
         /// </summary>
         private void OnFtpFileArrived(int cameraIndex, string path)
         {
             if (cameraIndex >= 0 && cameraIndex < _ftpArrive.Length)
+            {
+                // 事件路径可能是 jpeg 或 iv4p（每枪两文件分别到达），都记下来；
+                // WaitForFtpImage 会用它找"同一文件名"的另一格式配对（见 TryResolveArrivedPair）。
+                if (cameraIndex < _ftpArrivedPath.Length)
+                    _ftpArrivedPath[cameraIndex] = path;
                 _ftpArrive[cameraIndex].Set();
+            }
         }
 
         /// <summary>开始运行：订阅扫码枪事件 + 启动 PLC 请求轮询。</summary>
@@ -904,19 +916,34 @@ namespace CommandCenter.Services
         /// 现在 ImageStore 的 FileSystemWatcher 一发现新文件就会 Set 本相机的 _ftpArrive 信号，
         /// 下面用 Wait(200) 等待"信号或超时"——图一到立即醒来重扫马上拿到，事件漏报再靠 200ms 兜底轮询。
         /// 每拍开始先 Reset：把上一拍残留的信号清掉，保证"本次触发之后的新图事件"才唤醒本拍。
+        ///
+        /// 【V2.14.37② 事件路径优先】外源高频推图时（现场第二触发源问题），按目录"修改时间最新"
+        /// 取到的 jpeg 常常是别的枪/早已堆叠的旧图——事件已把"实际到达的那个文件"记在 _ftpArrivedPath，
+        /// 这里每拍优先 TryResolveArrivedPair（用事件文件配对 jpeg+iv4p 并校验 mtime），命中即用，
+        /// 减少照片与当前判定错配；事件路径失效（被覆盖/配对文件缺失/文件读不到）则照旧扫目录兜底。
+        /// 注意：外源若在本枪 T2 之后持续推图，事件路径的 mtime 校验仍可能放开——那是外源问题的
+        /// 固有局限（根因仍需现场停掉第二触发源），本处只做"尽量贴合本枪"的缓解。
         /// </summary>
         /// <returns>jpeg 完整路径（无则空字符串），iv4p 通过 out 返回（可为 null）</returns>
         private string WaitForFtpImage(CameraConfig cfg, DateTime triggerUtc, out string iv4p)
         {
             iv4p = null;
             int waitMs = Math.Max(2000, cfg.ImageWaitMs); // 至少 2s，防配置过小立刻判失败
-            int camIdx = _cameraCfgs.IndexOf(cfg);        // 相机在下标 → 对应信号
+            int camIdx = _cameraCfgs.IndexOf(cfg);        // 相机在下标 → 对应信号/事件路径
             bool hasSignal = camIdx >= 0 && camIdx < _ftpArrive.Length;
             if (hasSignal) _ftpArrive[camIdx].Reset();    // 清掉上一拍残留信号
             var stopwatch = Stopwatch.StartNew();
             var pair = new ImageStore.LatestPairResult();
             while (stopwatch.ElapsedMilliseconds < waitMs)
             {
+                // ① 优先（V2.14.37②）：watcher 事件实际到达的文件（配对 + mtime 校验，命中即取）
+                var ev = TryResolveArrivedPair(camIdx, triggerUtc);
+                if (!string.IsNullOrEmpty(ev.JpegPath))
+                {
+                    pair = ev;
+                    break;
+                }
+                // ② 兜底：扫目录取"mtime 新于触发时刻"的最新对（旧行为，事件漏报/被覆盖时不失图）
                 var c = _imageStore.FindLatestPair(FtpDirFor(cfg));
                 if (!string.IsNullOrEmpty(c.JpegPath) && IsNewerThanTrigger(c.JpegPath, triggerUtc))
                 {
@@ -931,9 +958,70 @@ namespace CommandCenter.Services
                     Thread.Sleep(200);
             }
             if (string.IsNullOrEmpty(pair.JpegPath))
-                pair = _imageStore.FindLatestPair(FtpDirFor(cfg)); // 超时兜底：取最新一对
+            {
+                // 超时兜底：先试事件路径，再回退"取最新一对"（有旧图残留也照常归档，防失图）
+                var ev = TryResolveArrivedPair(camIdx, triggerUtc);
+                pair = !string.IsNullOrEmpty(ev.JpegPath)
+                    ? ev
+                    : _imageStore.FindLatestPair(FtpDirFor(cfg));
+            }
             iv4p = pair.IvpPath;
             return pair.JpegPath;
+        }
+
+        /// <summary>
+        /// 用"watcher 事件实际到达的文件"解析出应取的一对（V2.14.37②）。
+        /// 事件到达的可能是 jpeg 或 iv4p（每枪两文件分别触发事件）：无论哪个，先按"同文件名主名"
+        /// 找到对应的 jpeg + iv4p，再校验 jpeg 修改时间新于本枪触发时刻，两者齐备才返回。
+        /// 事件路径为空/文件不存在/配对缺失/已早于触发时刻 → 返回空结果（调用方回退扫目录）。
+        /// </summary>
+        /// <param name="camIdx">相机列表下标（-1/越界视为无事件路径）</param>
+        /// <param name="triggerUtc">本枪触发时刻（UTC，判断文件是否本次触发之后新推）</param>
+        private ImageStore.LatestPairResult TryResolveArrivedPair(int camIdx, DateTime triggerUtc)
+        {
+            var r = new ImageStore.LatestPairResult();
+            if (camIdx < 0 || camIdx >= _ftpArrivedPath.Length) return r;
+            string arrived = _ftpArrivedPath[camIdx];
+            if (string.IsNullOrWhiteSpace(arrived)) return r;
+            try
+            {
+                string dir = Path.GetDirectoryName(arrived);
+                string stem = Path.GetFileNameWithoutExtension(arrived);
+                string ext = Path.GetExtension(arrived);
+                string jpeg = null;
+                string iv4p = null;
+                if (ext.Equals(".jpeg", StringComparison.OrdinalIgnoreCase)
+                    || ext.Equals(".jpg", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 事件主体就是 jpeg：直接用它，另找同名 iv4p 配对
+                    jpeg = arrived;
+                    string cand = Path.Combine(dir, stem + ".iv4p");
+                    if (File.Exists(cand)) iv4p = cand;
+                }
+                else if (ext.Equals(".iv4p", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 事件到的是 iv4p：按同名找 jpeg（.jpeg/.jpg 都试）
+                    iv4p = arrived;
+                    foreach (var cand in new[] { Path.Combine(dir, stem + ".jpeg"),
+                                                 Path.Combine(dir, stem + ".jpg") })
+                    {
+                        if (File.Exists(cand)) { jpeg = cand; break; }
+                    }
+                }
+                // 必须"jpeg 存在"且"mtime 新于本枪触发时刻"才算命中（事件可能是上一拍残留/外源旧图）
+                if (string.IsNullOrEmpty(jpeg) || !File.Exists(jpeg)) return r;
+                if (!IsNewerThanTrigger(jpeg, triggerUtc)) return r;
+                r.JpegPath = jpeg;
+                r.IvpPath = iv4p;
+                LogHelper.Info($"相机取图：命中 watcher 事件实际文件 → {jpeg}"
+                    + (iv4p != null ? " | " + iv4p : "（无 iv4p）"));
+                return r;
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Warn($"解析 watcher 事件文件失败：{arrived} → {ex.Message}");
+                return r;
+            }
         }
 
         /// <summary>判断文件是否是"本次触发之后新推的图"：修改时间（UTC）不早于触发时刻即视为新图。
