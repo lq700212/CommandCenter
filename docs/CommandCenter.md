@@ -669,16 +669,29 @@ IV4 系列内置以太网，支持：EtherNet/IP、PROFINET CC-B、**TCP/IP 无�
 拍两遍（多个 Task 对同一请求连发 T2、同点位并发取图/删源）；令牌一次放行一个回调、重入直接跳过（PLC 请求
 握手期间保持、丢一拍下次仍读得到，用"丢一拍"换"绝不重入双触发"）。
 
-**V2.14.36 协调器重建换代守卫 + 启动磨合期（补充 V2.14.35 覆盖不到的"重建丢认领"路径）**：切型号
+**V2.14.36 协调器重建换代守卫 + 启动磨合期（补充 V2.14.35 覆盖不到的"重建丢认领"路径；V2.14.40 补三道修复）**：切型号
 （`SwitchModel`）/配置热更（`ApplyRuntimeConfig`）都会 `Dispose` 旧协调器后瞬时新建并 `Start` 新协调器，
 旧协调器在途的 `DoCameraShot` Task 没有取消机制；此刻 PLC 请求寄存器往往还是旧值，新协调器若立即受理会对
 同一请求二次触发相机。三层防护（`ProductionCoordinator.cs`）：
-① **启动磨合期**：新协调器 `PollNewRequest` 在构造后 `StartDrainMs=1200ms` 内一律不认领新请求（`_startUtc`/
+① **启动磨合期**：新协调器 `PollNewRequest` 在构造后 `_startDrainMs` 内一律不认领新请求（`_startUtc`/
 `_drained`），给旧 Task 写完 PLC 结果、PLC 读走并复位请求留时间窗；② **`DoCameraShot` 换代守卫**：try 开头
 与发 T2/T1 前检查 `_disposed`，已换代即收尾、绝不发出触发指令（相机不重复拍）；③ **判定即写照落、取图归档
 跳过**：已换代时判定即写保留（PLC 能读到结果复位请求，这是防二次触发另一半关键），但跳过取图/归档/删源/
 显示（防旧 Task 与新 Task 并发取图、互删 FTP 源、图发到已重建窗口矩阵）。此三条与 V2.14.35 的 `_polling`
 令牌是两道**互补**防线：前者防"重建瞬间两代各认领一次"，后者防"单协调器内回调重入各认领一次"。
+**V2.14.40 补三道修复（缺一仍会双重触发）**：① **`DoCameraShot` 失败路径收口写 NG**——旧实现多个失败
+return 路径（SetOutputFormat/SwitchProgram/TriggerAndRead 失败、防线1/2 _disposed）都不写 PLC 结果，换代后旧
+step1 不调，PLC 结果保持 0 → PLC 不复位请求 → 新协调器磨合期满读到请求仍保持 → 再发 T2 → 双重触发。修复：
+局部标志 `plcResultWritten`（成功路径"判定即写"置 true），`finally` 里检测 `!plcResultWritten` 补写一次
+NG(2) 收口——任何失败/换代路径 PLC 都有结果可读、能复位请求。⚠️ **禁止"入口抢先写 2"**（PLC 主站周期轮询
+结果、读到 ≠0 即复位请求，入口写 2 会让 OK 件在 T2 判定期间就被误读成 NG 复位）；**不检查 _disposed**
+（否则旧 Task 失败时 PLC 永远等不到结果），"写脏新协调器结果"的风险由动态磨合期兜住；② **磨合期改为动态值 `_startDrainMs = max(1200,
+各相机 ResponseTimeoutMs 最大值) + 1000`**——原 1200ms < T2 超时 5s，磨合期满时旧 Task 还在等 T2 应答
+（T2 早已发出），新协调器受理即双重触发；③ **`KeyenceIV4Camera.TriggerAndRead`/`SendTrigger` 加
+`Func<bool> stillAlive` 回调**——V2.14.36 防线2 与"实际发 T2"间有竞态窗口（检查通过后、发 T2 前协调器被
+Dispose，T2 仍发出）。`stillAlive` 在 EnsureConnected 之后、发 T2 前最后一刻调用，返回 false 放弃触发、不写
+T2 字节进 TCP 流。`DoCameraShot` 调用处传 `() => !_disposed`，窗口收敛到最小。DevTestForm 不传（默认 null=
+旧行为）。仍非完全原子（volatile 读 + 后续 Write），彻底根治需 CancellationToken（改动量大未实施）。
 
 **② `ProgramNo` 判据是 `>= 0`，不是 `> 0`**：0 也是合法程序号（相机程序从 0 开始编号），
 `ProgramNo=0` 必须发 `PW,000`。只有 **-1（默认值）才表示"不切换"**。设置窗体该列填 `-1` 或不填都行。
@@ -1510,6 +1523,24 @@ SubDirs 为空时用模型默认含 `{相机}` 的四层 `{年月日}/{SN}/{相�
 # 第八部分 版本
 
 > 本部分保留原 `通讯接入.md` 的版本演进记录，最新在前。
+
+- V2.14.40（2026-08-15，修复"上位机多次触发相机拍照"三个根因）：现场反馈切型号/热更后相机被同一
+  PLC 请求触发两次（旧 Task 一次 + 新协调器一次），配合 V2.14.38 触发计数跳变日志可直接定位。代码审查
+  确认三条独立根因路径，全部修复：① **`DoCameraShot` 失败路径收口写 NG**——旧实现多个失败 return
+  路径（SetOutputFormat/SwitchProgram/TriggerAndRead 失败、防线1/2 _disposed）都不写 PLC 结果，换代后旧
+  step1 不调，PLC 结果保持 0 → PLC 不复位请求 → 新协调器磨合期满读到请求仍保持 → 再发 T2 → 双重触发。
+  修复：局部标志 `plcResultWritten`（成功路径"判定即写"置 true），`finally` 里检测 `!plcResultWritten`
+  补写一次 NG(2) 收口——任何失败/换代路径 PLC 都有结果可读、能复位请求。⚠️ **禁止"入口抢先写 2"**
+  （PLC 主站周期轮询、读到 ≠0 即复位请求，入口写 2 会把 OK 件在 T2 判定期间误读成 NG）——
+  V2.14.40 初版曾用"入口抢先写 NG(2)"方案，审查确认该方案有回归风险后改为失败收口；② **磨合期改为
+  动态值 `_startDrainMs = max(1200, 各相机 ResponseTimeoutMs 最大值) + 1000`**——原 1200ms < T2 超时 5s，
+  磨合期满时旧 Task 还在等 T2 应答（T2 早已发出），新协调器受理即双重触发；③ **`KeyenceIV4Camera.
+  TriggerAndRead`/`SendTrigger` 加 `Func<bool> stillAlive` 回调**——V2.14.36 防线2 与"实际发 T2"间有
+  竞态窗口（检查通过后、发 T2 前协调器被 Dispose，T2 仍发出）。`stillAlive` 在 EnsureConnected 之后、发
+  T2 前最后一刻调用，返回 false 放弃触发、不写 T2 字节进 TCP 流。`DoCameraShot` 调用处传 `() => !_disposed`，
+  窗口收敛到最小。DevTestForm 不传（默认 null=旧行为）。仍非完全原子（volatile 读 + 后续 Write），彻底
+  根治需 CancellationToken（改动量大未实施）。同步 CHANGELOG（V2.14.40）、AGENTS.md（V2.14.36 段补
+  V2.14.40 三道修复）、docs 第五部分。
 
 - V2.14.38（2026-08-15，相机触发计数跳变检测日志，现场排查"外部第二触发源"辅助）：客户反馈
   "改了扫码后相机疯狂触发/搜不到NG"。代码审查确认扫码枪与相机触发完全隔离（端口/指令/通道独立），

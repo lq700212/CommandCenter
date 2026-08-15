@@ -76,12 +76,16 @@ namespace CommandCenter.Services
         /// 仅轮询线程读写。
         /// </summary>
         private readonly DateTime _startUtc;
-        /// <summary>启动磨合期时长（毫秒，V2.14.36）：新协调器建好后 StartDrainMs 内不认领
-        /// PLC 请求，防止重建瞬间对上一代在途请求二次触发相机。见 _startUtc 注释。
-        /// 取值依据：旧 Task 正常判定即写（几百 ms）+ PLC 主站轮询读结果并复位请求
-        /// （~百 ms 级）+ 余量。现场切型号是停机操作，晚 1.2s 受理请求可接受；
-        /// 若 PLC 请求在磨合期后仍保持，说明确未处理完毕，再正常受理（不丢请求）。</summary>
-        private const int StartDrainMs = 1200;
+        /// <summary>启动磨合期时长（毫秒，V2.14.36 起；V2.14.40 改为动态值）：新协调器建好后
+        /// _startDrainMs 内不认领 PLC 请求，防止重建瞬间对上一代在途请求二次触发相机。见 _startUtc 注释。
+        /// 【V2.14.40 动态化】原固定 1200ms 仅覆盖"旧 Task 正常判定即写（几百 ms）+ PLC 复位请求
+        /// （~百 ms）"，但旧 Task 失败路径（T2 超时/读判定异常）耗时 = ResponseTimeoutMs（默认 5s），
+        /// 远超 1200ms。磨合期满时旧 Task 还在等 T2 应答（T2 早已发出、相机已拍照），新协调器受理
+        /// → 再发一次 T2 → 相机被同一请求触发两次。改为 max(1200, 各相机 ResponseTimeoutMs 最大值 + 1000)，
+        /// 确保磨合期 &gt; 旧 Task 最长可能耗时，旧 Task 超时收尾后新协调器才受理。配合 DoCameraShot
+        /// 入口兜底 NG（见 DoCameraShot 注释），旧 Task 失败时入口已写 NG、PLC 已复位请求，新协调器
+        /// 磨合期满读到"请求已复位"不重复触发。代价：切型号/热更后晚几秒受理请求（停机操作可接受）。</summary>
+        private readonly int _startDrainMs;
         /// <summary>磨合期结束标记（V2.14.36）：磨合期内 PollNewRequest 直接返回、
         /// 只记一次日志（防 100ms 一次把日志刷爆），过点后置 true 永久放行。</summary>
         private volatile bool _drained;
@@ -248,6 +252,16 @@ namespace CommandCenter.Services
             //   不可达 IP 时把界面整个卡住（点"系统设置"半天没反应就是这原因）。
             // V2.14.36：记录本实例创建时刻，供"启动磨合期"判定（见 _startUtc/_drained）。
             _startUtc = DateTime.UtcNow;
+            // V2.14.40：动态磨合期 = max(1200, 各相机 ResponseTimeoutMs 最大值 + 1000)。
+            // 取值依据：旧 Task 失败路径耗时 = ResponseTimeoutMs（T2 读判定超时），磨合期必须 > 它，
+            // 确保旧 Task 超时收尾后新协调器才受理。无相机时退回原 1200ms 默认值。
+            int maxResp = 1200;
+            foreach (var c in _cameraCfgs)
+            {
+                if (c != null && c.ResponseTimeoutMs > maxResp)
+                    maxResp = c.ResponseTimeoutMs;
+            }
+            _startDrainMs = maxResp + 1000;
             _positionTimer = new System.Threading.Timer(
                 PositionTimer_Tick, null,
                 System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
@@ -417,12 +431,15 @@ namespace CommandCenter.Services
             // Task 并发取图/归档/删源混图。磨合期内 PollNewRequest 一律返回不认领请求，等旧 Task
             // 写完 PLC 结果（判定即写照常、见 DoCameraShot）、PLC 主站读走并复位请求后再受理；
             // 若磨合期后请求仍保持，说明前一代确实没处理完，此刻受理是安全且不丢请求的。
+            // 【V2.14.40】磨合期改为动态值 _startDrainMs（> ResponseTimeoutMs），覆盖旧 Task 失败
+            // 路径（T2 超时）的最长耗时；配合 DoCameraShot 入口兜底 NG，旧 Task 失败时入口已写 NG、
+            // PLC 已复位请求，磨合期满读到"请求已复位"不重复触发。
             if (!_drained)
             {
-                if ((DateTime.UtcNow - _startUtc).TotalMilliseconds < StartDrainMs)
+                if ((DateTime.UtcNow - _startUtc).TotalMilliseconds < _startDrainMs)
                     return;                                            // 磨合期内：只放行已有通道推进，不认领新请求
                 _drained = true;
-                LogHelper.Info($"协调器启动磨合期({StartDrainMs}ms)结束，开始受理 PLC 请求");
+                LogHelper.Info($"协调器启动磨合期({_startDrainMs}ms)结束，开始受理 PLC 请求");
             }
 
             bool ok;
@@ -716,6 +733,12 @@ namespace CommandCenter.Services
             var cfg = _cameraCfgs[camIdx];
             var cam = _cameras[camIdx];
             int code = 2;                 // 默认 NG，成功路径改 1
+            // 【V2.14.40 失败收口写 NG 标志】本 Task 是否已把"真实/最终判定"写进 PLC 结果寄存器。
+            // 判定即写（成功路径）执行后置 true；finally 里检查它——若为 false 说明本拍走了失败
+            // return 路径（OF/PW/T2 失败、换代放弃、异常），由 finally 统一补写一次 NG(2) 收口，
+            // 保证 PLC 在任何失败路径下都能读到 ≠0 结果并复位请求（防"结果保持 0 → PLC 不复位 →
+            // 新协调器对同一请求重复触发"）。
+            bool plcResultWritten = false;
             string archived = null;
             string resultText = "";
             // 显示用内存缩略图（V2.13.2 显示提速）：FTP 模式下 jpeg 一到位就提前从源文件加载，
@@ -732,13 +755,26 @@ namespace CommandCenter.Services
                 : cfg.Name.Trim();
             try
             {
-                // 【V2.14.36 换代守卫：协调器已被 Dispose（切型号/热更新建了新一代）时，
-                // 本在途 Task 立即收尾，绝不再向相机发任何指令】Dispose 无法取消已开跑的
-                // Task，但可以在这里检查 _disposed 及时刹车——否则旧 Task 的 T2 会撞上
-                // 新协调器对同一请求的 T2，相机被连续触发两次（本修复的根因之一）。
+                // 【V2.14.40 失败收口写 NG 的设计说明（入口不再抢先写 2）】
+                // 早期方案在 try 入口先 `WriteCameraResult(cfg, 2)` 兜底：本意是想覆盖所有失败 return
+                // 路径（OF/PW/T2 失败、换代放弃），但这是【严重错误】——PL C 是主站、周期轮询结果
+                // 寄存器、读到 ≠0 即视为本拍处理完成并复位请求（docs §5.3 ⑦）。每次正常拍照在入口
+                // 就写 2，相机 T2 判定（几百 ms~数秒）进行中 PLC 就可能读到这个"中间态 2"，把 OK 件
+                // 误判 NG、复位请求进入下一工位，身后判定的覆盖写 PLC 早不看了。正常拍一件 NG 一件。
+                //
+                // 正确做法：不在入口写，而在【失败 return 路径统一收口写 NG】。本方法所有正常成功
+                // 路径都会走到"判定即写"（_plc.WriteCameraResult(cfg, isOk?1:2)，见下方），写完置
+                // plcResultWritten=true；异常/失败/换代放弃路径 return 前不经判定即写，finally 检测
+                // plcResultWritten=false 补写一次 NG(2) 收口。效果：
+                //   ① 正常成功：PLC 只在判定完成后读到 1/2 最终值，绝无中间态；② 任何失败路径
+                //      （含换代 _disposed）PLC 都能读到 NG 复位请求，不会"结果保持 0 → 永不复位 →
+                //      新协调器对同一请求重复触发"（这正是 V2.14.40 要修的根因）；③ finally 收口
+                //      不检查 _disposed（换代后 _plc 是 MainForm 复用的同一实例、仍可写），旧 Task
+                //      失败时 PLC 才有结果可读；"写脏新协调器结果"的风险由 _startDrainMs 动态磨合期
+                //      兜住（新协调器不会在旧 Task 完成前认领同一请求寄存器）。
                 if (_disposed)
                 {
-                    LogHelper.Info($"协调器已换代（在途 Task 放弃触发）：相机[{camName}] 点位{stationNo}");
+                    LogHelper.Info($"协调器已换代（在途 Task 放弃触发，结果将由 finally 收口写 NG）：相机[{camName}] 点位{stationNo}");
                     return;
                 }
                 // ① 触发前的输出格式 + 程序切换（V1.12.18/V1.12.25）：
@@ -765,6 +801,11 @@ namespace CommandCenter.Services
                 // 【V2.14.36 换代守卫 2 号】发出 T2/T1 前的最后一道闸：若协调器已换代
                 // （切型号/热更），即使前面 OF/PW 已执行，也绝不让这颗 T2 发出去——
                 // 一旦发出相机就真的拍了，新协调器对同一请求的 T2 会造成重复拍照。
+                // 【V2.14.40 收敛竞态窗口】本检查与下方 cam.TriggerAndRead/SendTrigger 内部的
+                // stillAlive 检查互补：这里是"早检查"（OF/PW 之后、TriggerAndRead 调用前），
+                // stillAlive 是"晚检查"（EnsureConnected 之后、T2 字节进 TCP 流之前最后一刻）。
+                // 两道检查之间仍有微小窗口（volatile 读非原子），但窗口已小到可忽略；彻底根治
+                // 需 CancellationToken（改动量大，当前未实施，见 TriggerAndRead 注释）。
                 if (_disposed)
                 {
                     LogHelper.Info($"协调器已换代（触发前放弃）：相机[{camName}] 点位{stationNo}");
@@ -774,7 +815,9 @@ namespace CommandCenter.Services
                 bool isOk;
                 if (cfg.ReadResultFromCamera)
                 {
-                    var outcome = cam.TriggerAndRead();
+                    // V2.14.40：传 stillAlive 回调，TriggerAndRead 在 EnsureConnected 之后、发 T2 之前
+                    // 最后一刻再检查一次 _disposed，收敛"早检查通过 → 协调器被 Dispose → T2 发出"的窗口
+                    var outcome = cam.TriggerAndRead(() => !_disposed);
                     triggerOk = outcome.Succeeded;
                     isOk = outcome.IsOk;
                     resultText = outcome.ResultText ?? "";
@@ -791,7 +834,8 @@ namespace CommandCenter.Services
                 else
                 {
                     // 退化模式：只 T1 触发，判定不详，图到即记 OK（现场临时用）
-                    triggerOk = cam.SendTrigger();
+                    // V2.14.40：同样传 stillAlive 回调，收敛 T1 路径的竞态窗口
+                    triggerOk = cam.SendTrigger(() => !_disposed);
                     isOk = true;
                     if (!triggerOk)
                     {
@@ -810,6 +854,8 @@ namespace CommandCenter.Services
                 code = isOk ? 1 : 2;
                 _chanResult = code;
                 _plc.WriteCameraResult(cfg, code);
+                // 【V2.14.40 失败收口】判定即写成功 = 真实结果已落 PLC，finally 不再补写兜底 NG。
+                plcResultWritten = true;
                 LogHelper.Info($"相机[{camName}] 点位{stationNo} 判定即写已落 PLC：{(isOk ? "OK(1)" : "NG(2)")}");
 
                 // ③ 取图 + 归档（Ftp：轮询取图目录拿最新对；Tcp：BR 同步读回）——纯异步补充材料，
@@ -933,6 +979,20 @@ namespace CommandCenter.Services
             }
             finally
             {
+                // 【V2.14.40 失败收口写 NG】正常成功路径判定即写已置 plcResultWritten=true，这里跳过；
+                // 任何失败路径（OF/PW/T2 失败、异常、换代 _disposed 放弃、取图失败 return）都没有走到
+                // 判定即写，plcResultWritten 仍为 false → 补写一次 NG(2) 收口，保证 PLC 在每个失败
+                // 路径下都能读到 ≠0 结果并复位请求（防"结果保持 0 → PLC 永不复位 → 新协调器对同一
+                // 请求重复触发"）。
+                // 注意：这里【不检查 _disposed】——换代后 _plc 是 MainForm 复用的同一实例、仍可写，
+                // 旧 Task 失败时 PLC 必须有结果可读，这正是 V2.14.40 要修的根因场景。
+                // "写脏新协调器结果"的风险由 _startDrainMs 动态磨合期兜住（新协调器不会在旧 Task
+                // 完成前认领同一请求寄存器）。写失败（如 _plc 也已 Dispose）只记 Error 不阻断。
+                if (!plcResultWritten)
+                {
+                    try { _plc.WriteCameraResult(cfg, 2); }
+                    catch (Exception ex) { LogHelper.Error($"相机[{camName}] 点位{stationNo} finally 兜底写 NG 失败", ex); }
+                }
                 _chanResult = code; // 兜底：与判定即写阶段已写出的 PLC 结果一致（幂等）；失败路径靠这里落 NG
                 _taskDone = true;   // V2.13.7：拍照 Task 完全结束（判定+取图+归档+显示），放行通道复位
             }

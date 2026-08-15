@@ -131,18 +131,32 @@ ProductModelIndexAddress/ProductModelAddress/ProductModelLen/ModelIndexes`）+ �
    请求触发拍两遍（开多个 Task 连发 T2、同点位并发取图/删源混图）；令牌一次只放行一个回调、重入的直接
    跳过（PLC 请求握手期间保持、跳过的拍下次还读得到，用"丢一拍"换"绝不重入双触发"）。改轮询入口
    先读这段；删除该互斥前先想"有没有谁在依赖重入行为"。
-   **协调器重建换代守卫 + 启动磨合期（V2.14.36，与 V2.14.35 互补的另一条独立路径）**：切型号
+   **协调器重建换代守卫 + 启动磨合期（V2.14.36，与 V2.14.35 互补的另一条独立路径；V2.14.40 补三道修复）**：切型号
    `SwitchModel`/热更 `ApplyRuntimeConfig` 会 `Dispose` 旧协调器后瞬时新建 `Start`，旧协调器在途的
    `DoCameraShot` Task **没有取消机制停不掉**，而 PLC 请求在握手期间保持旧值——新协调器读完会对同一
    请求**二次触发相机**（连发 T2 + 两套并发取图/归档/删源互删对方源文件）。修复必须守住三层（改协调器
-   重建/相机触发链路先读这一段，禁止只守一层）：① 新建协调器启动磨合期 `_startUtc`/`StartDrainMs=1200`/
-   `_drained`：`PollNewRequest` 在构造后 1.2s 内一律不认领新请求，给旧 Task 写完 PLC 结果、PLC 读走并
+   重建/相机触发链路先读这一段，禁止只守一层）：① 新建协调器启动磨合期 `_startUtc`/`_startDrainMs`/
+   `_drained`：`PollNewRequest` 在构造后 `_startDrainMs` 内一律不认领新请求，给旧 Task 写完 PLC 结果、PLC 读走并
    复位请求留窗口（磨合期后请求仍保持=上一代真没处理完，正常受理不丢请求）；② `DoCameraShot` try 开头
    与发 T2/T1 前检查 `_disposed`：已换代即收尾、**绝不把触发指令发出去**（相机不重复拍）；③ **判定即写照
    落 PLC 保留、但已换代时取图/归档/删源/显示全部跳过**（判定即写保留=PLC 能读完结果复位→磨合期满后不再
    触发——这是防二次触发另一半关键；取图归档跳过=防旧 Task 与新 Task 并发取图、互删 FTP 源、图发到已重建
    窗口矩阵，宁可这半拍无存档图）。换代与重入是【两道互补防线】：V2.14.35 防单协调器内回调重入、
    V2.14.36 防协调器重建丢认领，缺一不可。
+   **V2.14.40 补三道修复（仍需同时遵守，缺一仍会双重触发）**：① **`DoCameraShot` 失败路径收口写 NG**——
+   旧实现多个失败 return 路径（SetOutputFormat/SwitchProgram/TriggerAndRead 失败、防线1/2 _disposed）都不写
+   PLC 结果，换代后旧 step1 不调，PLC 结果保持 0 → PLC 不复位请求 → 新协调器磨合期满读到请求仍保持 → 再发
+   T2 → 双重触发。修复：局部标志 `plcResultWritten`——成功路径"判定即写"置 true；`finally` 里检测
+   `!plcResultWritten` 补写一次 NG(2) 收口，任何失败/换代路径 PLC 都有结果可读、能复位请求（不检查
+   _disposed，换代后 _plc 是 MainForm 复用同一实例仍可写；"写脏新协调器结果"由动态磨合期兜住）。
+   ⚠️ 禁止回到"入口抢先写 2"方案：PLC 主站周期轮询结果、读到 ≠0 即复位请求，入口写 2 会让 OK 件在
+   T2 判定中就被 PLC 误读成 NG 复位（正常拍一件 NG 一件）。② **磨合期改为动态值 `_startDrainMs = max(1200, 各相机 ResponseTimeoutMs 最大值) + 1000`**——
+   原 1200ms < T2 超时 5s，磨合期满时旧 Task 还在等 T2 应答（T2 早已发出），新协调器受理即双重触发。动态值
+   确保磨合期 > 旧 Task 最长耗时；③ **`KeyenceIV4Camera.TriggerAndRead`/`SendTrigger` 加 `Func<bool> stillAlive`
+   回调**——V2.14.36 防线2 与"实际发 T2"间有竞态窗口（检查通过后、发 T2 前协调器被 Dispose，T2 仍发出）。
+   `stillAlive` 在 EnsureConnected 之后、发 T2 前最后一刻调用，返回 false 放弃触发、不写 T2 字节进 TCP 流。
+   `DoCameraShot` 调用处传 `() => !_disposed`，窗口收敛到最小。DevTestForm 不传（默认 null=旧行为）。仍非完全
+   原子（volatile 读 + 后续 Write），彻底根治需 CancellationToken（改动量大未实施，见 TriggerAndRead 注释）。
    改动 PLC 或相机通讯或握手流程必须同步 `docs/CommandCenter.md`。
 - **相机 FTP 双文件归档 + 点位程序号（V1.12.18；V1.12.24 起取图改"扫目录取最新"，V2.14.37 起"事件路径优先"）**：现场方案是"一台相机=一个 FTP 目录、所有点位图混放"——FTP 目录只当**中转暂存区**：基恩士每次拍照生成 jpeg+iv4p 两个文件（**文件名不保证恒为 `0000`（现场实测有 `0084` 等任意编号），上位机不写死文件名**），上位机等图 = `WaitForFtpImage`：**V2.13.6 起事件信号加速 + 轮询兜底双保险**：
    MainForm.BuildServices 为每台相机 `ImageStore.AddMonitor` 启动 FileSystemWatcher，相机一推图触发

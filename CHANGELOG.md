@@ -1,5 +1,62 @@
 # 版本改动记录
 
+## V2.14.40（2026-08-15）修复"上位机多次触发相机拍照"三个根因
+
+> 现场反馈切型号/热更后相机被同一 PLC 请求触发两次（旧 Task 一次 + 新协调器一次），
+>   配合 V2.14.38 触发计数跳变日志可直接定位。代码审查确认三条独立根因路径，全部修复。
+
+### 改动范围
+
+- **`Services/ProductionCoordinator.cs` `DoCameraShot` 失败路径收口写 NG**（根因1，V2.14.40 修订）：
+  旧实现 try 块多个失败 return 路径（SetOutputFormat/SwitchProgram/TriggerAndRead 失败、
+  防线1/2 检测到 _disposed）都不写 PLC 结果寄存器。若此时协调器换代（切型号/热更），旧 step1
+  不再被调用，PLC 结果寄存器保持 0 → PLC 按协议等结果≠0 才复位请求 → 永不复位 →
+  新协调器磨合期满后读到请求仍保持 → 再发一次 T2 → 相机被同一请求触发两次
+  （若旧 Task 的 TriggerAndRead 内部 T2 字节已写进 TCP 流，相机实际拍照两次）。
+  修复：不再"入口抢先写 2"（那会让 PLC 在 T2 判定期间读到中间态 NG、把 OK 件误判 NG——早期方案
+  已废弃），改为局部标志 `plcResultWritten`：成功路径"判定即写"置 true，`finally` 里检测
+  `!plcResultWritten` 补写一次 NG(2) 收口——任何失败/换代路径 PLC 都有结果可读、能复位请求，
+  "写脏新协调器结果"的风险由动态磨合期兜住。
+
+- **`Services/ProductionCoordinator.cs` 启动磨合期改为动态值 `_startDrainMs`**（根因3）：
+  原 `StartDrainMs=1200ms` 仅覆盖"旧 Task 正常判定即写（几百 ms）+ PLC 复位请求（~百 ms）"，
+  但旧 Task 失败路径耗时 = `ResponseTimeoutMs`（默认 5s），远超 1200ms。磨合期满时旧 Task
+  还在等 T2 应答（T2 早已发出、相机已拍照），新协调器受理 → 再发一次 T2 → 双重触发。
+   改为 `max(1200, 各相机 ResponseTimeoutMs 最大值) + 1000`，确保磨合期 > 旧 Task 最长可能耗时，
+   旧 Task 超时收尾后新协调器才受理。配合失败收口 NG，旧 Task 失败时 finally 已写 NG、PLC 已复位
+   请求，磨合期满读到"请求已复位"不重复触发。代价：切型号/热更后晚几秒受理请求（停机操作可接受）。
+
+- **`Services/KeyenceIV4Camera.cs` `TriggerAndRead` / `SendTrigger` 加 `stillAlive` 回调**（根因2）：
+  V2.14.36 防线2（DoCameraShot 发 T2 前检查 _disposed）与"实际发 T2"之间存在竞态窗口——
+  防线2 检查通过后、TriggerAndRead 内部发 T2 前，协调器可能被 Dispose，T2 仍会发出去。
+  新增 `Func<bool> stillAlive` 参数（默认 null=旧行为），在 EnsureConnected 之后、发 T2/T1 之前
+  最后一刻调用，返回 false 即放弃触发、不把 T2 字节写进 TCP 流。`DoCameraShot` 调用处传
+  `() => !_disposed`，把窗口收敛到最小（检查与发送之间只有几行本地代码，无 IO）。
+  DevTestForm 手动触发不传该参数（默认 null），旧行为不变。
+
+### 为什么这么改
+
+- 三条根因相互独立，任一单独存在都会导致双重触发，必须同时修复：
+  ① 失败路径漏写 PLC 结果 → PLC 不复位请求 → 新协调器重复触发；
+  ② 防线2 竞态窗口 → 旧 Task 的 T2 仍会发出 → 新协调器再发一次；
+  ③ 磨合期 1200ms < T2 超时 5s → 旧 Task 还在跑、新协调器已受理 → 两个 Task 并发触发。
+- 入口兜底 NG 不检查 _disposed 的思路保留，但实现从"入口抢先写 2"改为"失败路径 finally 收口写 NG"：
+  入口抢先写会在每次正常拍照先暴露 2 给 PLC（PLC 读到 ≠0 即复位请求，把 OK 件误判 NG），
+  而 finally 收口只在"未判定即写"的失败/换代路径补写 NG，正常成功路径 PLC 只读到最终判定值。
+- 修复1 修订说明：GLM 早期"入口即落兜底 NG(2)"方案经审查存在"PLC 在 T2 判定期间读到中间态 2、
+  把 OK 误判 NG"的回归风险（PLC 主站周期轮询、读到 ≠0 即复位请求），已改为失败路径收口写 NG——
+  既保留"失败/换代 PLC 有结果可复位"的收益，又不污染正常成功路径。
+- 仍非完全原子（volatile 读 + 后续 Write），但窗口已小到可忽略；彻底根治需 CancellationToken
+  （改动量大，当前未实施，见 TriggerAndRead 注释的展望）。
+
+### 优化点
+
+- 配合 V2.14.38 触发计数跳变检测，现场可直接从日志定位双重触发的强度与时机。
+- 动态磨合期自适应相机配置：`ResponseTimeoutMs` 调大时磨合期自动跟涨，无需手改常量。
+- `stillAlive` 回调设计向后兼容（默认 null），DevTestForm 等不涉及协调器代换的调用点零改动。
+
+---
+
 ## V2.14.39（2026-08-15）FTP 取图"同主名成对"修复：杜绝 jpeg 与 iv4p 跨拍错配归档
 
 > 现场日志暴露的错配：同一相机三拍取图，归档的 jpeg 与 iv4p **总数不同名**——

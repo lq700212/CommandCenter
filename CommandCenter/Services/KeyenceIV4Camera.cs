@@ -113,13 +113,30 @@ namespace CommandCenter.Services
         /// 触发＋读取判定结果（T2）。
         /// 返回 TriggerReadOutcome：Succeeded=true 表示通讯成功并拿到判定；
         /// IsOk=true 表示判 OK（全部判定位为合格位）。
+        /// 【V2.14.40 收敛"防线2 → TriggerAndRead 内部"竞态窗口】
+        /// 调用方可传 stillAlive 回调，本方法在 EnsureConnected 之后、发 T2 之前的最后一刻调用它：
+        /// 返回 false 表示调用方（协调器）已被 Dispose/换代，本方法立即放弃触发返回 Fail，
+        /// 不再把 T2 字节写进 TCP 流。这样把 V2.14.36 防线2（DoCameraShot 发 T2 前检查 _disposed）
+        /// 与"实际发 T2"之间的竞态窗口收敛到最小（检查与发送之间只有几行本地代码，无 IO）。
+        /// 仍非原子（volatile 读 + 后续 Write），但窗口已小到可忽略；彻底根治需 CancellationToken
+        /// （见 DoCameraShot 注释的"修复4"展望，当前未实施）。
         /// </summary>
-        public TriggerReadOutcome TriggerAndRead()
+        /// <param name="stillAlive">发 T2 前最后一刻调用的"协调器是否仍存活"回调；null=不检查（旧行为）</param>
+        public TriggerReadOutcome TriggerAndRead(Func<bool> stillAlive = null)
         {
             try
             {
                 if (!EnsureConnected())
                     return TriggerReadOutcome.Fail("相机连接失败");
+
+                // 【V2.14.40】发 T2 前最后一刻检查协调器是否已换代：EnsureConnected 可能耗时（重连），
+                // 期间协调器可能被 Dispose；若已换代，绝不让 T2 字节进 TCP 流，否则旧 Task 的 T2 会
+                // 撞上新协调器对同一请求的 T2（相机被同一请求触发两次）。
+                if (stillAlive != null && !stillAlive())
+                {
+                    LogHelper.Info($"相机[{_cfg.IpAddress}] TriggerAndRead 发 T2 前检测到协调器已换代，放弃触发（收敛竞态窗口）");
+                    return TriggerReadOutcome.Fail("协调器已换代，放弃触发");
+                }
 
                 // 期望应答前缀：T2/RT 指令的应答固定以 "RT," 开头（判定帧）；"ER" 是本指令错误回执。
                 string raw = SendCommandAndReadLine(_cfg.TriggerAndReadCommand, _cfg.ResponseTimeoutMs,
@@ -282,12 +299,21 @@ namespace CommandCenter.Services
         /// 相机对 T1 的回帧就是回显 "T1"（以 CR 结尾的确认帧），收到任意非空响应即视为触发成功；
         /// 回显内容无需解析（不像 T2 要读判定）。用于 ReadResultFromCamera=false 的退化模式
         /// （判定不详，FTP 图到即记 OK）。
+        /// 【V2.14.40】与 TriggerAndRead 同步加 stillAlive 回调，发 T1 前最后一刻检查协调器是否已换代，
+        /// 收敛退化模式下的竞态窗口（防旧 Task 的 T1 撞上新协调器的 T1，相机被同一请求触发两次）。
         /// </summary>
-        public bool SendTrigger()
+        /// <param name="stillAlive">发 T1 前最后一刻调用的"协调器是否仍存活"回调；null=不检查（旧行为）</param>
+        public bool SendTrigger(Func<bool> stillAlive = null)
         {
             try
             {
                 if (!EnsureConnected()) return false;
+                // 【V2.14.40】发 T1 前最后一刻检查协调器是否已换代（同 TriggerAndRead）
+                if (stillAlive != null && !stillAlive())
+                {
+                    LogHelper.Info($"相机[{_cfg.IpAddress}] SendTrigger 发 T1 前检测到协调器已换代，放弃触发");
+                    return false;
+                }
                 // 期望应答前缀：T1 触发指令的回显就是指令名本身（如 "T1"），"ER" 为错误回执。
                 string raw = SendCommandAndReadLine(_cfg.TriggerCommand, _cfg.TimeoutMs,
                     new[] { _cfg.TriggerCommand.Trim(), "ER" });
