@@ -1,5 +1,66 @@
 # 版本改动记录
 
+## V2.14.30（2026-08-15）扫码枪读码失败文本过滤 + 读码失败快速上报扫码 NG
+
+> 需求（现场）：基恩士 SR 扫码枪在**读码失败/读取超时**时，会按扫码枪自身配置把错误字符串
+> （现场实测 `ERROR`、`ER,READ,00` 等）当成一条普通"条码"推给上位机。此前上位机照单全收把
+> `ERROR` 当真 SN：标题栏"序列号:"显示 ERROR、`LatestSerialNumber=ERROR`、上报扫码 OK(1) 进入
+> 后续相机拍照、存图目录出现 `{SN}=ERROR` 的脏目录——一个坏码污染整个检测件。
+> 要求：① 上电真给 ERROR 时**不当序列号用**（不显示、不进流程、不存 ERROR 目录）；
+> ② 扫码枪明确报告读码失败后应**立即上报扫码 NG**，不要干等 30s 扫描超时（现场节拍拖死）。
+
+### 改动范围
+
+- **`Models/AppConfig.cs`（`ScanConfig`）**：
+  - 新增配置 `IgnoreScanTexts`（默认 `ERROR,ERR,NG,NOREAD`）：读码失败/状态文本过滤名单，
+    逗号/中文逗号/分号/顿号分隔、忽略大小写；以 `*` 结尾的项 = 前缀匹配（如 `ER,*` 命中
+    `ER,READ,00`），**精确匹配不误伤同前缀真码**（`ERROR123` 是真码照收）。留空 = 不过滤。
+  - 新增判断方法 `IsIgnoredScanText(string)`：空白文本同样判为无效（双保险）。
+- **`Services/ScannerTcpService.cs`（收码层）**：ReadLoop 切行后先过 `IsIgnoredScanText`——
+  命中即**不触发 `SerialNumberScanned`**（序列号框/协调器都收不到、不存 `{SN}=ERROR` 脏目录）、
+  记 WARN 日志，改触发新增的 **`ScanFailed` 事件**（扫码枪工作线程）；不命中照旧当真码推。
+- **`Services/ScannerService.cs`（串口实现）**：DataReceived 切行后同一套过滤 + `ScanFailed`（串口枪
+  同样有 ERROR/NG 状态文本，两实现行为一致）。
+- **`Services/ProductionCoordinator.cs`**：
+  - `AttachScanners` 成对 hook/unhook `ScanFailed`（复用既有 `_scanHooked` 开关，防热更/关闭悬挂）；
+  - 新增 `OnScannerFail`：置"本件读码失败"标志 `_serialErrorSeen` + WARN 日志；
+  - `BeginScanChannel` 新一轮开始清 `_serialErrorSeen`（防上一轮残留误判）；
+  - `StepScanChannel` 等 SN 分支**先判定真码、再判失败信号**：
+    `_serialReceived`（真码）优先 → OK；`else if (_serialErrorSeen)` → **立即上报扫码 NG(2)**
+    并清标志（不等 `ScanWaitMs` 30s 超时）；最后才是超时 NG 兜底。三个分支都先写型号再写结果，
+    与既有流程一致。
+- **`Views/SettingsForm.cs`**：扫码枪 **TCP 表 + 串口表**均新增"忽略文本"列（`IgnoreScanTexts`），
+  建列/加载行 `LoadScannerRows`/收集行 `CollectScannersFromGrid` 三处对应补齐；漏填的单元格
+  收集时回填默认名单。
+
+### 为什么这么改
+
+- **错误文本当条码是基恩士 SR 无协议模式的固有行为**（无协议=透传任意文本，读码失败也照推），
+  无法在扫描头侧关闭，只能上位机收码层识别拦截——过滤名单放在 `.Trim()` 之后做**精确匹配**
+  是最安全的：不误伤真实以 ERROR 开头的条码（若真码恰巧叫 ERRORxxx，默认名单不拦它）。
+- **不直接删掉错误行而是触发 `ScanFailed`**：单纯丢弃会导致"没扫到码 → 超时 NG"（等 30s）；
+  既然扫码枪已明确报告失败，把"失败已知"传给协调器就能**一拍立即 NG**，PLC 那一拍不用空等，
+  生产节拍不受坏码影响（真码 `_serialReceived` 优先级更高，避免"先报过失败、后又补扫到真码"
+  的场景被误判 NG）。
+
+### 验证
+
+- MSBuild Debug/AnyCPU 构建通过（两次，含设置窗体加列后）。
+- 防错推演：TCP 扫码枪推 `ERROR` → 日志"读码失败/状态文本「ERROR」已忽略"、序列号框不更新、
+  等 SN 阶段立即上报扫码 NG(2)、无 `{SN}=ERROR` 目录；推 `ERROR123`（真码）→ 照常收；名单配
+  `ER,*` → `ER,READ,00` 命中拦截；`IgnoreScanTexts` 留空 → 恢复旧行为不过滤；
+  设置窗体留空该列保存 → 自动回填默认名单。
+
+### 文档同步
+
+- `docs/CommandCenter.md`：第三部分（3.1 配置示例 / 3.2 过滤说明 / 3.4 校准清单新增校验项）、
+  第一部分（3.2 序列号新增"读码失败自动识别"）、第八部分"换场地怎么改"+ 版本记录（V2.14.30）；
+- `README.md`：可配置项"扫码枪"两表各补 `ignoreScanTexts` 行；
+- `AGENTS.md`：扫码枪通讯约定追加"读码失败文本过滤"红线段；
+- `CHANGELOG.md`：本版本（V2.14.30）。
+
+---
+
 ## V2.14.29（2026-08-15）产品型号配置弹窗：废除自动"* 新行"（防删行异常）+ Delete 键显式接管
 
 > 需求（现场报错）：ModelIndexEditForm 报"程序发生未处理异常:无法删除未提交的新行"——

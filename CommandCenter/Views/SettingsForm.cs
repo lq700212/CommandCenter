@@ -427,6 +427,8 @@ namespace CommandCenter.Views
                 // 触发指令（V1.12.0）：基恩士 SR 连接后需发 LON 才读码，留空则不发
                 //（对应扫码枪设成"上电自动读码"模式）
                 gridScannersTcp.Columns.Add("TriggerCommand", "触发指令");
+                // 读码失败文本过滤名单（V2.14.30）：逗号分隔、忽略大小写，命中=丢弃不当条码并快速报扫码 NG(2)
+                gridScannersTcp.Columns.Add("IgnoreScanTexts", "忽略文本");
             }
 
             // 串口表：串口参数列（对齐 ScanConfig 的 PortName/BaudRate/StopBits/Parity）
@@ -442,6 +444,8 @@ namespace CommandCenter.Views
                 gridScannersSerial.Columns.Add("BaudRate", "波特率");
                 gridScannersSerial.Columns.Add("StopBits", "停止位");
                 gridScannersSerial.Columns.Add("Parity", "校验位");
+                // 读码失败文本过滤名单（V2.14.30）：与 TCP 表同含义，串口枪一样会有 ERROR/NG 状态文本
+                gridScannersSerial.Columns.Add("IgnoreScanTexts", "忽略文本");
             }
         }
 
@@ -460,12 +464,12 @@ namespace CommandCenter.Views
                 // 空安全比较：只有显式 "Serial"（大小写不敏感）才进串口表，其余（含 null/空）进 TCP 表
                 if (s.Mode?.Trim().Equals("Serial", StringComparison.OrdinalIgnoreCase) == true)
                 {
-                    gridScannersSerial.Rows.Add(s.Enabled, s.PortName, s.BaudRate, s.StopBits, s.Parity);
+                    gridScannersSerial.Rows.Add(s.Enabled, s.PortName, s.BaudRate, s.StopBits, s.Parity, s.IgnoreScanTexts);
                     hasSerial = true;
                 }
                 else
                 {
-                    gridScannersTcp.Rows.Add(s.Enabled, s.IpAddress, s.Port, s.TriggerCommand);
+                    gridScannersTcp.Rows.Add(s.Enabled, s.IpAddress, s.Port, s.TriggerCommand, s.IgnoreScanTexts);
                     hasTcp = true;
                 }
             }
@@ -735,6 +739,10 @@ namespace CommandCenter.Views
                 if (!int.TryParse(portTxt, out port)) port = 9004;
                 // V1.12.0 触发指令：基恩士 SR 的 LON，留空表示连上后不发指令
                 string trigger = r.Cells["TriggerCommand"].Value == null ? "" : r.Cells["TriggerCommand"].Value.ToString().Trim();
+                // V2.14.30 读码失败文本过滤名单：逗号分隔，漏填按默认值（真实错误文本不过滤也不会重复出现）
+                string ignoreTexts = r.Cells["IgnoreScanTexts"].Value == null
+                    ? "ERROR,ERR,NG,NOREAD"
+                    : r.Cells["IgnoreScanTexts"].Value.ToString().Trim();
                 // 全空的模板行（IP 都没填）忽略，避免保存一堆垃圾行
                 if (string.IsNullOrWhiteSpace(ip)) continue;
                 scanners.Add(new ScanConfig
@@ -743,7 +751,8 @@ namespace CommandCenter.Views
                     Mode = "Tcp",
                     IpAddress = string.IsNullOrWhiteSpace(ip) ? "19.87.6.100" : ip,
                     Port = Math.Max(1, port),
-                    TriggerCommand = trigger
+                    TriggerCommand = trigger,
+                    IgnoreScanTexts = ignoreTexts
                 });
             }
 
@@ -758,6 +767,9 @@ namespace CommandCenter.Views
                 if (!int.TryParse(baudTxt, out baud)) baud = 115200;
                 string stopBits = r.Cells["StopBits"].Value == null ? "" : r.Cells["StopBits"].Value.ToString().Trim();
                 string parity = r.Cells["Parity"].Value == null ? "" : r.Cells["Parity"].Value.ToString().Trim();
+                string ignoreTexts = r.Cells["IgnoreScanTexts"].Value == null
+                    ? "ERROR,ERR,NG,NOREAD"
+                    : r.Cells["IgnoreScanTexts"].Value.ToString().Trim();
                 // 全空的模板行（串口名都没填）忽略
                 if (string.IsNullOrWhiteSpace(portName)) continue;
                 scanners.Add(new ScanConfig
@@ -767,7 +779,8 @@ namespace CommandCenter.Views
                     PortName = portName,
                     BaudRate = Math.Max(1, baud),
                     StopBits = string.IsNullOrWhiteSpace(stopBits) ? "1" : stopBits,
-                    Parity = string.IsNullOrWhiteSpace(parity) ? "None" : parity
+                    Parity = string.IsNullOrWhiteSpace(parity) ? "None" : parity,
+                    IgnoreScanTexts = ignoreTexts
                 });
             }
 

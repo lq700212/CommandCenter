@@ -56,6 +56,15 @@ namespace CommandCenter.Services
         public event EventHandler<string> SerialNumberScanned;
 
         /// <summary>
+        /// 扫码枪"读码失败/状态错误"通知（V2.14.30，实现 IScanner）：收码层命中
+        /// ScanConfig.IgnoreScanTexts 名单时触发（见 ReadLoop），协调器据此立即上报扫码 NG(2)。
+        /// 【为什么要这个事件】光过滤还不够：过滤后协调器若不知道"扫码枪报告失败"，只会干等
+        /// ScanWaitMs(30s) 超时才报扫码 NG，PLC 那一拍空等半分钟。有了 ScanFailed，读码失败一拍
+        /// 就反馈，现场节拍不拖死。
+        /// </summary>
+        public event EventHandler<string> ScanFailed;
+
+        /// <summary>
         /// 连接状态变化事件（V1.12.5）：连接成功触发 true、断线触发 false（边沿检测，状态没变不发）。
         /// 工作线程触发，UI 订阅方需自行 Invoke。功能测试窗体的扫码枪状态灯靠它实时刷新——
         /// 此前 IScanner 没有此事件，状态灯只初始刷新一次永远停"断连"，用户会误以为连不上，
@@ -247,10 +256,22 @@ namespace CommandCenter.Services
                             string code = _line.ToString().Trim();
                             _line.Clear();
                             if (code.Length > 0)
+                        {
+                            // 【V2.14.30 读码失败文本过滤】基恩士扫码枪读码失败时可能把错误字符串
+                            // （如 ERROR / ER,READ,00）当条码推上来；命中 IgnoreScanTexts 名单的行
+                            // 不是真码——不抛 SerialNumberScanned（避免污染序列号框/存图目录），
+                            // 改抛 ScanFailed 让协调器立即上报扫码 NG(2)。精确匹配不误伤同前缀真码。
+                            if (_cfg.IsIgnoredScanText(code))
+                            {
+                                LogHelper.Warn($"扫码枪(TCP)读码失败/状态文本「{code}」已忽略（命中 IgnoreScanTexts），上报扫码失败信号");
+                                ScanFailed?.Invoke(this, code);
+                            }
+                            else
                             {
                                 LogHelper.Info("扫码枪收到条码：" + code);
                                 SerialNumberScanned?.Invoke(this, code);
                             }
+                        }
                         }
                     }
                     else

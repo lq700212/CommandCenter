@@ -94,6 +94,12 @@ namespace CommandCenter.Services
         //   否→上一件残留（重复扫/产品未离开/旧手动输入），丢弃重新等新码，杜绝串号/误 OK。
         private DateTime _serialArrivedUtc;     // 最近一次收到码/手动输入的时刻（码时间窗判断用；
                                                 //   扫码枪工作线程写、轮询线程读，毫秒级偏差可接受）
+        // V2.14.30：扫码枪"读码失败"标志（协调器感知 ScanFailed 事件）。
+        // 基恩士扫码枪读码失败会把错误文本（如 ERROR）当条码推上来，收码层已按 IgnoreScanTexts
+        // 过滤（不当 SN），这里再记一个"本件扫码失败"信号，让 StepScanChannel 在等 SN 阶段
+        // 见到它就**立即上报扫码 NG(2)**——否则过滤后协调器只干等 ScanWaitMs 超时才 NG，
+        // PLC 那一拍会空等 30s（现场节拍拖死）。真码（_serialReceived）优先于失败信号。
+        private volatile bool _serialErrorSeen;
         private bool _scanHooked;               // 是否已订阅扫码枪事件（防重复订阅）
         private DateTime _scanArriveUtc;        // 扫码请求受理时刻（判断 SN 等待超时）
 
@@ -232,13 +238,17 @@ namespace CommandCenter.Services
                 _scanners.AddRange(scanners);
         }
 
-        /// <summary>订阅每台扫码枪的 SerialNumberScanned：只记"SN 已到"标志（最新值由 UI 订阅方维护）。</summary>
+        /// <summary>订阅每台扫码枪的 SerialNumberScanned：只记"SN 已到"标志（最新值由 UI 订阅方维护）。
+        /// 【V2.14.30】同时订阅 ScanFailed（扫码枪读码失败信号）→ 置 _serialErrorSeen，扫码通道快速 NG。</summary>
         private void HookScannerEvents()
         {
             if (_scanHooked) return;
             _scanHooked = true;
             foreach (var sc in _scanners)
+            {
                 sc.SerialNumberScanned += OnScannerCode;
+                sc.ScanFailed += OnScannerFail;
+            }
         }
 
         /// <summary>退订扫码枪事件（Dispose 或换列表时调用），防热更/关闭时事件叠加或悬挂。</summary>
@@ -247,7 +257,10 @@ namespace CommandCenter.Services
             if (!_scanHooked) return;
             _scanHooked = false;
             foreach (var sc in _scanners)
+            {
                 sc.SerialNumberScanned -= OnScannerCode;
+                sc.ScanFailed -= OnScannerFail;
+            }
         }
 
         /// <summary>扫码枪读码事件（工作线程）：置"本次 SN 已到"标志，扫码通道据此推进。
@@ -257,6 +270,22 @@ namespace CommandCenter.Services
         {
             _serialReceived = true;
             _serialArrivedUtc = DateTime.UtcNow;
+        }
+
+        /// <summary>
+        /// 扫码枪"读码失败"信号（V2.14.30，ScanFailed 事件，扫码枪工作线程触发）：
+        /// 收码层已按 IgnoreScanTexts 把错误文本（ERROR 等）过滤掉不当 SN，这里仅置"本件扫码失败"
+        /// 标志 _serialErrorSeen——StepScanChannel 等 SN 阶段见到它即**立即上报扫码 NG(2)**，
+        /// 不必干等 ScanWaitMs 超时。
+        /// 【为什么分两个信号】真码 _serialReceived=false 意味着"没扫到码→超时 NG"；
+        /// 而扫码枪明确报告了"读码失败"（推了 ERROR 文本），我们其实**已知**失败，直接 NG 更快。
+        /// 【不清标志】BeginScanChannel 新一轮开始才清；StepScanChannel 写 NG 消费后也清，
+        /// 防止残留失败信号误判下一轮。
+        /// </summary>
+        private void OnScannerFail(object sender, string text)
+        {
+            _serialErrorSeen = true;
+            LogHelper.Warn("扫码枪报告读码失败（错误文本已过滤不当 SN）：" + text);
         }
 
         /// <summary>暂停流程（界面手动暂停时调用，停在空闲）。</summary>
@@ -350,6 +379,7 @@ namespace CommandCenter.Services
             _activeCh = ChScan;
             _chStep = 0;                    // 步骤0：等 SN
             _scanArriveUtc = DateTime.UtcNow;   // 超时基准：本轮扫码请求到达时刻（30s 判 NG 用）
+            _serialErrorSeen = false;       // V2.14.30：新一轮开始清"读码失败"标志，防上一轮残留误判
 
             // V2.14.11：新一轮开始，通知 UI 清空上一轮各窗口图片（新的一轮第一个动作就是扫码，
             // 上一轮的图片已过时，提前清掉避免与新结果混淆）。事件在轮询线程触发，
@@ -402,6 +432,19 @@ namespace CommandCenter.Services
                     _chStep = 1;
                     SetState("扫码完成，等待 PLC 复位请求");
                     LogHelper.Info($"扫码 OK：SN={LatestSerialNumber}，已上报型号[{_productModel}]与结果(1)");
+                }
+                else if (_serialErrorSeen)
+                {
+                    // 【V2.14.30 扫码枪读码失败 → 立即 NG】扫码枪已明确报告"读码失败"（推了 ERROR
+                    // 等错误文本，收码层过滤不当 SN、置了 _serialErrorSeen）——不等 ScanWaitMs 超时
+                    // 立刻上报扫码 NG(2)，让 PLC 那拍不必空等 30s。清标志防残留误判下一轮。
+                    _plc.WriteProductModel(_productModel);
+                    _plc.WriteScanResult(2);      // 扫码 NG（扫码枪读码失败）
+                    _serialErrorSeen = false;     // 已消费，清理失败标志
+                    _chStep = 1;
+                    LogHelper.Warn("扫码枪读码失败，上报扫码 NG(2)（不等超时）");
+                    ErrorRaised?.Invoke("扫码枪读码失败：未取得序列号，已上报扫码 NG");
+                    SetState("扫码 NG（读码失败），等待 PLC 复位请求");
                 }
                 else if ((DateTime.UtcNow - _scanArriveUtc).TotalMilliseconds >= ScanWaitMs)
                 {

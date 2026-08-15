@@ -316,12 +316,14 @@ E:\Images\                        ← saveRootDir（存图根目录）
 | `enabled` | true | 是否启用 |
 | `ipAddress` / `port` | 19.87.6.100 / 9004 | TCP 地址 |
 | `triggerCommand` | LON | 连上/重连后自动发一条该指令才开始读码，发时自动补 `\r\n`；留空=不发送（枪设成上电自动读码） |
+| `ignoreScanTexts` | ERROR,ERR,NG,NOREAD | **读码失败/状态文本过滤名单（V2.14.30）**：扫码枪读码失败时会按自身配置把错误字符串（如 `ERROR`、`ER,READ,00`）当条码推送，命中名单的行不当序列号（不显示、不存图），并立刻上报扫码 NG(2)（不等 30s 超时）。逗号分隔、忽略大小写；精确匹配不误伤同前缀真码，以 `*` 结尾的项按前缀匹配。留空=不过滤 |
 
 | 字段（串口行） | 默认 | 说明 |
 | --- | --- | --- |
 | `portName` / `baudRate` | COM3 / 115200 | 串口号 / 波特率 |
 | `stopBits` | "1" | 停止位，存字符串 `"1"`/`"15"`/`"2"` |
 | `parity` | None | 校验位，存枚举名 `None/Odd/Even/Mark/Space` |
+| `ignoreScanTexts` | ERROR,ERR,NG,NOREAD | 同 TCP 行的读码失败文本过滤 |
 
 `mode` 缺省一律按 `"Tcp"`（现场就是 TCP 枪）；`scanners` 段为空时启动自动补一台启用 TCP 枪
 （19.87.6.100:9004/LON）——**排查"网络通但程序不连枪"先看 `scanners` 是否为空**。

@@ -1045,6 +1045,54 @@ namespace CommandCenter.Models
         /// 留空则不发送（对应扫码枪设为"上电自动连续读码"模式的场景）。
         /// </summary>
         public string TriggerCommand { get; set; } = "LON";
+
+        /// <summary>
+        /// 扫码枪"读码失败/状态错误"文本过滤名单（V2.14.30，逗号分隔，大小写不敏感）：
+        /// 基恩士 SR 无协议模式在读取超时/读取失败时，会按扫码枪自身配置把错误字符串
+        /// （现场常见 "ERROR"、"ER,READ,00"、"NG" 等）当成一条普通"条码"推给上位机。
+        /// 若不拦，上位机就会把这个 ERROR 当真 SN：标题栏显示 ERROR、LatestSerialNumber=ERROR、
+        /// 还上报扫码 OK(1) 进入后续相机拍照、存图目录出现 `{SN}=ERROR` 的脏目录——一个坏码
+        /// 污染整个检测件。
+        ///
+        /// 【命中规则】每条扫码文本收码后 trim，命中任一名单项即丢弃（不触发 SerialNumberScanned、
+        /// 不进协调器 LatestSerialNumber），并触发 IScanner.ScanFailed 事件让协调器**立即上报
+        /// 扫码 NG(2)**（不必等 ScanWaitMs 超时，PLC 那一拍不用空等）：
+        ///   - 默认模式：忽略大小写**精确相等**（如名单项 "ERROR"，只匹配文本 "ERROR"，不会误伤
+        ///     以 ERROR 开头的真实条码如 "ERROR123"）；
+        ///   - 以 "*" 结尾的项 = **前缀匹配**（如 "ER,*" 可命中 "ER,READ,00"），用于扫码枪输出
+        ///     带编号/可变后缀的状态文本这种难以穷举的情况。
+        /// 留空 = 不过滤（保持旧行为）。手动输入（人工补录）不走扫码枪，不受本名单影响。
+        /// </summary>
+        public string IgnoreScanTexts { get; set; } = "ERROR,ERR,NG,NOREAD";
+
+        /// <summary>
+        /// 判断一条扫码文本是否命中"错误文本过滤名单"（V2.14.30）。
+        /// 命中 = 这是扫码枪读码失败/状态输出、不是真实条码：收码层应丢弃该条并触发
+        /// <see cref="ScanFailed"/>。空白文本同样视为无效（前面的行切分只抛非空行，双保险）。
+        /// </summary>
+        public bool IsIgnoredScanText(string code)
+        {
+            if (string.IsNullOrWhiteSpace(code)) return true;   // 空白不可能是有效条码
+            string c = code.Trim();
+            var tags = (IgnoreScanTexts ?? "").Split(new[] { ',', '，', ';', '；', '、' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var raw in tags)
+            {
+                string tag = raw.Trim();
+                if (tag.Length == 0) continue;
+                if (tag.EndsWith("*"))
+                {
+                    // 前缀匹配项（如 "ER,*" 命中 "ER,READ,00"）：取 * 前的部分做开头匹配。
+                    string prefix = tag.Substring(0, tag.Length - 1).Trim();
+                    if (prefix.Length > 0 && c.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+                else if (string.Equals(c, tag, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;   // 精确匹配（忽略大小写），不误伤同前缀的真实条码
+                }
+            }
+            return false;
+        }
     }
 
     /// <summary>

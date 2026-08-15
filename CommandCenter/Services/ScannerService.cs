@@ -2,6 +2,7 @@ using System;
 using System.IO.Ports;
 using System.Text;
 using CommandCenter.Models;
+using CommandCenter.Utils;
 
 namespace CommandCenter.Services
 {
@@ -14,6 +15,14 @@ namespace CommandCenter.Services
     {
         /// <summary>扫到一条完整条码的事件（参数为条码文本，在工作线程触发，UI 需 Invoke）</summary>
         event EventHandler<string> SerialNumberScanned;
+
+        /// <summary>
+        /// 扫码枪"读码失败/状态错误"通知（V2.14.30）：收码层遇到"错误文本过滤名单"
+        /// （ScanConfig.IgnoreScanTexts，如基恩士 SR 读码失败的 ERROR 输出）命中时触发，
+        /// 参数=命中的原始文本。协调器订阅后**立即上报扫码 NG(2)**（不必等 ScanWaitMs 超时），
+        /// 让 PLC 那拍不用空等。工作线程触发，UI 不需要此事件。
+        /// </summary>
+        event EventHandler<string> ScanFailed;
 
         /// <summary>
         /// 连接状态变化事件（V1.12.5）：true=已连接/已打开，false=断开/已关闭。
@@ -57,6 +66,12 @@ namespace CommandCenter.Services
 
         /// <summary>扫到一条完整条码的事件（参数为条码文本，在工作线程触发，UI 需 Invoke）</summary>
         public event EventHandler<string> SerialNumberScanned;
+
+        /// <summary>
+        /// 扫码枪"读码失败/状态错误"通知（V2.14.30，实现 IScanner）：收码层命中
+        /// ScanConfig.IgnoreScanTexts 名单时触发（见 OnDataReceived），协调器据此立即报扫码 NG(2)。
+        /// </summary>
+        public event EventHandler<string> ScanFailed;
 
         /// <summary>连接（串口打开）状态变化事件：Open 成功 true / Dispose 关闭 false（边沿触发）。</summary>
         public event EventHandler<bool> ConnectionChanged;
@@ -117,7 +132,21 @@ namespace CommandCenter.Services
                             string line = _buffer.ToString().Trim();
                             _buffer.Clear();
                             if (line.Length > 0)
-                                SerialNumberScanned?.Invoke(this, line);
+                            {
+                                // 【V2.14.30 读码失败文本过滤】基恩士扫码枪读码失败时可能把错误字符串
+                                // （如 ERROR）当条码推出；命中 IgnoreScanTexts 名单的行不是真码——
+                                // 不抛 SerialNumberScanned（避免污染序列号/存图目录），改抛 ScanFailed
+                                // 让协调器立即上报扫码 NG(2)。精确匹配不误伤同前缀真实条码。
+                                if (_cfg.IsIgnoredScanText(line))
+                                {
+                                    LogHelper.Warn($"扫码枪(串口)读码失败/状态文本「{line}」已忽略（命中 IgnoreScanTexts），上报扫码失败信号");
+                                    ScanFailed?.Invoke(this, line);
+                                }
+                                else
+                                {
+                                    SerialNumberScanned?.Invoke(this, line);
+                                }
+                            }
                         }
                     }
                     else
