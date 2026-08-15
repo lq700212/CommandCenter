@@ -68,6 +68,24 @@ namespace CommandCenter.Services
         private volatile bool _running;   // 总开关
         private volatile bool _disposed;  // 已释放标记
         /// <summary>
+        /// 本协调器实例的创建时刻（UTC，V2.14.36）。用于"启动磨合期"：
+        /// 切型号/热更重建协调器时，上一代协调器在途的相机拍照 Task 可能还没收尾
+        /// （T2 正在读判定 / 刚判定即写），而 PLC 的请求寄存器还是旧值。新协调器若
+        /// 立即受理，会对同一个点位再触发一次相机（连续触发根因之一）。磨合期内在
+        /// 不认领新请求，给旧 Task 留出"写完 PLC 结果 → PLC 读走并复位请求"的时间窗。
+        /// 仅轮询线程读写。
+        /// </summary>
+        private readonly DateTime _startUtc;
+        /// <summary>启动磨合期时长（毫秒，V2.14.36）：新协调器建好后 StartDrainMs 内不认领
+        /// PLC 请求，防止重建瞬间对上一代在途请求二次触发相机。见 _startUtc 注释。
+        /// 取值依据：旧 Task 正常判定即写（几百 ms）+ PLC 主站轮询读结果并复位请求
+        /// （~百 ms 级）+ 余量。现场切型号是停机操作，晚 1.2s 受理请求可接受；
+        /// 若 PLC 请求在磨合期后仍保持，说明确未处理完毕，再正常受理（不丢请求）。</summary>
+        private const int StartDrainMs = 1200;
+        /// <summary>磨合期结束标记（V2.14.36）：磨合期内 PollNewRequest 直接返回、
+        /// 只记一次日志（防 100ms 一次把日志刷爆），过点后置 true 永久放行。</summary>
+        private volatile bool _drained;
+        /// <summary>
         /// 轮询回调重入互斥（V2.14.35，防"同一 PLC 请求被重复触发相机"）：
         /// 1=上一个回调仍在执行。System.Threading.Timer 不会等回调结束再起下一次——
         /// 一旦某次回调执行超过轮询周期 PollMs(100ms)（PLC 从站断线重建 EnsureConnected
@@ -224,6 +242,8 @@ namespace CommandCenter.Services
             // 请求轮询：后台线程 200ms 一问 PLC。
             // ★ 必须用 System.Threading.Timer：此前用 Forms.Timer 在 UI 线程同步读 PLC，
             //   不可达 IP 时把界面整个卡住（点"系统设置"半天没反应就是这原因）。
+            // V2.14.36：记录本实例创建时刻，供"启动磨合期"判定（见 _startUtc/_drained）。
+            _startUtc = DateTime.UtcNow;
             _positionTimer = new System.Threading.Timer(
                 PositionTimer_Tick, null,
                 System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
@@ -377,6 +397,22 @@ namespace CommandCenter.Services
         /// <summary>空闲轮询：先看扫码请求，再按相机列表顺序轮询每台相机自己的通道请求（V2.12.6 每相机一路）。</summary>
         private void PollNewRequest()
         {
+            // 【V2.14.36 启动磨合期：防"协调器重建瞬间同一 PLC 请求被二次触发相机"】
+            // 切型号（SwitchModel）/配置热更（ApplyRuntimeConfig）都会 Dispose 旧协调器、瞬时
+            // 新建协调器并 Start。旧协调器在途的相机拍照 Task 没有取消机制可直接拿走，Dispose
+            // 只是把新任务挡在门外；此刻 PLC 请求寄存器往往还是旧值（上一代在处理、还没复位）。
+            // 若新协调器启动后立即受理，会对同一个点位再开 Task 再发 T2 → 相机连续触发 + 两个
+            // Task 并发取图/归档/删源混图。磨合期内 PollNewRequest 一律返回不认领请求，等旧 Task
+            // 写完 PLC 结果（判定即写照常、见 DoCameraShot）、PLC 主站读走并复位请求后再受理；
+            // 若磨合期后请求仍保持，说明前一代确实没处理完，此刻受理是安全且不丢请求的。
+            if (!_drained)
+            {
+                if ((DateTime.UtcNow - _startUtc).TotalMilliseconds < StartDrainMs)
+                    return;                                            // 磨合期内：只放行已有通道推进，不认领新请求
+                _drained = true;
+                LogHelper.Info($"协调器启动磨合期({StartDrainMs}ms)结束，开始受理 PLC 请求");
+            }
+
             bool ok;
             // 通道① 扫码请求（40001）
             ok = _plc.ReadScanRequest(out bool scanReq);
@@ -684,6 +720,15 @@ namespace CommandCenter.Services
                 : cfg.Name.Trim();
             try
             {
+                // 【V2.14.36 换代守卫：协调器已被 Dispose（切型号/热更新建了新一代）时，
+                // 本在途 Task 立即收尾，绝不再向相机发任何指令】Dispose 无法取消已开跑的
+                // Task，但可以在这里检查 _disposed 及时刹车——否则旧 Task 的 T2 会撞上
+                // 新协调器对同一请求的 T2，相机被连续触发两次（本修复的根因之一）。
+                if (_disposed)
+                {
+                    LogHelper.Info($"协调器已换代（在途 Task 放弃触发）：相机[{camName}] 点位{stationNo}");
+                    return;
+                }
                 // ① 触发前的输出格式 + 程序切换（V1.12.18/V1.12.25）：
                 //    OutputFormat 非空才发（OF,nn），失败即中止；程序号由"点位→程序号"映射表决定，
                 //    命中才切（PW,nnn），未命中保持相机当前程序。程序没切对就触发会对应错点位，宁可不拍。
@@ -705,6 +750,14 @@ namespace CommandCenter.Services
                 }
 
                 // ② 触发 + 读判定
+                // 【V2.14.36 换代守卫 2 号】发出 T2/T1 前的最后一道闸：若协调器已换代
+                // （切型号/热更），即使前面 OF/PW 已执行，也绝不让这颗 T2 发出去——
+                // 一旦发出相机就真的拍了，新协调器对同一请求的 T2 会造成重复拍照。
+                if (_disposed)
+                {
+                    LogHelper.Info($"协调器已换代（触发前放弃）：相机[{camName}] 点位{stationNo}");
+                    return;
+                }
                 bool triggerOk;
                 bool isOk;
                 if (cfg.ReadResultFromCamera)
@@ -749,6 +802,17 @@ namespace CommandCenter.Services
 
                 // ③ 取图 + 归档（Ftp：轮询取图目录拿最新对；Tcp：BR 同步读回）——纯异步补充材料，
                 //  只影响窗口显示与存图，不参与 PLC 结果（结果已在②末尾写掉）
+                // 【V2.14.36 换代守卫 3 号】判定即写【保留】——刚把结论落 PLC 了，PLC 能读到结果
+                // 并复位请求，新协调器磨合期满后读到"请求已复位"就不会重复触发（这是防二次触发的
+                // 另一半关键）。但本协调器已换代，之后"取图/归档/删源/显示"全部跳过：这些动作
+                // 归新一代协调器管，旧 Task 去做反而会与新 Task 并发取图、互相删 FTP 源文件、把
+                // 图发到已重建的窗口矩阵上。宁可这半拍无存档图，也不让两代并发捣乱。
+                if (_disposed)
+                {
+                    LogHelper.Info($"协调器已换代（跳过取图/归档/显示，结果已落 PLC）：相机[{camName}] 点位{stationNo}"
+                        + $"　判定={(isOk ? "OK" : "NG")}");
+                    return;
+                }
                 bool hasImage = false;
                 if (IsTcpImage(cfg))
                 {
