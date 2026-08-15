@@ -1,5 +1,140 @@
 # 版本改动记录
 
+## V2.14.29（2026-08-15）产品型号配置弹窗：废除自动"* 新行"（防删行异常）+ Delete 键显式接管
+
+> 需求（现场报错）：ModelIndexEditForm 报"程序发生未处理异常:无法删除未提交的新行"——
+> DataGridView 自带"* 新行"编辑到一半（未提交）时被删除会抛 InvalidOperationException；
+> 且 Delete 键删除此前只依赖 DataGridView 内建行为（只删 SelectedRows，"选中"列勾选的行会漏），
+> 行为隐式不可控。要求：① 不做自动新增行、加显式【新增】按钮（放删除按钮左边），只有点了
+> 新增才加行；② Delete 键也要能删"选中"列勾选的行。
+
+### 改动范围
+
+- **`ModelIndexEditForm.Designer.cs`**：
+  - `grid.AllowUserToAddRows` true→**false**（关闭"* 新行"，从源头消除"无法删除未提交的新行"异常）；
+  - 新增蓝色系按钮 `btnAdd`（"新  增"，宽 108，放在右上方【删除选中】左边，蓝=加、红=删对比）；
+  - 三处注释（类头布局图 / grid 说明 / btnDelete 说明）同步更新。
+- **`ModelIndexEditForm.cs`**：
+  - 新增 `BtnAdd_Click`：追加空行（序号 0、型号名留空）并把光标聚焦到型号名格；
+  - 删除逻辑抽成共享方法 `DeleteRows()`：优先删"选中"列勾选的行 → 无勾选回退选中行，
+    一律跳过 `IsNewRow`、按索引从后往前删、`Distinct()` 防勾选与选中重叠；
+  - 按钮 `BtnDelete_Click` 改调 `DeleteRows()`（返回 false 才弹提示）；
+  - **`Grid_KeyDown` 显式接管 Delete 键**（V2.14.29）：与按钮共用 `DeleteRows()`，勾选行按
+    Delete 同样全删；`grid.IsCurrentCellInEditMode=true`（正在编辑单元格文本）时放行给编辑控件
+    当删字符，不删行；处理完 `e.Handled=true` 阻止内建删除二次执行。
+
+### 为什么这么改
+
+- 自动"* 新行"在"已输入内容但未提交"状态下，`grid.Rows.RemoveAt(新行)` 会抛
+  "无法删除未提交的新行"——WinForms 对未提交新行的删除是禁止的。字段删掉它、改为显式按钮
+  新增后，加行/删行全由我们代码控制，行为确定性、零异常风险。
+- DataGridView 内建 Delete 只删 `SelectedRows`，"选中"列勾选的行不在选中集合内会漏删；
+  显式接管后与按钮同一套逻辑，勾选多行按 Delete 也能全部删掉，体验一致且可控。
+
+### 验证
+
+- MSBuild Debug/AnyCPU 构建通过；冒烟启动存活。
+- 防错推演：勾选 2 行按 Delete → 两行全删；只在单元格内编辑文本按 Delete → 只删字符不删行；
+  点【新增】→ 表格加一行空行；取消关闭 → 新增行丢弃、原配置不变。
+
+### 文档同步
+
+- `docs/CommandCenter.md` 第一部分（产品型号配置弹窗：新增按钮 + Delete 键共用删除逻辑）；
+- `AGENTS.md` 文件导航表（ModelIndexEditForm 描述更新）；
+- `CHANGELOG.md`：本版本（V2.14.29）。
+
+---
+
+## V2.14.28（2026-08-15）新检测件扫码时清零标题栏计数（总数/OK/NG）
+
+> 需求：MainForm 标题栏的"总数 / OK / NG"是统计**当前一个检测件**的检测点数，
+> 但此前只在检测完成后累加（`UpdateCountsTitle`），从不清零——随着生产持续，
+> 计数会无限累加，失去"当前工件检测点"的意义。扫码=新的检测件到位，必须在
+> 新一轮开始时就清零，重新统计当前工件的检测点总数与 OK/NG 点数。
+
+### 改动范围
+
+- `MainForm.OnRoundStarted`（收到 PLC 扫码请求 40001=1、新一轮生产启动时触发）：
+  在原有"清空各窗口图片"基础上，新增**计数清零**——`_total/_ok/_ng` 全部归 0 并
+  刷新标题栏；之后每台相机检测完成再逐点重新累加（`UpdateCountsTitle` 不变）。
+
+### 为什么这么改
+
+- `RoundStarted` 事件（`ProductionCoordinator.BeginScanChannel`）恰好是"扫码请求到达、
+  本轮生产启动"的时点，与"扫码=上新的检测件"语义一致，且事件已按既有约定
+  `BeginInvoke` 回 UI 线程（线程安全），在此清零不新增跨线程风险、不阻塞轮询线程。
+
+### 验证
+
+- MSBuild Debug/AnyCPU 构建通过（`CommandCenter -> ...\bin\Debug\CommandCenter.exe`）。
+- 冒烟逻辑：收到 PLC 扫码请求 → 窗口图片被清空、计数归零 → 相机判定返回后	从 0 开始逐点累计。
+
+---
+
+## V2.14.27（2026-08-15）新增 CommonLib 通用设备通讯库（PLC/相机/扫码枪/图片存储抽取封装）
+
+> 需求：把 CommandCenter 里四类底层通讯/存储服务（汇川 PLC Modbus TCP 从站、基恩士 IV4 相机、
+> 基恩士 SR 扫码枪、图片 FTP 归档与定期清理）抽取成独立类库 `CommonLib/`，目标是——
+> **换新客户、做新界面时底层服务一行不改，只写 UI 和业务编排**；且所有通讯必须支持热更
+> （与当前项目一致，改配置免重启）。
+
+### 改动范围
+
+- **新增 `CommonLib/` 独立类库**（.NET Framework 4.7.2，LangVersion 7.3，不依赖 NuGet，离线可编译）：
+  - `CommonLib.csproj` + `libs/NModbus.dll`（本地引用）；
+  - `Models/`：`PlcConfig`、`CameraConfig`（含点位→程序号/型号分表模型 + `DefaultCameras()` 默认相机）、
+    `ScanConfig`、`ImageConfig`、`DeviceHubConfig`（四类配置 + 型号的聚合载体，DeviceHub 唯一入参）；
+  - `Services/`：`PlcService`、`KeyenceIV4Camera`、`IScanner`/`ScannerService`（串口）/
+    `ScannerTcpService`（TCP，连上自动发触发指令）、`ImageStore`（FTP 监听 + 双格式归档 + 定期清理）、
+    `ConnectionMonitor`（心跳 + 断连自动重连 + 边沿日志）；
+  - `Utils/`：`LogHelper`（可替换出口）、`TcpKeepAlive`。
+- **★ `Services/DeviceHub.cs`（设备聚合门面，核心封装）**：把原 MainForm 手写的
+  "建服务 + 启动 + 事件聚合 + 热更 + 释放"全链路编排收进库内，新界面只需四个固定方法：
+  `new DeviceHub(config)` → `Start()` → `ApplyConfig(newCfg)`（热更）→ `Dispose()`；
+  对外只暴露聚合事件（`SerialNumberScanned`/`DeviceConnectionChanged`/`FtpFileArrived`/
+  `ServicesRebuilt`）与各服务实例（`Plc`/`Cameras`/`Scanners`/`ImageStore`）。
+- **抽取过程中的适配**（原代码只读，不动 CommandCenter）：
+  - `IScanner` 接口新增 `Name` 属性（串口返回串口名、TCP 返回 IP:端口，供连接指示灯/日志标识）；
+  - `CameraConfig` 补 `DefaultCameras()` 静态方法（现场默认两台相机，改现场 IP 只改这一处）；
+  - 命名空间统一为 `CommonLib.Models`/`CommonLib.Services`/`CommonLib.Utils`。
+- **新增 `CommonLib/README.md`**（接入四步 + 热更说明 + 通用红线）与 **`CommonLib/AGENTS.md`**
+  （本库维护约定：分层架构、热更约束、**注释详实是第一红线**、通讯关键点、构建命令）。
+- **新增 `CommonLib/使用说明.md`**（完整接入手册：配置逐项说明表、四步接入骨架、业务层
+  协调器写法（PLC 三拍 / 相机判定即写 / 扫码枪 / 图片显示）、热更、事件清单与线程模型、
+  日志出口、FAQ 排查、红线汇总）。
+- **新增 `CommonLib/Demo/` WinForms 测试台**（.NET Framework 4.7.2）：现场界面未完成前，
+  用它手动验证全链路——配置区（型号/PLC IP/端口，应用配置热更/保存/加载）、相机
+  （T1 仅触发 / T2 触发+判定+取图存图 / 读程序 / 切 P001）、扫码枪（发触发指令 + 收码大字）、
+  PLC 读写（读请求/写结果/写型号/任意寄存器读写）、**存图测试（不依赖相机，生成测试图
+  验证 ImageStore 归档链路）**、右侧连接状态灯 + 图片预览 + 日志。Demo 严格走 DeviceHub
+  四步标准接入、后台线程 IO + SafeInvoke 回 UI，是"标准接入方式的最小界面模板"，
+  新界面可直接抄它的 MainForm 接入骨架。`DemoConfig.cs` 用 Newtonsoft.Json 持久化
+  `Config/demo.json`（含 CommonLib 全部强类型配置）。
+
+### 为什么这么改
+
+- CommandCenter 的设备编排（`BuildServices`/`ApplyRuntimeConfig`/`FormClosing` 释放、扫码枪按
+  `Mode` 选实现、每相机 FTP 目录监听、存图定期清理等）全部手写在 `MainForm` 里，新客户接新界面
+  就得重新抄一遍、还容易漏掉红线（UI 禁 IO、热更顺序、ImageStore 释放归属等）。DeviceHub 把
+  "设备活着"这件事彻底封装，业务项目只写"业务流程 + UI"，底层通讯行为与坑（超时/重连/热更/并发
+  混图）全部复用库内已验证实现。
+- 所有服务保持惰性连接 + 自动重连 + Dispose 干净（限时抢锁 + 锁外强断网 + NModbus
+  `_network?.Dispose()`），天然支持热更。
+
+### 验证
+
+- MSBuild Debug/AnyCPU 构建 CommonLib 通过（`CommonLib -> ...\bin\Debug\CommonLib.dll`）。
+- 原 CommandCenter 工程未改动，仍按原样构建（两工程独立）。
+
+### 文档同步
+
+- `CommonLib/README.md`：新建（接入范式/热更/红线/配置项），补 Demo 测试台一节。
+- `CommonLib/使用说明.md`：新建（完整接入手册，README 的详细版）。
+- `CommonLib/AGENTS.md`：新建（库级维护约定，含注释详实红线 + 跨 .NET 版本兼容性评估）。
+- `CommonLib/Demo/README.md`：新建（Demo 使用说明/验证清单/配置说明）。
+- `CommandCenter/AGENTS.md`：关键文件导航表补 `CommonLib/` 说明。
+- `CHANGELOG.md`：本版本（V2.14.27）。
+
 ## V2.14.26（2026-08-14）窗口徽标显隐还原：只随开关走（保留 V2.14.24 的默认开启）
 
 > 需求：主界面窗口矩阵里，空窗口/还没接到图像的窗口右下角 **OK/NG 徽标也要一直显示**——

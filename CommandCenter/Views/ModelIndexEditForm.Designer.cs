@@ -11,7 +11,7 @@ namespace CommandCenter.Views
     ///   ┌──────────────────────────────────────────────┐
     ///   │▓ 产品型号配置（pnlHeader 蓝色横幅，白字居中）▓│
     ///   ├──────────────────────────────────────────────┤
-    ///   │                                  [btnDelete] │
+    ///   │          [btnAdd新增][btnDelete删除选中]     │
     ///   │  ┌─────────┬───────┬──────────────────────┐  │
     ///   │  │ 选中(□) │ 序号  │ 型号名称（全居中）     │  │
     ///   │  ├─────────┼───────┼──────────────────────┤  │
@@ -52,6 +52,7 @@ namespace CommandCenter.Views
             this.colModel = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.btnOk = new System.Windows.Forms.Button();
             this.btnCancel = new System.Windows.Forms.Button();
+            this.btnAdd = new System.Windows.Forms.Button();
             this.btnDelete = new System.Windows.Forms.Button();
             this.pnlHeader.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.grid)).BeginInit();
@@ -85,13 +86,16 @@ namespace CommandCenter.Views
             // grid
             // 型号↔PLC序号映射表格（V2.14.14）：三列——选中、序号、型号名称。
             //   · 前几行默认预载当前已有型号与序号（LoadFromConfig 填充）；
-            //   · 可编辑单元格、可增删行（btnDelete 删勾选/选中行、Delete 键删选中行、
-            //     末尾 * 新行回车加行）；
+            //   · 单元格可直接编辑；
+            //   · 增加行只能走【新增】按钮（btnAdd，V2.14.29）——**不开放 DataGridView 自带的
+            //     自动新行（AllowUserToAddRows=false）**：自动"* 新行"在编辑一半时被删除会抛
+            //     "无法删除未提交的新行"异常，且现场容易误点出空行，故统一由按钮显式加行；
+            //     删除走【删除选中】按钮（勾选列多选 / 选中行单选多选 / Delete 键）；
             //   · 整行选中（FullRowSelect）+ 支持多选（Ctrl/Shift）、勾选列可快速多选；
             //   · "全列内容居中"（V2.14.25）：表头与单元格横竖都居中。
             // 确定写回 plc.modelIndexes 并持久化；取消关闭不保存。
             // 
-            this.grid.AllowUserToAddRows = true;
+            this.grid.AllowUserToAddRows = false;
             this.grid.AllowUserToDeleteRows = true;
             this.grid.BackgroundColor = System.Drawing.Color.White;
             this.grid.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
@@ -171,8 +175,27 @@ namespace CommandCenter.Views
             this.btnCancel.Text = "取  消";
             this.btnCancel.UseVisualStyleBackColor = false;
             // 
+            // btnAdd
+            // 新增按钮（V2.14.29，放在【删除选中】左边）：
+            // 加新型号必须显式点它——不再用 DataGridView 自带"* 新行"（编辑一半删除会抛
+            // "无法删除未提交的新行"）。点击后在表格末尾追加一行空行（序号 0、型号名空，
+            // 见 ModelIndexEditForm.cs BtnAdd_Click），填好后点【确定】写回。
+            // 样式：蓝色系（与确定主蓝同族），与红色删除按钮形成"蓝=加、红=删"的对比印象。
+            // 
+            this.btnAdd.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
+            this.btnAdd.FlatAppearance.BorderSize = 0;
+            this.btnAdd.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnAdd.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
+            this.btnAdd.ForeColor = System.Drawing.Color.White;
+            this.btnAdd.Location = new System.Drawing.Point(160, 68);
+            this.btnAdd.Name = "btnAdd";
+            this.btnAdd.Size = new System.Drawing.Size(108, 30);
+            this.btnAdd.TabIndex = 6;
+            this.btnAdd.Text = "新  增";
+            this.btnAdd.UseVisualStyleBackColor = false;
+            // 
             // btnDelete
-            // 删除按钮（V2.14.25，红色系破坏性操作，放表格右上方）：
+            // 删除按钮（V2.14.25，红色系破坏性操作，放表格右上方、【新增】按钮右边）：
             // 浅红底白字、Flat 无边框，一眼区别于蓝/灰按钮。
             // 点击删除"勾选的行"；没有勾选但有选中行时删除选中行（单选/多选删除）；
             // 都没有则提示（见 ModelIndexEditForm.cs BtnDelete_Click）。
@@ -201,6 +224,7 @@ namespace CommandCenter.Views
             this.ClientSize = new System.Drawing.Size(440, 362);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnOk);
+            this.Controls.Add(this.btnAdd);
             this.Controls.Add(this.btnDelete);
             this.Controls.Add(this.grid);
             this.Controls.Add(this.pnlHeader);
@@ -227,6 +251,7 @@ namespace CommandCenter.Views
         private DataGridViewTextBoxColumn colModel;
         private Button btnOk;
         private Button btnCancel;
+        private Button btnAdd;
         private Button btnDelete;
     }
 }
