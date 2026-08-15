@@ -112,7 +112,9 @@ namespace CommandCenter.Services
                 if (!EnsureConnected())
                     return TriggerReadOutcome.Fail("相机连接失败");
 
-                string raw = SendCommandAndReadLine(_cfg.TriggerAndReadCommand, _cfg.ResponseTimeoutMs);
+                // 期望应答前缀：T2/RT 指令的应答固定以 "RT," 开头（判定帧）；"ER" 是本指令错误回执。
+                string raw = SendCommandAndReadLine(_cfg.TriggerAndReadCommand, _cfg.ResponseTimeoutMs,
+                    new[] { "RT", "ER" });
                 return ParseResult(raw);
             }
             catch (Exception ex)
@@ -155,7 +157,8 @@ namespace CommandCenter.Services
                 }
 
                 string cmd = "PW," + programNo.ToString("D3");
-                string raw = SendCommandAndReadLine(cmd, _cfg.ResponseTimeoutMs);
+                string raw = SendCommandAndReadLine(cmd, _cfg.ResponseTimeoutMs,
+                    new[] { "PW", "ER" });   // PW 指令应答以 "PW" 回显开头，"ER" 为错误回执
                 if (raw == null) return false;
                 if (raw.StartsWith("ER", StringComparison.OrdinalIgnoreCase))
                 {
@@ -196,7 +199,8 @@ namespace CommandCenter.Services
             try
             {
                 if (!EnsureConnected()) return -1;
-                string raw = SendCommandAndReadLine("PR", _cfg.ResponseTimeoutMs);
+                string raw = SendCommandAndReadLine("PR", _cfg.ResponseTimeoutMs,
+                    new[] { "PR", "ER" });   // PR 指令应答以 "PR," 开头，"ER" 为错误回执
                 if (raw == null) return -1;
                 // 期望 "PR,009"；非法前缀返回 -1
                 if (!raw.StartsWith("PR", StringComparison.OrdinalIgnoreCase)) return -1;
@@ -230,7 +234,8 @@ namespace CommandCenter.Services
             try
             {
                 if (!EnsureConnected()) return false;
-                string raw = SendCommandAndReadLine("OF," + nn, _cfg.ResponseTimeoutMs);
+                string raw = SendCommandAndReadLine("OF," + nn, _cfg.ResponseTimeoutMs,
+                    new[] { "OF", "ER" });   // OF 指令应答以 "OF" 开头，"ER" 为错误回执
                 if (raw == null) return false;
                 bool ok = raw.StartsWith("OF", StringComparison.OrdinalIgnoreCase);
                 if (ok) LogHelper.Info($"相机已设置判定输出格式 → OF,{nn}");
@@ -256,7 +261,9 @@ namespace CommandCenter.Services
             try
             {
                 if (!EnsureConnected()) return false;
-                string raw = SendCommandAndReadLine(_cfg.TriggerCommand, _cfg.TimeoutMs);
+                // 期望应答前缀：T1 触发指令的回显就是指令名本身（如 "T1"），"ER" 为错误回执。
+                string raw = SendCommandAndReadLine(_cfg.TriggerCommand, _cfg.TimeoutMs,
+                    new[] { _cfg.TriggerCommand.Trim(), "ER" });
                 return raw != null;
             }
             catch (Exception ex)
@@ -279,11 +286,37 @@ namespace CommandCenter.Services
         /// ② 假活连接复用：读超时/断流（Read 抛异常或返回 0）时，TCP 层的 Connected 属性
         ///    仍可能为 true，旧实现不清理连接 → 下一次 EnsureConnected 复用坏流，永远失败且不重连。
         ///    现在超时/断流一律 MarkDisconnected，下次动作强制重建连接。
+        ///
+        /// 【V2.14.34 响应错位根治：指令↔应答配对，杜绝"相机 NG 被报 OK"】
+        ///   基恩士无协议 TCP 是"一指令一应答"的松散协议，帧里没有任何字段标明它应答的是哪条
+        ///   指令；而相机应答是异步的（尤其 T2 要拍照+判定，200ms~数秒），上位机发指令时 TCP
+        ///   接收缓冲里可能还躺着上一拍的旧应答。旧实现"发一条就读一行、读到什么算什么"——
+        ///   一旦读到滞留旧帧（例如上一条 T2 的 RT,...,OK），就会把本次实判 NG 的响应顶掉、
+        ///   误写 PLC=1(OK)（现场实测 2026-08：PW 读回 RT/PW 读回 ER/T2 读回 PW 等串位日志）。
+        ///   三层防御：
+        ///   ① 发指令前先把输入缓冲里已可读的旧应答全部读掉（排空残留），从空缓冲开始等本条应答；
+        ///   ② 读回应答时校验"期望前缀"（expectedPrefixes）：开头匹配（RT/PW/OF/PR/T1/ER）才算
+        ///      本条指令的应答；读到不匹配的行（旧残留）则丢弃、继续读，直到读到匹配行或超时——
+        ///      "ER" 一律视为合法应答（它是本条指令的错误回执，要交给调用方判失败，不能当残留扔掉）；
+        ///   ③ 仍读不到匹配行而超时 → 返回 null + MarkDisconnected，调用方走既有"失败=NG"路径。
         /// </summary>
-        private string SendCommandAndReadLine(string command, int readTimeoutMs)
+        private string SendCommandAndReadLine(string command, int readTimeoutMs, string[] expectedPrefixes)
         {
             if (_stream == null)
                 throw new InvalidOperationException("网络流未就绪");
+
+            // ① 发指令前先排空输入缓冲里的旧残留帧（上一拍没被取走的应答），
+            //    保证下面 Read 拿到的第一条应答就是本条指令的应答。
+            //    只读"此刻已可读"的数据（DataAvailable），不等待——正常时没残留、瞬间返回；
+            //    绝不能吞掉本条指令的应答，因为本条指令此刻还没发出去。
+            while (_stream.DataAvailable)
+            {
+                var stale = new byte[512];
+                int n;
+                try { n = _stream.Read(stale, 0, stale.Length); }
+                catch { break; }
+                if (n <= 0) break;
+            }
 
             byte[] sendBuf = Encoding.ASCII.GetBytes(command.Trim() + "\r");
             _stream.Write(sendBuf, 0, sendBuf.Length);
@@ -292,25 +325,54 @@ namespace CommandCenter.Services
 
             try { _stream.ReadTimeout = readTimeoutMs; } catch { }
 
-            // 逐字节拼一行；Read 到期由 ReadTimeout 抛异常兜底
-            var sb = new StringBuilder();
-            var one = new byte[1];
-            while (sb.Length < 1024)
+            // ② 读应答行，校验是否本条指令的应答：读到期望前缀的行才返回，
+            //    读到其它行视为残留帧丢弃继续读（读不到匹配行最终由 ReadTimeout 抛异常兜底）。
+            while (true)
             {
-                int n;
-                try { n = _stream.Read(one, 0, 1); }
-                catch { MarkDisconnected(); break; }       // 超时/断流：连接不可信，标记待重建
-                if (n <= 0) { MarkDisconnected(); break; } // 对端关闭：同上
-                char c = (char)one[0];
-                if (sb.Length == 0 && (c == '\r' || c == '\n' || c == '\0'))
-                    continue;                              // 前导空行/上一帧残留行尾：跳过
-                if (c == '\r' || c == '\n' || c == '\0') break;
-                sb.Append(c);
-            }
-            string line = sb.ToString();
-            if (line.Length > 0)
+                var sb = new StringBuilder();
+                var one = new byte[1];
+                while (sb.Length < 1024)
+                {
+                    int n;
+                    try { n = _stream.Read(one, 0, 1); }
+                    catch { MarkDisconnected(); break; }       // 超时/断流：连接不可信，标记待重建
+                    if (n <= 0) { MarkDisconnected(); break; } // 对端关闭：同上
+                    char c = (char)one[0];
+                    if (sb.Length == 0 && (c == '\r' || c == '\n' || c == '\0'))
+                        continue;                              // 前导空行/上一帧残留行尾：跳过
+                    if (c == '\r' || c == '\n' || c == '\0') break;
+                    sb.Append(c);
+                }
+                string line = sb.ToString();
+                if (line.Length == 0)
+                {
+                    MarkDisconnected();
+                    return null;                               // 超时/断流没读到任何行
+                }
+
+                // 匹配期望前缀（大小写不敏感）；期望前缀为空=不校验（兼容读取任意行）。
+                bool match = expectedPrefixes == null || expectedPrefixes.Length == 0;
+                if (!match)
+                {
+                    foreach (var prefix in expectedPrefixes)
+                    {
+                        if (line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                        {
+                            // 兼容 "RT" 后直接 "xxx"：前缀算法不要求精确到指令名长度，保持简单
+                            match = true;
+                            break;
+                        }
+                    }
+                }
+
                 LogHelper.Info("相机响应：" + line);
-            return line.Length > 0 ? line : null;
+                if (match)
+                    return line;                               // 本条指令的应答 → 返回给调用方
+
+                // 读到残留/串位帧（如 T2 指令等到的是上一条指令的 PT/PW 应答）：丢弃、继续读，
+                // 等真正的本条应答。这是"NG 被误报 OK"的根治点：不让旧帧顶掉本次判定。
+                LogHelper.Warn($"相机响应残留/串位帧已忽略（等待第 {command.Trim()} 条指令的真应答）：{line}");
+            }
         }
 
         /// <summary>
@@ -452,15 +514,18 @@ namespace CommandCenter.Services
         /// 解析 T2/RT 的响应为判定结果。
         /// 基恩士相机响应有【两种实际格式】，必须都要兼容：
         ///  ① 标准格式：`RT,00000000` —— 8 位判定位，每位对应一个工具（'0'=OK）；
-        ///  ② 详细格式：`RT,00152,OK,01,OK,0000100` —— 总判定为明文 OK/NG，在第【2】个逗号字段，
-        ///     第 1 个逗号字段是递增触发计数（00152/00327…），【绝不能当判定位】（含 1/3/2 等
-        ///     非 '0' 字符逐位检查必然判 NG）。
+        ///  ② 详细格式：`RT,00152,OK,01,OK,0000100` —— 逗号分隔多字段，
+        ///     字段里带明文 OK/NG 总判定（第 1 个字段是递增触发计数，绝不能当判定位）。
         ///
         /// 【V2.14.10 修复"相机判定 OK 但上位机/PLC/存图全 NG"血泪】
         /// 现场相机 T2 实测输出详细格式（前 v2.13 只按标准格式解析），旧实现取"第 1 个逗号前字段"
         /// （触发计数）当判定位逐位检查 → 每次触发计数递增、几乎必含非 '0' 位 → 一切皆判 NG，
         /// 导致 PLC 收 2、存图全进 NG 目录、界面 OK 计数恒 0。修复：先识别详细格式（字段数>=2 且
         /// 第 2 字段是明文 OK/NG）直接取结论；识别不到再回退标准格式逐位判定（旧行为不变）。
+        ///
+        /// 【V2.14.34 判定字段收紧】扫描响应里【所有】明文 OK/NG 字段，任一字段精准文本为 NG 即判 NG
+        /// （复合工具判定下"任一工具不良=整体不良"，绝不因只看了第 2 个字段漏掉 NG）；无 NG 且有 OK
+        /// 才判 OK。标准格式（纯 0/1 位图、无明文 OK/NG）不受影响，仍走逐位判定。
         ///
         /// 【V1.7.2 修复】
         /// ① 判定内容为空（"RT," / "RT,,..."）时直接判失败——此前空 flags 会因 foreach 不执行
@@ -482,14 +547,22 @@ namespace CommandCenter.Services
 
             // 【V2.14.10】详细格式判定：字段数>=2 且第 2 个逗号字段是明文 OK/NG → 直接采用。
             // 现场实测响应：RT,00152,OK,01,OK,0000100（OK）/ RT,00151,NG,01,NG,0000000（NG）。
-            if (fields.Length >= 2)
+            //
+            // 【V2.14.34 健壮性扩展】不再只认第 2 个字段，而是扫描【所有】明文 OK/NG 字段：
+            //   响应里可能同时带多个判定（如 "RT,计数,OK,01,NG,数值" 这类复合工具判定），
+            //   任一字段是 NG 即判 NG（复合判定"任一工具不良即整体不良"，绝不放行）；
+            //   没有 NG 且至少有明文 OK → 判 OK；完全没有明文 OK/NG → 回退标准格式逐位判定。
+            bool anyNg = false, anyOk = false;
+            foreach (var fld in fields)
             {
-                string verdict = fields[1].Trim();
-                if (verdict.Equals("OK", StringComparison.OrdinalIgnoreCase))
-                    return TriggerReadOutcome.OkResult(verdict, raw);
-                if (verdict.Equals("NG", StringComparison.OrdinalIgnoreCase))
-                    return TriggerReadOutcome.NgResult(verdict, raw, "相机判定 NG（详细格式）");
+                string t = fld.Trim();
+                if (t.Equals("NG", StringComparison.OrdinalIgnoreCase)) anyNg = true;
+                else if (t.Equals("OK", StringComparison.OrdinalIgnoreCase)) anyOk = true;
             }
+            if (anyNg)
+                return TriggerReadOutcome.NgResult("NG", raw, "相机判定 NG（详细格式）");
+            if (anyOk)
+                return TriggerReadOutcome.OkResult("OK", raw);
 
             // 标准格式：整段即 8 位判定位（fields[0]，标准响应只有这一位）
             string flags = fields[0].Trim();
