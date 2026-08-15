@@ -111,6 +111,13 @@
     <Compile Include="Views\SerialInputForm.Designer.cs">
       <DependentUpon>SerialInputForm.cs</DependentUpon>
     </Compile>
+    <!-- ScannerFailForm：扫码枪异常提醒对话框（V2.14.32，读码失败 ERROR 文本→弹窗提醒检查扫码枪或人工补录） -->
+    <Compile Include="Views\ScannerFailForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Views\ScannerFailForm.Designer.cs">
+      <DependentUpon>ScannerFailForm.cs</DependentUpon>
+    </Compile>
     <!-- ModelIndexEditForm：产品型号配置对话框（V2.14.14，表格维护型号↔PLC序号映射，取代旧型号序号框） -->
     <Compile Include="Views\ModelIndexEditForm.cs">
       <SubType>Form</SubType>
@@ -145,6 +152,9 @@
   <ItemGroup>
     <EmbeddedResource Include="Views\MainForm.resx">
       <DependentUpon>MainForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Views\ScannerFailForm.resx">
+      <DependentUpon>ScannerFailForm.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Views\WindowPointForm.resx">
       <DependentUpon>WindowPointForm.cs</DependentUpon>

@@ -74,6 +74,11 @@ namespace CommandCenter.Views
         private bool _modelComboInit;     // 型号下拉程序内初始化/刷新时防误触 SelectedIndexChanged
         private bool _modelComboWired;    // 型号下拉事件是否已挂线（构造与热更都会走 InitModelCombo，只挂一次）
 
+        // 扫码枪异常弹窗节流（V2.14.32）：避免扫码枪持续报 ERROR 时弹窗轰炸操作员。
+        // 记录上次弹窗的时间点，两次真实弹窗间隔必须 ≥ 该窗口，中间再次失败只进日志不再弹窗。
+        private static readonly TimeSpan ScannerFailPromptThrottle = TimeSpan.FromSeconds(30);
+        private DateTime _lastScannerFailPromptUtc = DateTime.MinValue;
+
         /// <summary>
         /// 显示窗口集合（V1.12.28 起按"窗口编号"索引，不再用数组下标）：
         /// 禁用的窗口（DisplayConfig.WindowEnabled=false）不在矩阵显示、不建控件，
@@ -1100,6 +1105,9 @@ namespace CommandCenter.Views
             foreach (var sc in _scanners)
             {
                 sc.SerialNumberScanned += OnSerialScanned;
+                // 【V2.14.32 弹窗提醒】扫码枪读码失败（推 ERROR 等错误文本）→ 弹窗提醒操作员
+                // 检查扫码枪或人工补录。与协调器的"快速 NG"各自独立：本订阅只管 UI 提醒。
+                sc.ScanFailed += OnScannerFailPrompt;
                 sc.Open(); // 串口打开失败 / TCP 连不上都不影响主流程，后台持续重连
             }
             // 扫码枪连接状态灯（V1.12.6）：订阅每台扫码枪的连接状态变化，聚合刷新标题栏右上角
@@ -1191,6 +1199,41 @@ namespace CommandCenter.Views
             _coordinator.LatestSerialNumber = code;
             if (lblSerial != null) lblSerial.Text = code;
             LogHelper.Info("当前产品序列号：" + code);
+        }
+
+        /// <summary>
+        /// 扫码枪"读码失败"弹窗提醒（V2.14.32，ScanFailed 事件，扫码枪工作线程触发）。
+        /// 收码层已按 IgnoreScanTexts 把 ERROR 等错误文本过滤不当 SN，协调器也借此立即上报
+        /// 扫码 NG(2)（OnScannerFail）；这里专职"人看的提醒"：弹 ScannerFailForm 提示操作员
+        /// 检查扫码枪或点【人工补录】直接手动输入本条序列号接手处理。
+        ///
+        /// 【节流防轰炸】扫码枪持续失败会连发事件，若每次都弹窗会打断生产。用
+        /// _lastScannerFailPromptUtc 记录上次真实弹窗时刻，30 秒内重复失败只在日志体现、
+        /// 不再弹窗——给操作员留出处理时间，又不会因持续故障刷屏。
+        /// 【线程安全】事件来自后台线程，先 BeginInvoke 切回 UI 线程再弹模态窗（红线：UI 禁 IO、
+        /// 后台线程禁碰 UI 控件）。模态弹窗只在 UI 线程排队，后台协调器/扫码枪不受阻塞。
+        /// </summary>
+        private void OnScannerFailPrompt(object sender, string text)
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<object, string>(OnScannerFailPrompt), sender, text);
+                return;
+            }
+
+            // 节流：距上次真实弹窗不足 30 秒 → 只记日志、不打扰（防持续失败刷屏）
+            if ((DateTime.UtcNow - _lastScannerFailPromptUtc) < ScannerFailPromptThrottle) return;
+            _lastScannerFailPromptUtc = DateTime.UtcNow;
+            LogHelper.Warn("扫码枪读码失败，弹窗提醒操作员检查（已上报扫码 NG）：" + text);
+
+            // 弹提醒窗：点【人工补录】→ 顺手打开手动录入对话框（复用现有补录流程），
+            // 点【稍后处理】→ 仅提醒、本条按扫码 NG 处理，等下一拍。
+            using (var dlg = new ScannerFailForm(text))
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                    PromptManualSerial();
+            }
         }
 
         /// <summary>
