@@ -67,6 +67,20 @@ namespace CommandCenter.Services
         private readonly System.Threading.Timer _positionTimer;  // 请求轮询（后台线程）
         private volatile bool _running;   // 总开关
         private volatile bool _disposed;  // 已释放标记
+        /// <summary>
+        /// 轮询回调重入互斥（V2.14.35，防"同一 PLC 请求被重复触发相机"）：
+        /// 1=上一个回调仍在执行。System.Threading.Timer 不会等回调结束再起下一次——
+        /// 一旦某次回调执行超过轮询周期 PollMs(100ms)（PLC 从站断线重建 EnsureConnected
+        /// 建站耗时、系统负载高、日志写盘卡顿等），Timer 会【并发重入】下一个回调。
+        /// 重入的回调若同时看到"空闲(_activeCh==ChNone) + 同一个 PLC 请求≠0"，会重复
+        /// 调 BeginCameraChannel → 开多个 Task 对同一请求连发 T2 → 相机同点位重复拍照、
+        /// 重复取图/归档/删源（并发删彼此刚归档的图，窗口错乱）。本标志用 Interlocked
+        /// 原子"入场令牌"把回调串行化：一次只放一个进轮询体，重入的直接返回跳过。
+        /// 【为何选"跳过"而非"阻塞等锁"】PLC 请求在三拍握手期间是保持的（点位不清零），
+        /// 跳过的这一拍下次还能读到同一请求，绝不丢请求——用"丢一拍"换"绝不复用重入
+        /// 双触发"，比 lock 排队（占着线程池线程陪着卡住的回调）更稳。仅在回调内读写。
+        /// </summary>
+        private int _polling;
         private int _seqNo;               // 全局检测序号（非线程敏感，轮询线程自增）
 
         // ── V2.7 三通道状态机 ──
@@ -324,25 +338,39 @@ namespace CommandCenter.Services
         {
             if (!_running || _disposed) return;
 
-            if (!_plc.EnsureConnected())
-            {
-                SafeChange(_positionTimer, SlowPollMs, SlowPollMs);
+            // 重入互斥（V2.14.35，见 _polling 字段注释）：Interlocked.Exchange 原子的
+            // "拿令牌"——只有拿到 0（上一位已用、本次换回 1）的线程才继续进轮询体；
+            // 拿不到（已是 1，说明上一个回调还没跑完）本次直接返回，等下一下个周期。
+            // 不在这保护：两个并发回调都会读到老旧的 _activeCh==ChNone 与同一个 PLC 请求，
+            // 把一个请求触发拍两遍。令牌在 finally 里归还，回调异常/主动 return 都能释放。
+            if (Interlocked.Exchange(ref _polling, 1) != 0)
                 return;
-            }
-            SafeChange(_positionTimer, PollMs, PollMs);
-
             try
             {
-                if (_activeCh == ChNone)
-                    PollNewRequest();        // 空闲：看有没有新请求
-                else if (_activeCh == ChScan)
-                    StepScanChannel();       // 扫码通道推进
-                else
-                    StepCameraChannel();     // 上/下相机通道推进
+                if (!_plc.EnsureConnected())
+                {
+                    SafeChange(_positionTimer, SlowPollMs, SlowPollMs);
+                    return;
+                }
+                SafeChange(_positionTimer, PollMs, PollMs);
+
+                try
+                {
+                    if (_activeCh == ChNone)
+                        PollNewRequest();        // 空闲：看有没有新请求
+                    else if (_activeCh == ChScan)
+                        StepScanChannel();       // 扫码通道推进
+                    else
+                        StepCameraChannel();     // 上/下相机通道推进
+                }
+                catch (Exception ex)
+                {
+                    LogHelper.Error("PLC 请求轮询异常", ex);
+                }
             }
-            catch (Exception ex)
+            finally
             {
-                LogHelper.Error("PLC 请求轮询异常", ex);
+                Interlocked.Exchange(ref _polling, 0); // 归还令牌，下一拍可正常进入
             }
         }
 

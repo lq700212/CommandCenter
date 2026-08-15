@@ -124,8 +124,14 @@ ProductModelIndexAddress/ProductModelAddress/ProductModelLen/ModelIndexes`）+ �
    由旧配置迁移自动固化；**新增相机/第3台起必须与 PLC 协商后显式填地址**，未填则不参与 PLC 轮询）。
    相机触发前按窗口映射解析点位 → 按"当前型号→点位"查本相机映射表
   （先 `ModelStationPrograms` 型号表、型号没配表回退 `StationPrograms` 默认表）`PW` 切程序。
-  扫码枪列表经 `_coordinator.AttachScanners()` 注入（协调器比扫码枪先创建，用方法注入不用构造）。
-  改动 PLC 或相机通讯或握手流程必须同步 `docs/CommandCenter.md`。
+扫码枪列表经 `_coordinator.AttachScanners()` 注入（协调器比扫码枪先创建，用方法注入不用构造）。
+   **轮询回调必须带重入互斥（V2.14.35）**：`PositionTimer_Tick` 入口用 `Interlocked` 令牌（`_polling`）
+   串行化——`System.Threading.Timer` 不等待回调结束，某次回调执行超 100ms（PLC 从站断线重建/负载高/
+   日志卡顿）会并发重入，两个并发回调同时看到"空闲(`_activeCh==ChNone`)+ 同一 PLC 请求≠0"会把一个
+   请求触发拍两遍（开多个 Task 连发 T2、同点位并发取图/删源混图）；令牌一次只放行一个回调、重入的直接
+   跳过（PLC 请求握手期间保持、跳过的拍下次还读得到，用"丢一拍"换"绝不重入双触发"）。改轮询入口
+   先读这段；删除该互斥前先想"有没有谁在依赖重入行为"。
+   改动 PLC 或相机通讯或握手流程必须同步 `docs/CommandCenter.md`。
 - **相机 FTP 双文件归档 + 点位程序号（V1.12.18；V1.12.24 起取图改"扫目录取最新"）**：现场方案是"一台相机=一个 FTP 目录、所有点位图混放"——FTP 目录只当**中转暂存区**：基恩士每次拍照生成 jpeg+iv4p 两个文件（**文件名不保证恒为 `0000`（现场实测有 `0084` 等任意编号），上位机取图一律 `ImageStore.FindLatestPair(dir)` 扫目录取"修改时间最新"的一对、不写死文件名**），上位机等图 = `WaitForFtpImage`（**V2.13.6 起事件信号加速 + 轮询兜底双保险**：
    MainForm.BuildServices 为每台相机 `ImageStore.AddMonitor` 启动 FileSystemWatcher，相机一推图触发
    `FtpFileArrived` → 置位该相机 `ManualResetEventSlim` → 等图流程立即醒来重扫目录（消除纯轮询最长
