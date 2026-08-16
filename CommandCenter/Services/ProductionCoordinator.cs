@@ -146,6 +146,28 @@ namespace CommandCenter.Services
         // （_reqResetSeen，复位回执）就【立即】清 0，把残留窗口缩到 ~100ms；_taskDone 仍保留作
         // 通道释放闸门（V2.13.7 防同相机并发取图，见 StepCameraChannel 步骤2）。
         private bool _resultCleared;       // 相机通道：本拍结果已提前清零
+        // V2.14.44 保护版新增："点位推进推断已观察到"标志（仅轮询线程读写）。
+        // 背景：V2.14.41 的复位确认有两条置真来源——① 真看到请求==0（PLC 写 0 本身就是"已读走本拍
+        // 结果"的硬回执）；② 请求推进到别的点位（still>0 且 != _pendStation，推断 PLC 已读走并进入
+        // 下一拍）。V2.14.42 让"②推断"也触发【立即清 0】——本意是防结果寄存器残留窗口，但推断≠证据：
+        // 若现场 PLC 的"推进请求"与"读走结果"不同拍（先推进、后读），上位机会抢在 PLC 读之前把本拍
+        // 1/2 清成 0 → PLC 读不到值（DevTest 读 0）。本版把"清 0"与"推断"解耦：立即清 0 只认①真回执，
+        // ②推断只用作通道释放兜底（防"PLC 从不产生 0 中间态"导致通道卡死），残留值由下一拍
+        // BeginCameraChannel 受理时统一清 0。
+        // 【改回旧行为】现场日志若证明"低位推进推断"只是白清、不影响读走，可把 StepCameraChannel 步骤2
+        // 的立即清 0 条件改回 _reqResetSeen || _reqAdvancedSeen（恢复 V2.14.42 原功能），并删掉本注释。
+        private bool _reqAdvancedSeen;     // 相机通道：已观察到"请求推进到其它点位"（推断）
+
+        // ── V2.14.43 排查日志字段（不改业务，只给"PLC 读不到 40005"现场留证据）──
+        // 记录"本相机通道最近一次写结果（判定即写 / step1 兜底写）的时刻"，供 step2 清 0 时
+        // 打印"距写结果 Xms"，直观判断清 0 是不是发生在 PLC 读走之前（若清 0 距写结果仅数十 ms，
+        // 而 PLC 还没轮询到 → 就是"写后马上被清、PLC 没机会读"；正常握手应为"PLC 先读走再复位，
+        // 清 0 距写结果至少几百 ms 以上"）。仅轮询线程/Task 写、轮询线程读，毫秒级偏差可接受。
+        private DateTime _chanResultWriteUtc;
+        // 相机通道 step2 上一次读到的请求值（仅值变化时打印一条，防 100ms 轮询把日志刷爆）。
+        private volatile int _lastStepReqVal = -1;
+        // 扫码通道最近一次写扫码结果（1/2）的时刻，复位日志里附"距写结果时长"用。
+        private DateTime _scanResultWriteUtc;
 
         // ── 扫码通道 ──
         private readonly List<IScanner> _scanners = new List<IScanner>();
@@ -555,6 +577,7 @@ namespace CommandCenter.Services
                 {
                     _plc.WriteProductModel(_productModel);
                     _plc.WriteScanResult(1);      // 扫码 OK
+                    _scanResultWriteUtc = DateTime.UtcNow;   // V2.14.43：记扫码结果写时刻（排查日志）
                     _scanResultWritten = 1;       // V2.14.33：记录本轮已写入的结果值（供补录覆盖判断）
                     _serialReceived = false;      // V2.14.9：码已消费即清零，防止残留 true 污染下一轮
                                                  // （否则下一轮 BeginScanChannel 不清，会把上一轮的码
@@ -571,6 +594,7 @@ namespace CommandCenter.Services
                     // 不会空等 30s。清标志防残留误判下一轮。
                     _plc.WriteProductModel(_productModel);
                     _plc.WriteScanResult(2);      // 扫码结果=2（通知 PLC：扫码失败，等待人工补录）
+                    _scanResultWriteUtc = DateTime.UtcNow;   // V2.14.43：记扫码结果写时刻（排查日志）
                     _scanResultWritten = 2;       // V2.14.33：记录本轮已写入的结果值（供补录覆盖判断）
                     _serialErrorSeen = false;     // 已消费，清理失败标志
                     _chStep = 1;
@@ -582,6 +606,7 @@ namespace CommandCenter.Services
                 {
                     _plc.WriteProductModel(_productModel);
                     _plc.WriteScanResult(2);      // 扫码结果=2（通知 PLC：超时无码，等待人工补录）
+                    _scanResultWriteUtc = DateTime.UtcNow;   // V2.14.43：记扫码结果写时刻（排查日志）
                     _scanResultWritten = 2;       // V2.14.33：记录本轮已写入的结果值（供补录覆盖判断）
                     _chStep = 1;
                     LogHelper.Warn($"扫码等待 SN 超时（{ScanWaitMs}ms），结果已写 2 通知 PLC（等待人工补录）");
@@ -601,6 +626,7 @@ namespace CommandCenter.Services
             if (_scanResultWritten == 2 && _serialReceived)
             {
                 _plc.WriteScanResult(1);          // 覆盖：2(NG) → 1(OK)
+                _scanResultWriteUtc = DateTime.UtcNow;   // V2.14.43：记扫码结果写时刻（排查日志，补录覆盖也算一次写）
                 _scanResultWritten = 1;
                 _serialReceived = false;          // 补录的码已消费，防残留污染下一轮
                 SetState("扫码 OK（人工补录），等待 PLC 复位请求");
@@ -620,7 +646,10 @@ namespace CommandCenter.Services
                 _activeCh = ChNone;
                 _scanReqResetSeen = false;        // V2.14.41：通道释放，下一轮 BeginScanChannel 重新初始化
                 SetState("等待 PLC 请求");
-                LogHelper.Info("PLC 已复位扫码请求，上位机复位扫码结果");
+                LogHelper.Info("PLC 已复位扫码请求，上位机复位扫码结果"
+                    + (_scanResultWriteUtc == default(DateTime)
+                        ? "（结果未写）"
+                        : $"（{(int)(DateTime.UtcNow - _scanResultWriteUtc).TotalMilliseconds}ms 距写结果）"));
             }
         }
 
@@ -650,6 +679,13 @@ namespace CommandCenter.Services
             _pendStation = stationNo;
             _reqResetSeen = false;  // V2.14.41：新一轮开始时"PLC 已复位请求"尚未观察（边沿确认，见 StepCameraChannel 步骤2）
             _resultCleared = false; // V2.14.42：新一轮开始时"本拍结果已提前清零"尚未发生（见 StepCameraChannel 步骤2）
+            _reqAdvancedSeen = false; // V2.14.44：新一轮开始时"点位推进推断"尚未观察到（见 StepCameraChannel 步骤2）
+            _lastStepReqVal = -1;   // V2.14.43：排查日志探针复位（每拍从"值未记录"起，见 StepCameraChannel 步骤2）
+
+            // V2.14.44 保护版：上一拍若走"点位推进推断"放行释放、结果寄存器未清 0，可能残留上一拍 1/2；
+            // 新拍受理时先把本相机结果寄存器清 0——此刻本拍结果尚未写入，清的是上一拍残留，
+            // 绝不会误清新拍判定（PLC 即使这一拍就过来读结果，读到干净 0 也是合理等待）。
+            _plc.WriteCameraResult(_cameraCfgs[camIdx], 0);
 
             string camLabel = CameraLabel(camIdx);
             if (skip)
@@ -667,7 +703,7 @@ namespace CommandCenter.Services
             _chStep = 1;    // 步骤1：拍照进行中（判定即写，Task 里判定一出就落结果，不等图归档）
             _taskDone = false;  // V2.13.7：Task 结束（判定+取图+归档+显示全做完）才允许通道释放
             SetState($"点位{stationNo} 触发 {camLabel} 拍照");
-            LogHelper.Info($"收到 PLC 拍照请求：{camLabel}，点位{stationNo}（窗口{windowIndex}）");
+            LogHelper.Info($"***************************流程状态：点位{stationNo} 触发 {camLabel} 拍照（窗口{windowIndex}）*******************************");
 
             // 触发+取图+归档+显示 全部在后台线程，完成后只回传 _chanResult 给轮询线程
             System.Threading.Tasks.Task.Run(() => DoCameraShot(camIdx, stationNo, windowIndex));
@@ -738,8 +774,10 @@ namespace CommandCenter.Services
                     int code = _chanResult;
                     _chanResult = -1;
                     _plc.WriteCameraResult(cfg, code);
+                    _chanResultWriteUtc = DateTime.UtcNow;   // V2.14.43：记写结果时刻（排查日志）
                     _chStep = 2;
                     SetState($"点位{_pendStation} 已上报结果({code})，等待 PLC 复位请求");
+                    LogHelper.Info($"相机[{CameraLabel(camIdx)}] 点位{_pendStation} step1 兜底补写结果({code})到 D{cfg.PlcResultAddress}");
                 }
                 return;
             }
@@ -771,29 +809,56 @@ namespace CommandCenter.Services
             //   修复：拿到"PLC 已读走本拍结果"的回执（_reqResetSeen）就【立即】写 0、_resultCleared=true，
             //   残留窗口从 3~5s 缩到 -100ms（观察到复位的下个轮询周期）；结果只清一次，通道仍由
             //   _taskDone 闸门控制释放（防并发取图，V2.13.7 红线不回退），释放时不再重复写 0。
-            if (!_reqResetSeen)
+            // ── V2.14.43 排查日志：请求值变化探针 ──
+            // step2 每 100ms 轮询一次读请求寄存器，仅当"值变化"时打一条（含"距写结果 Xms"），
+            // 用来看清三步"判定即写 → 请求复位(0) → 清结果"的实际时间跨度，判断清 0 是否早于
+            // PLC 读走——PLC 读不到 40005 时这就是第一手证据（正常应为：PLC 先读走→复位请求，
+            // 清 0 距写结果至少数百 ms；若清 0 距写结果仅几十 ms，说明清 0 抢在 PLC 轮询之前）。
+            bool resetOkV = _plc.ReadCameraRequest(cfg, out int still);
+            if (resetOkV && still != _lastStepReqVal)
             {
-                bool resetOk = _plc.ReadCameraRequest(cfg, out int still);
-                if (resetOk && still == 0)
-                {
-                    _reqResetSeen = true;   // ① 观察到 PLC 已把请求复位为 0（边沿记忆）
-                }
-                else if (resetOk && still > 0 && still != _pendStation)
-                {
-                    _reqResetSeen = true;   // ② 请求已推进到另一点位：PLC 已读走本拍结果并进入下一拍
-                }
+                _lastStepReqVal = still;
+                string sinceV = _chanResultWriteUtc == default(DateTime)
+                    ? "结果未写"
+                    : $"{(int)(DateTime.UtcNow - _chanResultWriteUtc).TotalMilliseconds}ms(距写结果)";
+                LogHelper.Info($"相机[{CameraLabel(camIdx)}] 点位{_pendStation} step2 请求值变化: {still}（{sinceV}）");
             }
+            // 【V2.14.44 保护版·复位确认拆两档】
+            //  ① _reqResetSeen（真回执）：PLC 把请求写成 0 = 已读走本拍结果的硬证据 → 允许立即清 0；
+            //  ② _reqAdvancedSeen（推断）：请求推进到别的点位 = 大概率已读走 → 只用作通道释放兜底，
+            //     不参与立即清 0（防"PLC 先推进、后读走"却被误判断、抢在 PLC 读之前把 1/2 清掉）。
+            // 改回 V2.14.42 原行为：把下方"立即清 0"与"释放"两处条件里的 _reqAdvancedSeen 语义并回
+            // _reqResetSeen 即可（恢复"推断也立即清 0"），此块两行独立 if 不变。
+            if (!_reqResetSeen && resetOkV && still == 0)
+            {
+                _reqResetSeen = true;   // ① 真复位回执：PLC 已把请求复位为 0（边沿记忆，永久可信）
+            }
+            if (!_reqAdvancedSeen && resetOkV && still > 0 && still != _pendStation)
+            {
+                _reqAdvancedSeen = true; // ② 请求已推进到另一点位：推断 PLC 已读走本拍结果并进入下一拍
+            }
+            // 【V2.14.44 保护版·立即清 0 收紧】只认"真回执 _reqResetSeen"才立即清 0（V2.14.42 优化保留）；
+            // "推断 _reqAdvancedSeen"不再触发清 0——宁可让值多留一阵，也绝不在 PLC 读走之前抢清。
             if (_reqResetSeen && !_resultCleared)
             {
+                string sinceC = _chanResultWriteUtc == default(DateTime)
+                    ? "结果未写"
+                    : $"{(int)(DateTime.UtcNow - _chanResultWriteUtc).TotalMilliseconds}ms(距写结果)";
+                LogHelper.Info($"相机[{CameraLabel(camIdx)}] 点位{_pendStation} PLC 已读走本拍结果，立即清结果 D{cfg.PlcResultAddress}=0（{sinceC}）");
                 _plc.WriteCameraResult(cfg, 0);   // V2.14.42：本拍结果已被 PLC 读走 → 立即清 0 杜绝残留误读
                 _resultCleared = true;
             }
-            if (_taskDone && _resultCleared)
+            // 通道释放：Task 完全结束 且（结果已清 0 或 已观察到点位推进推断）。
+            // V2.14.44 起释放不再绑定"已清 0"：走"推断"放行时结果寄存器残留由下一拍 BeginCameraChannel 清 0
+            // （见 BeginCameraChannel 受理时 WriteCameraResult 0），既防通道卡死、又不抢在 PLC 读走前清值。
+            if (_taskDone && (_resultCleared || _reqAdvancedSeen))
             {
+                LogHelper.Info($"相机[{CameraLabel(camIdx)}] 点位{_pendStation} 通道释放（复位完成），等待 PLC 请求");
                 _activeCh = ChNone;
                 _chStep = 0;
                 _reqResetSeen = false;      // 通道释放：下一轮 BeginCameraChannel 重新初始化各标志
                 _resultCleared = false;
+                _reqAdvancedSeen = false;   // V2.14.44：随通道一起复位
                 SetState("等待 PLC 请求");
             }
         }
@@ -929,9 +994,18 @@ namespace CommandCenter.Services
                 code = isOk ? 1 : 2;
                 _chanResult = code;
                 _plc.WriteCameraResult(cfg, code);
+                _chanResultWriteUtc = DateTime.UtcNow;   // V2.14.43：记写结果时刻（排查日志）
                 // 【V2.14.40 失败收口】判定即写成功 = 真实结果已落 PLC，finally 不再补写兜底 NG。
                 plcResultWritten = true;
-                LogHelper.Info($"相机[{camName}] 点位{stationNo} 判定即写已落 PLC：{(isOk ? "OK(1)" : "NG(2)")}");
+                // V2.14.43 排查日志：写后立即【读回自校验】——确认值真的落进 DataStore 结果寄存器。
+                // 若读回≠写入值（地址越界/DataStore 异常），PLC 必然读不到，先把这条排除掉。
+                ushort echoVal = 0;
+                bool echoOk = cfg.PlcResultAddress > 0
+                    && _plc.ReadRegister((ushort)cfg.PlcResultAddress, out echoVal);
+                LogHelper.Info($"相机[{camName}] 点位{stationNo} 判定即写已落 PLC：{(isOk ? "OK(1)" : "NG(2)")}"
+                    + (echoOk
+                        ? $"（读回 D{cfg.PlcResultAddress}={echoVal}，写读{(code == echoVal ? "一致" : "不一致")}）"
+                        : $"（读回校验失败 D{cfg.PlcResultAddress}）"));
 
                 // ③ 取图 + 归档（Ftp：轮询取图目录拿最新对；Tcp：BR 同步读回）——纯异步补充材料，
                 //  只影响窗口显示与存图，不参与 PLC 结果（结果已在②末尾写掉）
