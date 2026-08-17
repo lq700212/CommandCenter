@@ -1,5 +1,47 @@
 # 版本改动记录
 
+## V2.14.49（2026-08-17）显示链路"半截文件防丢图"：预览图加载失败改为归档后**后台补发**，根治"相机拍了、结果上报了、但某窗口没图"且**不影响节拍**
+
+> 现场现象（2026-08-17）：最新一轮上相机**点位14** 相机触发/判定/归档全正常（日志"点位14 检测
+> 完成：OK → …（窗口14）"），但主窗体窗口14 没有显示图片。日志佐证：该拍从"取图命中"到"归档完成"
+> 间隔 **429ms**（同轮其它所有点位 103~154ms，唯一异常值）——jpeg/iv4p 写入明显偏慢。
+
+### 根因
+
+1. `DoCameraShot` FTP 分支在取图后**立即**同步 `LoadThumbnailSafe(jpeg)` 加载内存预览图（V2.13.2
+   显示提速）；
+2. jpeg 由 ImageStore 的 FileSystemWatcher **Created 事件**唤来，而 Created 在"文件创建"瞬间触发、
+   相机推图是"先建文件再写入"——事件到达时文件可能**仍半截**，GDI+ 解码必失败 → `PreviewImage=null`；
+3. UI 收到 null 走回退路径（`MainForm.OnInspectionFinished`），从 `data.ImagePath` 异步加载——而
+   `ImagePath` 填的是 **FTP 源 jpeg 路径**，它归档成功后**立即被 `DeleteSourceFile` 删除**，回退 Task
+   要么赶上文件半截、要么赶上文件已被删，最终 `SetImage(null)` → 窗口灰底无图。
+
+### 改动内容
+
+- **`Services/ProductionCoordinator.cs`**：
+  - 新增事件 `DisplayImageAvailable(int windowIndex, Image thumb, bool isOk)`——"迟到补发"专用，语义
+    只更新窗口图片/徽标、**不重复计数**（计数仍由 InspectionFinished 处理）；
+  - DoCameraShot FTP 分支预览加载**只试一次、失败不阻塞**（不做任何同步等待）——显示事件照抛
+    （UI 计数/徽标照常、窗口先空图）→ 归档 → **归档成功后**若 preview 为 null 且归档成功，启动
+    **后台 Task** 读【完整归档副本】解码并补发：归档发生在"补等 iv4p 之后"，jpeg 此时已写完、
+    副本完整可靠，且补发在后台线程、与协调器 `_taskDone`/通道释放/PLC 握手**完全解耦**；
+    补发前检查 `_disposed`（协调器换代即放弃，符合 V2.14.36 换代守卫）与是否有订阅者，无则
+    原地 Dispose 缩略图防句柄泄漏。
+- **`Views/MainForm.cs`**：
+  - `SubscribeCoordinatorEvents` 订阅 `DisplayImageAvailable` → `OnDisplayImageAvailable`：
+    BeginInvoke 回 UI 线程后按窗口编号更新图片+徽标（与 ApplyResultImage 同语义），窗口已重建则
+    原地 Dispose；不调用 `UpdateCountsTitle`（不重复计数）；
+  - 回退路径保留 200ms 快速重试（删源前文件恰好写完的即时补救），注释标明真正补救由补发事件兜底。
+
+### 为什么这么改
+
+- **节拍零影响**：补发全部发生在归档完成之后的后台线程，协调器不做任何阻塞等待，`_taskDone` 与
+  通道释放时序与旧版完全一致（对比初版"同步重试 1s"方案——那会拖慢通道释放、下一拍受理最多
+  延迟 1s，用户否决）；正常情况（文件完整）preview 非 null、补发不触发，开销为零；
+- **补救可靠**：补发读的是"补等 iv4p 后才归档的完整副本"，而非会被删除的 FTP 源文件，成功率远高于
+  UI 回退路径；只更新图片不重复计数，不破坏检测统计语义；
+- **换代安全**：补发前检查 `_disposed` + 订阅者空判，杜绝"旧协调器把图发到已重建窗口矩阵"。
+
 ## V2.14.48（2026-08-17）扫码枪异常弹窗 / 手动补录弹窗：打开期间读到真码自动关闭（免人工补录）
 
 > 现场场景：扫码枪读码失败弹出 ScannerFailForm（或操作员点【人工补录】打开 SerialInputForm）后，

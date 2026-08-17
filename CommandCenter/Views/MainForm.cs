@@ -1152,6 +1152,7 @@ namespace CommandCenter.Views
         private void SubscribeCoordinatorEvents()
         {
             _coordinator.InspectionFinished += OnInspectionFinished;
+            _coordinator.DisplayImageAvailable += OnDisplayImageAvailable;   // V2.14.49 图片迟到补发
             _coordinator.RoundStarted += OnRoundStarted;
             _coordinator.StateChanged += OnStateChanged;
             _coordinator.ErrorRaised += msg => LogHelper.Warn("界面收到错误：" + msg);
@@ -1395,12 +1396,23 @@ namespace CommandCenter.Views
                 }
 
                 // ② 回退路径：图片读盘/解码/降采样放后台 Task，完成后小图回 UI 赋值。
+                //    【V2.14.49 半截文件防丢图】协调器预览图提前加载失败（jpeg 半截）时回退到这里，
+                //    但 FTP 源文件归档后立即被删、回退大概率救不回——**真正补救由协调器归档后后台
+                //    补发（OnDisplayImageAvailable）负责**：它读完整归档副本、可靠且不阻塞节拍。
+                //    这里的 200ms 重试只是"删源前文件恰好写完"的快速路径，救不回也无妨（补发兜底）。
                 string path = data.ImagePath;
                 Task.Factory.StartNew(() =>
                 {
                     Image thumb = (!string.IsNullOrEmpty(path) && File.Exists(path))
                         ? ProductionCoordinator.LoadThumbnailSafe(path)
                         : null;
+                    if (thumb == null && !string.IsNullOrEmpty(path))
+                    {
+                        // 源 jpeg 可能半截/正在写：短等后重试一次。LoadThumbnailSafe 内部对
+                        // 文件不存在/占用/解码失败一律容错返回 null，文件已被删则自然拿到 null。
+                        System.Threading.Thread.Sleep(200);
+                        thumb = ProductionCoordinator.LoadThumbnailSafe(path);
+                    }
                     if (IsDisposed)
                     {
                         // 窗体已关：无窗口可显示，立即释放缩略图防 GDI+ 句柄泄漏
@@ -1457,6 +1469,33 @@ namespace CommandCenter.Views
             else
             {
                 thumb?.Dispose(); // 窗口已重建：释放刚加载的缩略图，防句柄泄漏
+            }
+        }
+
+        /// <summary>
+        /// 图片"迟到补发"（V2.14.49）：协调器预览图提前加载失败（jpeg 半截）时，归档完成后在后台
+        /// 读完整归档副本解码并补发本事件。只更新对应窗口图片与徽标、【不重复计数】——计数已在
+        /// OnInspectionFinished 处理过，本事件只补图片。thumb 由协调器后台线程创建、经 BeginInvoke
+        /// 转交 UI 线程后赋给窗口（SetImage 内部先 Dispose 旧图再接管新图）；窗口已消失（禁用/切型号
+        /// 重建）时原地 Dispose 防句柄泄漏。收到时窗口可能已显示过回退图，覆盖赋值幂等无害。
+        /// </summary>
+        private void OnDisplayImageAvailable(int windowIndex, Image thumb, bool isOk)
+        {
+            if (IsDisposed) { thumb?.Dispose(); return; }
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new Action<int, Image, bool>(OnDisplayImageAvailable), windowIndex, thumb, isOk); }
+                catch { thumb?.Dispose(); }   // 关窗竞态：句柄已销毁，原地释放
+                return;
+            }
+            if (_windowControls.TryGetValue(windowIndex, out var w))
+            {
+                w.SetImage(thumb);
+                w.SetOkNgStatus(isOk);
+            }
+            else
+            {
+                thumb?.Dispose();   // 窗口已重建：释放补发的缩略图，防句柄泄漏
             }
         }
 

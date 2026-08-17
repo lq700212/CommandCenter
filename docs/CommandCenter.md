@@ -1602,6 +1602,21 @@ SubDirs 为空时用模型默认含 `{相机}` 的四层 `{年月日}/{SN}/{相�
 
 > 本部分保留原 `通讯接入.md` 的版本演进记录，最新在前。
 
+- V2.14.49（2026-08-17，显示链路"半截文件防丢图"：预览图加载失败改为归档后**后台补发**，根治"相机
+  拍了、结果上报了、但某窗口没图"且**不影响节拍**）：现场上相机点位14 相机触发/判定/归档全正常但
+  窗口14 没显示图，日志该拍"取图→归档"间隔 429ms（同轮其它点位 103~154ms）暴露 jpeg 写入偏慢。
+  根因：`DoCameraShot` FTP 分支取图后立即 `LoadThumbnailSafe(jpeg)` 加载预览图，但 jpeg 由 watcher
+  **Created 事件**唤来（"先建文件再写入"），事件到达时文件可能半截 → 解码失败 → `PreviewImage=null`
+  → UI 回退从 `ImagePath`（FTP 源 jpeg 路径）异步加载，而源文件归档后立即被删 → 回退也失败 → 窗口
+  空图。修复：协调器预览加载**只试一次、失败不阻塞**（不做同步等待，节拍零影响），显示事件照抛
+  （计数/徽标照常），归档完成后由**后台 Task 读完整归档副本**（补等 iv4p 后才归档，jpeg 已写完、
+  副本完整可靠）解码并补发新事件 `DisplayImageAvailable(windowIndex, thumb, isOk)`——只更新窗口图片/
+  徽标、不重复计数；补发前检查 `_disposed` 与订阅者空判（换代即放弃、无订阅者则 Dispose 缩略图）。
+  MainForm 订阅该事件经 BeginInvoke 回 UI 线程更新对应窗口，窗口已重建则原地 Dispose；回退路径保留
+  200ms 快速重试（删源前恰好写完的即时补救），真正补救由补发事件兜底。涉及：
+  `Services/ProductionCoordinator.cs` / `Views/MainForm.cs`。无协议/寄存器/相机指令变化。同步
+  CHANGELOG（V2.14.49）/AGENTS.md（显示链路段）。
+
 - V2.14.48（2026-08-17，扫码枪异常弹窗/手动补录弹窗打开期间读到真码自动关闭）：`ScannerFailForm`
   与 `SerialInputForm` 构造新增可选参数 `scanners`（`IEnumerable<IScanner>`），窗口打开期间订阅每台
   扫码枪的 `SerialNumberScanned`——一旦读到真码（说明扫码枪已恢复、扫码路径已把 40004 从 2 覆盖成 1），

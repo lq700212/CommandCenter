@@ -240,6 +240,15 @@ namespace CommandCenter.Services
         /// <summary>检测流程异常提醒（参数为提示文本）</summary>
         public event Action<string> ErrorRaised;
 
+        /// <summary>
+        /// 图片"迟到补发"事件（V2.14.49 后台等图，不阻塞节拍）：预览图提前加载失败（jpeg 半截）时，
+        /// 协调器先抛 InspectionFinished（UI 计数/徽标照常），归档完成后在后台线程读【完整归档副本】
+        /// 解码，成功再补发本事件——只更新对应窗口图片与徽标，不重复计数（计数已在 InspectionFinished
+        /// 处理）。参数：(windowIndex 窗口编号, thumb 内存缩略图, isOk 判定结果)。thumb 所有权转交
+        /// 接收方（接收方负责 Dispose）。
+        /// </summary>
+        public event Action<int, Image, bool> DisplayImageAvailable;
+
         /// <summary>流程状态文本（空闲/扫码/拍照中），UI 可显示</summary>
         public event Action<string> StateChanged;
 
@@ -1052,9 +1061,15 @@ namespace CommandCenter.Services
                     }
                     // 【V2.13.2 显示提速 + V2.14.39 显示不等归档】jpeg 一到位立刻加载内存缩略图并
                     // 【立即抛显示事件】（不等 iv4p、不等归档复制）——UI 毫秒级出图，现场画面不被
-                    // iv4p 迟到的等待拖住（显示要的是 jpeg、不是 iv4p）。源文件此刻尚未被删、
-                    // SaveImageFilePair 用 FileShare.ReadWrite，即使相机仍在写也最多加载失败为 null，
-                    // 失败则 UI 回退按 ImagePath（此处暂用源 jpeg 路径）加载，无副作用。
+                    // iv4p 迟到的等待拖住（显示要的是 jpeg、不是 iv4p）。
+                    // 【V2.14.49 半截文件防丢图（后台补发，不阻塞节拍）】jpeg 由 ImageStore 的
+                    // FileSystemWatcher Created 事件唤来，而 Created 在"文件创建"瞬间触发、相机推图
+                    // 是"先建文件再写入"——事件到达时文件可能仍半截，GDI+ 解码失败（preview=null）。
+                    // 此时【不在这里阻塞等待】——同步 Sleep 会拖慢 _taskDone → 通道释放 → 下一拍
+                    // 受理，影响节拍。改为：显示事件照抛（UI 计数/徽标不受影响，窗口先空图）→ 归档 →
+                    // 归档成功后由后台 Task 读【完整归档副本】解码并补发（见 archived 之后的补发段）：
+                    // 归档发生在"补等 iv4p 之后"，jpeg 此时已写完，副本完整可靠；补发在后台线程、
+                    // 与协调器节拍完全解耦。正常情况（文件完整）preview 非 null，不走补发。
                     preview = ProductionCoordinator.LoadThumbnailSafe(jpeg);
                     _seqNo++;
                     var ftpData = new WindowData
@@ -1093,6 +1108,35 @@ namespace CommandCenter.Services
                         LogHelper.Warn($"相机[{camName}] 点位{stationNo} 图像归档失败（FTP 取图，显示已出图）");
                     }
                     LogHelper.Info($"点位{stationNo} 检测完成：{(isOk ? "OK" : "NG")} → {archived}（窗口{windowIndex}）");
+                    // 【V2.14.49 后台补发：预览图加载失败（jpeg 半截）时，归档成功后后台读完整归档副本
+                    // 解码并补发给 UI】不阻塞协调器 Task——_taskDone/通道释放/PLC 握手全部照常，节拍
+                    // 零影响；只在该窗口"首次预览解码失败"这一异常时刻触发（正常 preview 非 null 跳过）。
+                    // 读的是归档副本（补等 iv4p 之后才归档，jpeg 已写完、完整），比回退读"会被删除的
+                    // FTP 源文件"可靠得多。
+                    if (preview == null && archived != null && !_disposed)
+                    {
+                        LogHelper.Warn($"相机[{camName}] 点位{stationNo} 预览图加载失败（jpeg 半截），归档后后台补发显示");
+                        var lateHandler = DisplayImageAvailable;
+                        int lateWin = windowIndex;
+                        bool lateOk = isOk;
+                        string latePath = archived;
+                        System.Threading.Tasks.Task.Run(() =>
+                        {
+                            Image lateThumb = ProductionCoordinator.LoadThumbnailSafe(latePath);
+                            if (lateThumb == null)
+                            {
+                                LogHelper.Warn($"相机[{camName}] 点位{stationNo} 归档副本解码失败，该窗口将无图");
+                                return;
+                            }
+                            if (_disposed || lateHandler == null)
+                            {
+                                lateThumb.Dispose();   // 协调器已换代 / 无订阅者：不显示，立即释放防句柄泄漏
+                                return;
+                            }
+                            try { lateHandler(lateWin, lateThumb, lateOk); }
+                            catch { lateThumb.Dispose(); }   // 接收方异常（关窗等）：释放防句柄泄漏
+                        });
+                    }
                     return; // FTP 分支已"显示先行"并就地收尾，不再走下方 TCP 的 hasImage/显示段
                 }
                 if (!hasImage)
