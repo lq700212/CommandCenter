@@ -95,6 +95,7 @@ namespace CommandCenter.Views
             this.chkWindowIndex = new System.Windows.Forms.CheckBox();
             this.chkWindowToolTip = new System.Windows.Forms.CheckBox();
             this.chkAutoFit = new System.Windows.Forms.CheckBox();
+            this.btnToggleLanguage = new System.Windows.Forms.Button();
             this.lblCams = new System.Windows.Forms.Label();
             this.gridCameras = new System.Windows.Forms.DataGridView();
             this.btnAddCam = new System.Windows.Forms.Button();
@@ -356,6 +357,20 @@ namespace CommandCenter.Views
             this.chkAutoFit.Text = "自适应";
             this.chkAutoFit.UseVisualStyleBackColor = true;
             //
+            // btnToggleLanguage
+            // 界面语言切换按钮（V2.15.0 国际化）：点击直接切换中/英文（当前界面语言是中文 → 切到
+            // English，是英文 → 切回中文），立即热生效（I18n.Language 触发 LanguageChanged，
+            // 主界面/本窗体文字同时刷新、无需重启），点【保存】才写盘持久化。
+            // 按钮文本 = "目标语言名"（语言名本身不翻译，自解释）：中文界面显示 "English"、英文界面显示 "中文"。
+            // 必须加到 pnlScroll（见下方 pnlScroll.Controls.Add），否则不显示。
+            //
+            this.btnToggleLanguage.Location = new System.Drawing.Point(445, 57);
+            this.btnToggleLanguage.Name = "btnToggleLanguage";
+            this.btnToggleLanguage.Size = new System.Drawing.Size(110, 31);
+            this.btnToggleLanguage.TabIndex = 42;
+            this.btnToggleLanguage.Text = "English";
+            this.btnToggleLanguage.UseVisualStyleBackColor = true;
+            //
             // lblCams
             // 相机列表标题，加粗醒目
             //
@@ -534,6 +549,7 @@ namespace CommandCenter.Views
             this.pnlScroll.Controls.Add(this.btnAddCam);
             this.pnlScroll.Controls.Add(this.gridCameras);
             this.pnlScroll.Controls.Add(this.lblCams);
+            this.pnlScroll.Controls.Add(this.btnToggleLanguage);
             this.pnlScroll.Controls.Add(this.chkAutoFit);
             this.pnlScroll.Controls.Add(this.chkWindowToolTip);
             this.pnlScroll.Controls.Add(this.chkWindowIndex);
@@ -710,6 +726,7 @@ namespace CommandCenter.Views
         private CheckBox chkWindowIndex;
         private CheckBox chkWindowToolTip;
         private CheckBox chkAutoFit;
+        private Button btnToggleLanguage;
         private Label lblCams;
         private DataGridView gridCameras;
         private Button btnAddCam;

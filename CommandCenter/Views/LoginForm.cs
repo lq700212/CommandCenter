@@ -109,6 +109,7 @@ namespace CommandCenter.Views
 
             txtUser.Focus();
             txtUser.SelectAll(); // 选中整个账号文本，用户若想改直接输入即覆盖
+            ApplyLanguage();    // V2.15.0 国际化：按当前语言初始化全部文本
         }
 
         /// <summary>ESC 键：改密码面板时先回登录面板；登录面板时直接关闭（同取消）。</summary>
@@ -138,7 +139,7 @@ namespace CommandCenter.Views
             pnlChangePwd.Visible = false;
             pnlLogin.Visible = true;
             pnlLogin.BringToFront();
-            lblBanner.Text = "账号登录";
+            lblBanner.Text = I18n.T("账号登录", "Account Login"); // V2.15.0 双语
             AcceptButton = btnLogin;
         }
 
@@ -153,15 +154,17 @@ namespace CommandCenter.Views
                     StringComparison.OrdinalIgnoreCase);
             if (isDev)
             {
-                MessageBox.Show("开发者账号的密码在配置中维护，不支持在此修改。\n请用管理员账号修改或改配置文件。",
-                    "修改密码", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(I18n.T(
+                    "开发者账号的密码在配置中维护，不支持在此修改。\n请用管理员账号修改或改配置文件。",
+                    "The developer account password is maintained in the config file and cannot be changed here.\nUse the admin account or edit the config file."),
+                    I18n.T("修改密码", "Change Password"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
             pnlLogin.Visible = false;
             pnlChangePwd.Visible = true;
             pnlChangePwd.BringToFront();
-            lblBanner.Text = "修改密码";
+            lblBanner.Text = I18n.T("修改密码", "Change Password"); // V2.15.0 双语
             AcceptButton = btnSavePwd;
             txtOldPwd.Clear();
             txtNewPwd.Clear();
@@ -234,7 +237,8 @@ namespace CommandCenter.Views
             }
 
             LogHelper.Warn($"登录失败（用户名={user}）");
-            MessageBox.Show("用户名或密码错误，请重新输入。", "登录失败",
+            MessageBox.Show(I18n.T("用户名或密码错误，请重新输入。", "Incorrect user name or password. Please try again."),
+                I18n.T("登录失败", "Login Failed"),
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             txtPwd.Clear();
             txtPwd.Focus();
@@ -254,7 +258,8 @@ namespace CommandCenter.Views
                 || !string.Equals(oldPwdHash, _config.Security.AdminPasswordHash,
                     StringComparison.OrdinalIgnoreCase))
             {
-                MessageBox.Show("原密码不正确，请重新输入。", "修改密码",
+                MessageBox.Show(I18n.T("原密码不正确，请重新输入。", "The current password is incorrect. Please re-enter it."),
+                    I18n.T("修改密码", "Change Password"),
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtOldPwd.Clear();
                 txtOldPwd.Focus();
@@ -264,7 +269,8 @@ namespace CommandCenter.Views
             string newPwd = txtNewPwd.Text;
             if (newPwd.Length < 6)
             {
-                MessageBox.Show("新密码至少 6 位，请重新输入。", "修改密码",
+                MessageBox.Show(I18n.T("新密码至少 6 位，请重新输入。", "New password must be at least 6 characters. Please re-enter it."),
+                    I18n.T("修改密码", "Change Password"),
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtNewPwd.Clear();
                 txtNewPwd.Focus();
@@ -272,7 +278,8 @@ namespace CommandCenter.Views
             }
             if (newPwd != txtNewPwd2.Text)
             {
-                MessageBox.Show("两次输入的新密码不一致，请重新输入。", "修改密码",
+                MessageBox.Show(I18n.T("两次输入的新密码不一致，请重新输入。", "The two new passwords do not match. Please re-enter them."),
+                    I18n.T("修改密码", "Change Password"),
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtNewPwd2.Clear();
                 txtNewPwd2.Focus();
@@ -296,7 +303,8 @@ namespace CommandCenter.Views
             {
                 ConfigStore.Save(_config);
                 LogHelper.Info("管理员密码已修改并写盘");
-                MessageBox.Show("密码修改成功，下次登录请使用新密码。", "修改密码",
+                MessageBox.Show(I18n.T("密码修改成功，下次登录请使用新密码。", "Password changed. Use the new password next time you log in."),
+                    I18n.T("修改密码", "Change Password"),
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 ShowLoginPanel(null, EventArgs.Empty); // 改完切回登录面板，用新密码登录即可
                 txtPwd.Clear();
@@ -305,9 +313,34 @@ namespace CommandCenter.Views
             catch (Exception ex)
             {
                 LogHelper.Error("保存管理员密码失败：" + ex.Message);
-                MessageBox.Show("密码已修改但写盘失败（" + ex.Message + "），本次运行生效，重启后可能恢复旧密码。",
-                    "修改密码", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(I18n.T(
+                    "密码已修改但写盘失败（" + ex.Message + "），本次运行生效，重启后可能恢复旧密码。",
+                    "Password changed but saving failed (" + ex.Message + "). Effective for this run; it may revert after restart."),
+                    I18n.T("修改密码", "Change Password"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
+        }
+
+        /// <summary>
+        /// V2.15.0 国际化：按当前语言刷新本窗体全部界面文字。
+        /// 在构造函数末尾调用（模态对话框打开瞬间按当前语言初始化；模态期间语言不会变化）。
+        /// Designer 里的静态中文文本保持原样（方便 VS 设计器维护布局），运行时统一在这里覆盖。
+        /// </summary>
+        private void ApplyLanguage()
+        {
+            this.Text = I18n.T("账号登录", "Account Login");
+            lblBanner.Text = I18n.T("账号登录", "Account Login"); // 面板切换时会再按语义覆盖（登录/改密码）
+            lblUser.Text = I18n.T("用户名:", "User Name:");
+            lblPwd.Text = I18n.T("密　码:", "Password:");
+            chkRemember.Text = I18n.T("记住密码", "Remember Password");
+            btnChangePwd.Text = I18n.T("修改密码", "Change Password");
+            btnLogin.Text = I18n.T("登 录", "Log In");
+            lblOldPwd.Text = I18n.T("原密码:", "Current Password:");
+            lblNewPwd.Text = I18n.T("新密码:", "New Password:");
+            lblNewPwd2.Text = I18n.T("确认密码:", "Confirm Password:");
+            btnSavePwd.Text = I18n.T("保存修改", "Save Changes");
+            btnBack.Text = I18n.T("返回登录", "Back to Login");
+            lblPwdHint.Text = I18n.T("新密码至少 6 位，改后需用新密码登录", "New password must be at least 6 characters; use it next login");
         }
     }
 }

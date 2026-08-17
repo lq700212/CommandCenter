@@ -104,6 +104,8 @@ namespace CommandCenter.Utils
             if (cfg.Display == null) cfg.Display = new Models.DisplayConfig();
             if (cfg.Image == null) cfg.Image = new Models.ImageConfig();
             if (cfg.Security == null) cfg.Security = new Models.SecurityConfig();
+            // V2.15.0：界面语言兜底——空串/非法值一律回落中文（json 手改脏也不崩）。
+            if (string.IsNullOrWhiteSpace(cfg.Language)) cfg.Language = "zh-CN";
 
             // V2.13.4：相机配置升级——补 CameraId（旧配置无此字段=0 → 按行序）与 PLC 通道地址
             // （旧配置 plcRequestAddress=0 曾是"按相机序号自动"，V2.13.4 起改为显式配置，这里把

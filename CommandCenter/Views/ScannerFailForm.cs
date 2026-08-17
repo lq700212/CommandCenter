@@ -77,7 +77,7 @@ namespace CommandCenter.Views
             // 失败文本有值才显示（线程安全：构造在 UI 线程，只在 ShowDialog 前设置一次）
             lblFailText.Visible = !string.IsNullOrEmpty(failText);
             if (!string.IsNullOrEmpty(failText))
-                lblFailText.Text = "读码失败文本：" + failText;
+                lblFailText.Text = I18n.T("读码失败文本：" + failText, "Failed text: " + failText);
 
             // 回车=人工补录 / Esc=稍后处理（窗体的 AcceptButton/CancelButton）
             AcceptButton = btnManual;
@@ -98,6 +98,24 @@ namespace CommandCenter.Views
                 if (sc != null) sc.SerialNumberScanned += OnScannerScanned;
             }
             FormClosed += (s, e) => UnsubscribeScanners();
+            ApplyLanguage(); // V2.15.0 国际化：按当前语言初始化文本
+        }
+
+        /// <summary>
+        /// V2.15.0 国际化：按当前语言刷新本窗体全部界面文字。
+        /// 在构造函数末尾调用（模态对话框打开瞬间按当前语言初始化；模态期间语言不会变化）。
+        /// 注意 lblFailText 由构造参数动态设置（含读码失败原文），这里不覆盖它。
+        /// </summary>
+        private void ApplyLanguage()
+        {
+            this.Text = I18n.T("扫码枪异常", "Scanner Error");
+            lblBanner.Text = I18n.T("扫码枪异常", "Scanner Error");
+            lblMessage.Text = I18n.T(
+                "扫码枪读码失败，请检查扫码枪：\n· 电源是否正常 / TCP 是否已连接\n· 触发指令配置与扫码枪设置是否一致",
+                "Scanner failed to read. Please check the scanner:\n· Power / TCP connection\n· Trigger command matches the scanner settings");
+            chkMuteToday.Text = I18n.T("今日不再提醒", "Don't remind today");
+            btnLater.Text = I18n.T("稍后处理", "Later");
+            btnManual.Text = I18n.T("人工补录", "Manual Input");
         }
 
         /// <summary>

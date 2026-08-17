@@ -5,6 +5,7 @@ using System.Linq;
 using System.Windows.Forms;
 using CommandCenter.Models;
 using CommandCenter.Services;
+using CommandCenter.Utils;
 
 namespace CommandCenter.Views
 {
@@ -75,6 +76,7 @@ namespace CommandCenter.Views
             lstLevels.SelectedIndex = 0;   // 会触发 SelectedIndexChanged → txtLevelName 同步 + 插入目标锁定层级名
 
         RefreshPreview();               // 初始预览
+        ApplyLanguage();                // V2.15.0 国际化：按当前语言初始化文本
     }
 
         /// <summary>把配置填进界面：根目录、目录层级列表、文件名规则、时间戳后缀、保留天数。</summary>
@@ -122,7 +124,7 @@ namespace CommandCenter.Views
             {
                 if (_activeEdit == null) _activeEdit = txtLevelName;   // 兜底：绝不会让插入没去处
                 string ph = cmbPlaceholder.SelectedItem?.ToString();
-                if (string.IsNullOrWhiteSpace(ph)) { MessageBox.Show("请先在下拉框选择要插入的占位符。", "提示"); return; }
+                if (string.IsNullOrWhiteSpace(ph)) { MessageBox.Show(I18n.T("请先在下拉框选择要插入的占位符。", "Select a placeholder from the drop-down first."), I18n.T("提示", "Notice")); return; }
                 int pos = _activeEdit.SelectionStart;
                 _activeEdit.Text = _activeEdit.Text.Insert(pos, ph);
                 _activeEdit.SelectionStart = pos + ph.Length;   // 光标移到插入内容之后
@@ -203,7 +205,7 @@ namespace CommandCenter.Views
         private void DeleteLevel()
         {
             int idx = lstLevels.SelectedIndex;
-            if (idx < 0) { MessageBox.Show("请先选中要删除的层级。", "提示"); return; }
+            if (idx < 0) { MessageBox.Show(I18n.T("请先选中要删除的层级。", "Select a level to delete first."), I18n.T("提示", "Notice")); return; }
             lstLevels.Items.RemoveAt(idx);
             if (lstLevels.Items.Count == 0) AddLevel("");
             else lstLevels.SelectedIndex = Math.Min(idx, lstLevels.Items.Count - 1);
@@ -326,12 +328,17 @@ namespace CommandCenter.Views
                 string s = item?.ToString() ?? "";
                 if (s.IndexOf('\\') >= 0 || s.IndexOf('/') >= 0)
                 {
-                    MessageBox.Show(
+                    MessageBox.Show(I18n.T(
                         $"目录层级「{s}」里含路径分隔符（\\ 或 /）。\r\n\r\n" +
                         "每个层级只能是【一层目录】的名字或规则（如 {年月日}、{SN}、OK、NG）。\r\n" +
                         "需要多级目录请用【添加/插入层级】分开成多行，不要一次粘贴整条路径。\r\n" +
                         "本次修改未保存，请先修正后再点确定。",
-                        "目录层级格式错误", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        $"Directory level \"{s}\" contains a path separator (\\ or /).\r\n\r\n" +
+                        "Each level must be a single directory name or rule (e.g. {年月日}, {SN}, OK, NG).\r\n" +
+                        "For multiple levels use Add/Insert Level to create separate rows, do not paste a whole path.\r\n" +
+                        "This change was not saved. Fix it first, then click OK."),
+                        I18n.T("目录层级格式错误", "Invalid Directory Level"),
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;   // 中止保存，对话框保持打开
                 }
             }
@@ -352,6 +359,87 @@ namespace CommandCenter.Views
             _cfg.KeepDays = (int)nudKeepDays.Value;
 
             DialogResult = DialogResult.OK;
+        }
+
+        /// <summary>
+        /// V2.15.0 国际化：按当前语言刷新本窗体全部界面文字（标签/按钮/悬停气泡/标题）。
+        /// 在构造函数末尾调用（模态对话框打开瞬间按当前语言初始化；模态期间语言不会变化）。
+        /// 占位符下拉/预览树内容是配置数据（含 {年月日} 等占位符），不随语言翻译。
+        /// </summary>
+        private void ApplyLanguage()
+        {
+            this.Text = I18n.T("图片存储目录结构配置", "Image Directory Structure");
+            lblRootDir.Text = I18n.T("根目录:", "Root Dir:");
+            btnBrowse.Text = I18n.T("浏览...", "Browse...");
+            lblLevels.Text = I18n.T("目录层级列表（从上到下逐级目录）:", "Directory Levels (top to bottom):");
+            lblLevelName.Text = I18n.T("当前层级名称/规则:", "Current Level Name/Rule:");
+            lblPh.Text = I18n.T("插入占位符:", "Insert Placeholder:");
+            btnInsertPh.Text = I18n.T("插入", "Insert");
+            btnAddLevel.Text = I18n.T("添加层级", "Add Level");
+            btnInsertLevel.Text = I18n.T("插入到上方", "Insert Above");
+            btnInsertBelow.Text = I18n.T("插入到下方", "Insert Below");
+            btnDeleteLevel.Text = I18n.T("删除选中", "Delete Selected");
+            btnUp.Text = I18n.T("上 移", "Up");
+            btnDown.Text = I18n.T("下 移", "Down");
+            lblFileRule.Text = I18n.T("文件名规则:", "File Name Rule:");
+            lblKeepDays.Text = I18n.T("存图保留天数:", "Keep Days:");
+            chkTimestampSuffix.Text = I18n.T("时间戳后缀", "Timestamp Suffix");
+            gbPreview.Text = I18n.T("实时预览（按 OK 保存 / SN-0001 / 点位1）", "Live Preview (OK / SN-0001 / point 1)");
+            btnOk.Text = I18n.T("确定", "OK");
+            btnCancel.Text = I18n.T("取消", "Cancel");
+
+            // 悬停气泡（Designer 里的静态中文提示，运行时按语言刷新）
+            tip.SetToolTip(txtSaveRootDir, I18n.T(
+                "图片保存的根目录（绝对路径）。\r\n点\"浏览...\"可直接选文件夹；\r\n实际子目录按下方\"目录层级\"逐级创建。",
+                "Root directory for saved images (absolute path).\r\nUse \"Browse...\" to pick a folder.\r\nSub-directories are created level by level as listed below."));
+            tip.SetToolTip(btnBrowse, I18n.T("选择图片保存根目录的文件夹。", "Pick the root folder for saved images."));
+            tip.SetToolTip(lblLevels, I18n.T(
+                "存图目录从根目录起按此列表逐级创建。\r\n每级可以写固定名字（如 OK），也可以是生成规则（如 {年月日}）。\r\n顺序即建目录顺序：从上到下。",
+                "Save sub-directories are created top-to-bottom from the root.\r\nEach level can be a fixed name (e.g. OK) or a rule (e.g. {年月日})."));
+            tip.SetToolTip(lstLevels, I18n.T(
+                "目录层级列表（从上到下逐级建目录）。\r\n双击一项可直接进入编辑；\r\n支持占位符：{年月日}整个日期目录、{SN}序列号、{OKNG}→OK/NG 两个分支目录、{点位}点位号。",
+                "Directory level list (created top to bottom).\r\nDouble-click an item to edit it.\r\nPlaceholders: {年月日} date dir, {SN} serial, {OKNG}→OK/NG branches, {点位} point number."));
+            tip.SetToolTip(txtLevelName, I18n.T(
+                "当前选中层级的名字/规则，直接改文字就同步到左侧列表。\r\n支持占位符：{年月日}整个日期目录、{SN}序列号、{OKNG}→OK/NG 两个分支目录、{点位}点位号。",
+                "Name/rule of the selected level; editing it updates the list at once.\r\nPlaceholders: {年月日} date dir, {SN} serial, {OKNG}→OK/NG branches, {点位} point number."));
+            tip.SetToolTip(cmbPlaceholder, I18n.T(
+                "选中的占位符会插入到当前正在编辑的框里（目录层级名或文件名）。\r\n{年月日}→如 2026年08月11日  {SN}→序列号  {OKNG}→OK 或 NG 目录  {点位}→存图点位号  {时间}→毫秒时间戳",
+                "The selected placeholder is inserted into the box being edited (level name or file name).\r\n{年月日}→e.g. 2026-08-11  {SN}→serial  {OKNG}→OK or NG dir  {点位}→point number  {时间}→ms timestamp"));
+            tip.SetToolTip(btnInsertPh, I18n.T(
+                "把下拉框选中的占位符插到当前编辑框的光标位置，\r\n插入后光标自动移到其后。",
+                "Insert the selected placeholder at the cursor position of the current edit box."));
+            tip.SetToolTip(btnAddLevel, I18n.T(
+                "在列表末尾追加一级目录（默认给 {SN}，现场按需改）。",
+                "Append a level at the end of the list (default {SN})."));
+            tip.SetToolTip(btnInsertLevel, I18n.T(
+                "在选中层级的上方插入一级（默认 {SN}）；未选中则插到最顶部。",
+                "Insert a level above the selected one (default {SN}); top if none selected."));
+            tip.SetToolTip(btnInsertBelow, I18n.T(
+                "在选中层级的下方插入一级（默认 {SN}）；未选中则插到末尾。\r\n现场常需要把\"OK/NG\"插到某层后面，用它不用先删再加。",
+                "Insert a level below the selected one (default {SN}); end if none selected."));
+            tip.SetToolTip(btnDeleteLevel, I18n.T(
+                "删除选中的层级；删空会自动保留至少一级默认，避免存出空结构。",
+                "Delete the selected level; at least one default level is kept to avoid an empty structure."));
+            tip.SetToolTip(btnUp, I18n.T("上移选中的层级，调整目录顺序（顺序即建目录顺序）。", "Move the selected level up (order = creation order)."));
+            tip.SetToolTip(btnDown, I18n.T("下移选中的层级，调整目录顺序（顺序即建目录顺序）。", "Move the selected level down (order = creation order)."));
+            tip.SetToolTip(txtFileNameTpl, I18n.T(
+                "图片文件名规则（默认 {点位}，如 1.png）。\r\n占位符：{点位}点位号、{SN}序列号、{OKNG}→OK 或 NG、{年}/{月}/{日}日期、{时间}毫秒时间戳；\r\n其余文字原样保留。",
+                "Image file name rule (default {点位}, e.g. 1.png).\r\nPlaceholders: {点位} point, {SN} serial, {OKNG} OK/NG, {年}/{月}/{日} date, {时间} ms timestamp; other text kept as-is."));
+            tip.SetToolTip(lblKeepDays, I18n.T(
+                "存图目录只保留最近 N 天，更早的由后台定期清理删除（默认 30 天）。\r\n0 = 不自动清理。\r\n清理只动\"保存根目录\"下的过期日期目录，不影响相机 FTP 取图目录。",
+                "Keep saved images for the last N days; older ones are cleaned up by a background task (default 30).\r\n0 = no auto cleanup.\r\nOnly the save root's expired date dirs are cleaned, never the camera FTP dirs."));
+            tip.SetToolTip(nudKeepDays, I18n.T(
+                "存图目录只保留最近 N 天，更早的由后台定期清理删除（默认 30 天）。\r\n0 = 不自动清理。",
+                "Keep saved images for the last N days (default 30). 0 = no auto cleanup."));
+            tip.SetToolTip(chkTimestampSuffix, I18n.T(
+                "勾选后，存图文件名追加时间戳后缀（如 0084_20260814_164022_461.jpeg），\r\n防止同点位重复拍照/重复触发时覆盖旧图（默认开启）。\r\n取消勾选则保持相机源文件名原样（如 0084.jpeg）。",
+                "When checked, a timestamp suffix is appended to saved file names (e.g. 0084_20260814_164022_461.jpeg)\r\nto prevent overwriting old images on repeated triggers (on by default).\r\nUncheck to keep the camera source file name as-is."));
+            tip.SetToolTip(gbPreview, I18n.T(
+                "实时预览：按当前规则用示例数据（今天日期 / SN-0001 / 点位1）\r\n渲染出将来落盘的完整目录树，OK 和 NG 各展示一棵。",
+                "Live preview: renders the future directory tree with sample data (today / SN-0001 / point 1),\r\nshowing an OK tree and an NG tree."));
+            tip.SetToolTip(tvPreview, I18n.T(
+                "实时预览：按当前规则用示例数据（今天日期 / SN-0001 / 点位1）\r\n渲染出将来落盘的完整目录树，OK 和 NG 各展示一棵。",
+                "Live preview: renders the future directory tree with sample data (today / SN-0001 / point 1),\r\nshowing an OK tree and an NG tree."));
         }
     }
 }

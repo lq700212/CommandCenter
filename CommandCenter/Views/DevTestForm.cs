@@ -83,6 +83,9 @@ namespace CommandCenter.Views
         // 改为"触发后轮询扫描取图目录"，最多等这么久还见不到新图才报失败，防止"触发成功却没图"。
         private const int FtpWaitAfterTriggerMs = 5000;
 
+        /// <summary>本窗体对话框标题（V2.15.0 双语，MessageBox 统一用）。</summary>
+        private string Title => I18n.T("功能测试", "Function Test");
+
         public DevTestForm(PlcService plc, List<KeyenceIV4Camera> cameras,
             List<IScanner> scanners, List<ScanConfig> scannerConfigs,
             ImageStore imageStore, List<CameraConfig> cameraConfigs, string serialSnapshot)
@@ -105,7 +108,7 @@ namespace CommandCenter.Views
                 {
                     int camId = (i >= 0 && i < _cameraConfigs.Count && _cameraConfigs[i] != null)
                         ? _cameraConfigs[i].CameraId : 0;
-                    name = (camId > 0 ? $"相机{camId}" : $"相机{i + 1}") + "  " + _cameras[i].IpLabel;
+                    name = (camId > 0 ? I18n.T($"相机{camId}", $"Cam{camId}") : I18n.T($"相机{i + 1}", $"Cam{i + 1}")) + "  " + _cameras[i].IpLabel;
                 }
                 else
                 {
@@ -124,6 +127,7 @@ namespace CommandCenter.Views
             WireEvents();    // 订阅连接状态变化事件 + 扫码枪收码事件，实时刷新
             AppendLog("功能测试窗体已打开，复用主窗体已有连接。");
             AppendLog($"PLC={_plc?.IpLabel ?? "null"}，相机数={_cameras.Count}，扫码枪数={_scanners.Count}");
+            ApplyLanguage(); // V2.15.0 国际化：按当前语言初始化全部界面文本
         }
 
         /// <summary>扫码枪在测试窗体下拉框里的显示名：TCP 显示 IP:端口，串口显示 COM口号+波特率。</summary>
@@ -135,10 +139,10 @@ namespace CommandCenter.Views
                 var sc = _scannerConfigs[index];
                 // 空安全比较：Mode 为 null/空时按串口标签显示（与 BuildScanner 行为一致），防配置手改 null 崩溃
                 if (sc.Mode?.Trim().Equals("Tcp", StringComparison.OrdinalIgnoreCase) == true)
-                    return $"扫码枪{index + 1}  {sc.IpAddress}:{sc.Port}";
-                return $"扫码枪{index + 1}  {sc.PortName}  {sc.BaudRate}";
+                    return I18n.T($"扫码枪{index + 1}", $"Scanner{index + 1}") + "  " + sc.IpAddress + ":" + sc.Port;
+                return I18n.T($"扫码枪{index + 1}", $"Scanner{index + 1}") + "  " + sc.PortName + "  " + sc.BaudRate;
             }
-            return $"扫码枪{index + 1}";
+            return I18n.T($"扫码枪{index + 1}", $"Scanner{index + 1}");
         }
 
         // ────────────── 事件与通用工具 ──────────────
@@ -194,7 +198,7 @@ namespace CommandCenter.Views
             var scanner = SelectedScanner();
             if (scanner == null)
             {
-                MessageBox.Show("请先在列表选择一台扫码枪。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(I18n.T("请先在列表选择一台扫码枪。", "Please select a scanner from the list first."), Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -272,29 +276,29 @@ namespace CommandCenter.Views
         {
             if (_plc != null)
             {
-                lblPlcState.Text = _plc.HasMasterConnected ? "● 主站已连入"
-                    : _plc.IsConnected ? "● 监听就绪（等待主站）"
-                    : "○ 监听失败";
+                lblPlcState.Text = _plc.HasMasterConnected ? I18n.T("● 主站已连入", "● Master connected")
+                    : _plc.IsConnected ? I18n.T("● 监听就绪（等待主站）", "● Listening (waiting master)")
+                    : I18n.T("○ 监听失败", "○ Listen failed");
                 lblPlcState.ForeColor = _plc.HasMasterConnected ? Color.Green
                     : _plc.IsConnected ? Color.Orange
                     : Color.Red;
             }
             else
             {
-                lblPlcState.Text = "无 PLC 服务";
+                lblPlcState.Text = I18n.T("无 PLC 服务", "No PLC service");
                 lblPlcState.ForeColor = Color.Gray;
             }
 
             var cam = SelectedCamera();
             lblCamState.Text = cam != null
-                ? (cam.IsConnected ? "● 已连接" : "○ 断连")
-                : "无相机";
+                ? (cam.IsConnected ? I18n.T("● 已连接", "● Connected") : I18n.T("○ 断连", "○ Disconnected"))
+                : I18n.T("无相机", "No camera");
             lblCamState.ForeColor = cam != null && cam.IsConnected ? Color.Green : Color.Red;
 
             var scanner = SelectedScanner();
             lblScannerState.Text = scanner != null
-                ? (scanner.IsOpen ? "● 已连接" : "○ 断连")
-                : "无扫码枪";
+                ? (scanner.IsOpen ? I18n.T("● 已连接", "● Connected") : I18n.T("○ 断连", "○ Disconnected"))
+                : I18n.T("无扫码枪", "No scanner");
             lblScannerState.ForeColor = scanner != null && scanner.IsOpen ? Color.Green : Color.Red;
         }
 
@@ -327,7 +331,7 @@ namespace CommandCenter.Views
         private void BtnTrigger_Click(object sender, EventArgs e)
         {
             var cam = SelectedCamera();
-            if (cam == null) { MessageBox.Show("请先在相机列表选择一台相机。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (cam == null) { MessageBox.Show(I18n.T("请先在相机列表选择一台相机。", "Please select a camera from the camera list first."), Title, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
 
             SetBusy(true);
             AppendLog($"→ 相机 {cam.IpLabel} 触发拍照（T1）…");
@@ -336,7 +340,8 @@ namespace CommandCenter.Views
                 bool ok = cam.SendTrigger();
                 SafeInvoke(() =>
                 {
-                    lblCamResult.Text = ok ? "T1 触发成功：已收到相机回显" : "T1 触发失败：无回显";
+                    lblCamResult.Text = ok ? I18n.T("T1 触发成功：已收到相机回显", "T1 triggered: camera echoed OK")
+                        : I18n.T("T1 触发失败：无回显", "T1 trigger failed: no echo");
                     lblCamResult.ForeColor = ok ? Color.Green : Color.Gray;
                     AppendLog(ok ? "← T1 触发成功" : "← T1 触发失败（相机未回显）");
                     FinishOp();
@@ -358,7 +363,7 @@ namespace CommandCenter.Views
         private void BtnTriggerRead_Click(object sender, EventArgs e)
         {
             var cam = SelectedCamera();
-            if (cam == null) { MessageBox.Show("请先在相机列表选择一台相机。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (cam == null) { MessageBox.Show(I18n.T("请先在相机列表选择一台相机。", "Please select a camera from the camera list first."), Title, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             int camIndex = cmbCamera.SelectedIndex; // 取图目录按相机下标对应配置
 
             SetBusy(true);
@@ -400,7 +405,9 @@ namespace CommandCenter.Views
                     jpeg = pair.JpegPath;
                     iv4p = pair.IvpPath;
                     if (string.IsNullOrEmpty(jpeg))
-                        fetchError = "FTP 取图目录里没有 jpeg 图片（相机已触发但未推图，请检查相机 FTP 配置/网络）";
+                        fetchError = I18n.T(
+                            "FTP 取图目录里没有 jpeg 图片（相机已触发但未推图，请检查相机 FTP 配置/网络）",
+                            "No jpeg found in the FTP image dir (camera triggered but did not upload; check camera FTP config/network)");
                     else if (_imageStore != null)
                     {
                         // V2.12.1：存图文件名 {点位}=1，目录按相机名 {相机} 层隔离（与主流程同规则），
@@ -410,8 +417,8 @@ namespace CommandCenter.Views
                             ? _cameraConfigs[camIndex].Name.Trim()
                             : ((camIndex >= 0 && camIndex < _cameraConfigs.Count
                                 && _cameraConfigs[camIndex].CameraId > 0)
-                                ? $"相机{_cameraConfigs[camIndex].CameraId}"
-                                : $"相机{camIndex + 1}");
+                                ? I18n.T($"相机{_cameraConfigs[camIndex].CameraId}", $"Cam{_cameraConfigs[camIndex].CameraId}")
+                                : I18n.T($"相机{camIndex + 1}", $"Cam{camIndex + 1}"));
                         archived = _imageStore.SaveImageFilePair(jpeg, iv4p, 1, r.IsOk, _serialSnapshot, camName);
                         if (archived != null)
                         {
@@ -422,15 +429,15 @@ namespace CommandCenter.Views
                         }
                     }
                     else
-                        fetchError = "未提供主窗体 ImageStore（无法存图）";
+                        fetchError = I18n.T("未提供主窗体 ImageStore（无法存图）", "No ImageStore provided (cannot save image)");
                 }
                 SafeInvoke(() =>
                 {
                     if (r.Succeeded)
                     {
                         lblCamResult.Text = r.IsOk
-                            ? $"T2 判定：OK（{r.ResultText}）"
-                            : $"T2 判定：NG（{r.ResultText}）";
+                            ? I18n.T($"T2 判定：OK（{r.ResultText}）", $"T2 result: OK ({r.ResultText})")
+                            : I18n.T($"T2 判定：NG（{r.ResultText}）", $"T2 result: NG ({r.ResultText})");
                         lblCamResult.ForeColor = r.IsOk ? Color.Green : Color.Red;
                         AppendLog($"← T2 判定 {(r.IsOk ? "OK" : "NG")}：{r.ResultText}"
                             + (string.IsNullOrEmpty(r.Detail) ? "" : "　" + r.Detail));
@@ -439,8 +446,8 @@ namespace CommandCenter.Views
                             // 闪图 + 显示存档路径（主窗体保存目录下，点位 1）
                             bool shown = ShowTestImage(archived);
                             lblTestImagePath.Text = shown
-                                ? "最近存图：" + archived
-                                : "存图成功但预览加载失败：" + archived;
+                                ? I18n.T("最近存图：" + archived, "Last saved: " + archived)
+                                : I18n.T("存图成功但预览加载失败：" + archived, "Saved but preview failed: " + archived);
                             lblTestImagePath.ForeColor = shown ? Color.FromArgb(46, 158, 107) : Color.Red;
                             AppendLog($"→ 已取图并存档（点位1）：{archived}"
                                 + (string.IsNullOrEmpty(iv4p) ? "（无 iv4p）" : "")
@@ -449,14 +456,14 @@ namespace CommandCenter.Views
                         }
                         else
                         {
-                            lblTestImagePath.Text = "取图失败：" + (fetchError ?? "未知原因");
+                            lblTestImagePath.Text = I18n.T("取图失败：" + (fetchError ?? "未知原因"), "Fetch failed: " + (fetchError ?? "unknown"));
                             lblTestImagePath.ForeColor = Color.Red;
                             AppendLog("← 取图失败：" + (fetchError ?? "（无图可存）"));
                         }
                     }
                     else
                     {
-                        lblCamResult.Text = "T2 失败：" + r.Detail;
+                        lblCamResult.Text = I18n.T("T2 失败：" + r.Detail, "T2 failed: " + r.Detail);
                         lblCamResult.ForeColor = Color.Gray;
                         AppendLog("← T2 失败：" + r.Detail);
                     }
@@ -520,7 +527,7 @@ namespace CommandCenter.Views
         private void BtnReadProgramNo_Click(object sender, EventArgs e)
         {
             var cam = SelectedCamera();
-            if (cam == null) { MessageBox.Show("请先在相机列表选择一台相机。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (cam == null) { MessageBox.Show(I18n.T("请先在相机列表选择一台相机。", "Please select a camera from the camera list first."), Title, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
 
             SetBusy(true);
             AppendLog($"→ 相机 {cam.IpLabel} 读取当前程序号（PR）…");
@@ -531,17 +538,17 @@ namespace CommandCenter.Views
                 {
                     if (no >= 0)
                     {
-                        lblCurrentProgram.Text = "当前程序：" + $"P{no:D3}";   // P000/P001/P002…
+                        lblCurrentProgram.Text = I18n.T("当前程序：", "Current program: ") + $"P{no:D3}";   // P000/P001/P002…
                         lblCurrentProgram.ForeColor = Color.Green;
-                        lblCamResult.Text = $"当前程序号 P{no:D3}（读回成功）";
+                        lblCamResult.Text = I18n.T($"当前程序号 P{no:D3}（读回成功）", $"Current program P{no:D3} (read back OK)");
                         lblCamResult.ForeColor = Color.Green;
                         AppendLog($"← 当前程序号 P{no:D3}");
                     }
                     else
                     {
-                        lblCurrentProgram.Text = "当前程序：读取失败";
+                        lblCurrentProgram.Text = I18n.T("当前程序：读取失败", "Current program: read failed");
                         lblCurrentProgram.ForeColor = Color.Red;
-                        lblCamResult.Text = "PR 读取失败（未连接/无响应）";
+                        lblCamResult.Text = I18n.T("PR 读取失败（未连接/无响应）", "PR read failed (not connected / no response)");
                         lblCamResult.ForeColor = Color.Gray;
                         AppendLog("← 读取当前程序号失败（未连接或通讯异常）");
                     }
@@ -569,7 +576,7 @@ namespace CommandCenter.Views
         private void SwitchCameraProgram(int programNo, string display)
         {
             var cam = SelectedCamera();
-            if (cam == null) { MessageBox.Show("请先在相机列表选择一台相机。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (cam == null) { MessageBox.Show(I18n.T("请先在相机列表选择一台相机。", "Please select a camera from the camera list first."), Title, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
 
             SetBusy(true);
             AppendLog($"→ 相机 {cam.IpLabel} 切换程序 → {display}（PW,{programNo:D3}）…");
@@ -582,11 +589,11 @@ namespace CommandCenter.Views
                     int no = cam.ReadProgramNo();
                     SafeInvoke(() =>
                     {
-                        lblCurrentProgram.Text = no >= 0 ? $"当前程序：P{no:D3}" : "当前程序：P???";
+                        lblCurrentProgram.Text = no >= 0 ? I18n.T("当前程序：", "Current program: ") + $"P{no:D3}" : I18n.T("当前程序：P???", "Current program: P???");
                         lblCurrentProgram.ForeColor = ok ? Color.Green : Color.Red;
                         lblCamResult.Text = ok
-                            ? $"已切到 {display}（PW,{programNo:D3} 成功）"
-                            : $"切换 {display} 失败";
+                            ? I18n.T($"已切到 {display}（PW,{programNo:D3} 成功）", $"Switched to {display} (PW,{programNo:D3} OK)")
+                            : I18n.T($"切换 {display} 失败", $"Switch {display} failed");
                         lblCamResult.ForeColor = ok ? Color.Green : Color.Red;
                         AppendLog($"← 切换 {display} 成功" + (no >= 0 ? $"，读回当前程序 P{no:D3}" : "（读回超时，可点'读当前程序号'确认）"));
                         FinishOp();
@@ -596,9 +603,9 @@ namespace CommandCenter.Views
                 {
                     SafeInvoke(() =>
                     {
-                        lblCurrentProgram.Text = "当前程序：切换失败";
+                        lblCurrentProgram.Text = I18n.T("当前程序：切换失败", "Current program: switch failed");
                         lblCurrentProgram.ForeColor = Color.Red;
-                        lblCamResult.Text = $"切换 {display} 失败（PW 无响应/相机报错）";
+                        lblCamResult.Text = I18n.T($"切换 {display} 失败（PW 无响应/相机报错）", $"Switch {display} failed (PW no response / camera error)");
                         lblCamResult.ForeColor = Color.Red;
                         AppendLog($"← 切换 {display} 失败（未连接或相机返回 ER）");
                         FinishOp();
@@ -624,7 +631,7 @@ namespace CommandCenter.Views
                 bool ok = _plc.ReadScanRequest(out bool requested);
                 SafeInvoke(() =>
                 {
-                    lblMoveVal.Text = ok ? (requested ? "扫码请求=1" : "扫码请求=0") : "读取失败";
+                    lblMoveVal.Text = ok ? (requested ? I18n.T("扫码请求=1", "Scan request=1") : I18n.T("扫码请求=0", "Scan request=0")) : I18n.T("读取失败", "Read failed");
                     lblMoveVal.ForeColor = ok ? (requested ? Color.Green : Color.Gray) : Color.Red;
                     AppendLog(ok ? $"← 扫码请求 = {(requested ? 1 : 0)}" : "← 读扫码请求失败");
                     FinishOp();
@@ -638,7 +645,7 @@ namespace CommandCenter.Views
             if (!EnsurePlc()) return;
             if (_cameraConfigs.Count == 0)
             {
-                MessageBox.Show("当前没有相机配置，无法读取相机请求。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(I18n.T("当前没有相机配置，无法读取相机请求。", "No camera configuration, cannot read camera requests."), Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
             SetBusy(true);
@@ -655,7 +662,8 @@ namespace CommandCenter.Views
                     if (ok) anyOk = true; else allOk = false;
                     string name = string.IsNullOrWhiteSpace(_cameraConfigs[i]?.Name)
                         ? ((_cameraConfigs[i] != null && _cameraConfigs[i].CameraId > 0)
-                            ? $"相机{_cameraConfigs[i].CameraId}" : $"相机{i + 1}")
+                            ? I18n.T($"相机{_cameraConfigs[i].CameraId}", $"Cam{_cameraConfigs[i].CameraId}")
+                            : I18n.T($"相机{i + 1}", $"Cam{i + 1}"))
                         : _cameraConfigs[i].Name.Trim();
                     labels.Add($"{name}={station}");
                 }
@@ -672,7 +680,7 @@ namespace CommandCenter.Views
                     }
                     else
                     {
-                        lblMoveVal.Text = "读取失败";
+                        lblMoveVal.Text = I18n.T("读取失败", "Read failed");
                         lblMoveVal.ForeColor = Color.Red;
                     }
                     AppendLog(allOk && anyOk ? $"← 相机请求：{joined}" : "← 读相机请求失败");
@@ -740,7 +748,7 @@ namespace CommandCenter.Views
             if (!EnsurePlc()) return;
             if (_cameraConfigs.Count == 0)
             {
-                MessageBox.Show("当前没有相机配置，无法写相机结果。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(I18n.T("当前没有相机配置，无法写相机结果。", "No camera configuration, cannot write camera results."), Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
             SetBusy(true);
@@ -769,7 +777,7 @@ namespace CommandCenter.Views
             if (string.IsNullOrEmpty(text)) return true; // 空=0，允许
             if (!int.TryParse(text, out offset) || offset < 0 || offset > 65535)
             {
-                MessageBox.Show("协议偏移量需为 0~65535 的整数。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(I18n.T("协议偏移量需为 0~65535 的整数。", "Offset must be an integer 0~65535."), Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
             return true;
@@ -788,13 +796,13 @@ namespace CommandCenter.Views
             int addr;
             if (!int.TryParse(input.Trim(), out addr) || addr < 0)
             {
-                MessageBox.Show("D 地址需为 0~65535 的整数。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(I18n.T("D 地址需为 0~65535 的整数。", "D address must be an integer 0~65535."), Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
             long combined = (long)addr + offset; // 用 long 防 int 溢出
             if (combined < 0 || combined > 65535)
             {
-                MessageBox.Show($"实际地址（{addr} + {offset}）超出 0~65535 范围。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(I18n.T($"实际地址（{addr} + {offset}）超出 0~65535 范围。", $"Actual address ({addr} + {offset}) is out of range 0~65535."), Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
             actualAddress = (ushort)combined;
@@ -816,7 +824,7 @@ namespace CommandCenter.Views
                 bool ok = _plc.ReadRegister(actual, out value);
                 SafeInvoke(() =>
                 {
-                    txtReadVal.Text = ok ? value.ToString() : "通讯失败";
+                    txtReadVal.Text = ok ? value.ToString() : I18n.T("通讯失败", "Comm failed");
                     AppendLog(ok ? $"← D{actual} = {value}" : $"← 读 D{actual} 失败");
                     FinishOp();
                 });
@@ -832,7 +840,7 @@ namespace CommandCenter.Views
             ushort value;
             if (!ushort.TryParse(txtWriteVal.Text.Trim(), out value))
             {
-                MessageBox.Show("写值需为 0~65535 的整数。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(I18n.T("写值需为 0~65535 的整数。", "Write value must be an integer 0~65535."), Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -854,10 +862,57 @@ namespace CommandCenter.Views
         {
             if (_plc == null)
             {
-                MessageBox.Show("未提供 PLC 服务实例。", "功能测试", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(I18n.T("未提供 PLC 服务实例。", "No PLC service instance available."), Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
             return true;
+        }
+
+        /// <summary>
+        /// V2.15.0 国际化：按当前语言刷新本窗体全部静态界面文字。
+        /// 在构造函数末尾调用（模态对话框打开瞬间按当前语言初始化；模态期间语言不会变化）。
+        /// 状态标签/结果标签由运行时方法（RefreshStates/各按钮回调）随时覆盖，这里只管初始文案。
+        /// 日志框（txtLog）内容保持中文（日志保留中文约定，供工程师排查）。
+        /// </summary>
+        private void ApplyLanguage()
+        {
+            this.Text = I18n.T("功能测试（开发者）", "Function Test (Developer)");
+            grpCamera.Text = I18n.T("相机测试", "Camera Test");
+            btnTrigger.Text = I18n.T("仅触发拍照 T1", "Trigger T1");
+            btnTriggerRead.Text = I18n.T("触发+判定T2（取图存图）", "Trigger+Result T2");
+            lblCamResult.Text = I18n.T("（尚未操作相机）", "(Not operated yet)");
+            btnReadProgramNo.Text = I18n.T("读当前程序号", "Read Program No.");
+            lblCurrentProgram.Text = I18n.T("当前程序：?", "Current program: ?");
+            btnSwProg1.Text = I18n.T("切换程序 → P001", "Switch → P001");
+            btnSwProg2.Text = I18n.T("切换程序 → P002", "Switch → P002");
+            lblTestImagePath.Text = I18n.T("（最近未测试存图）", "(No test image yet)");
+            grpScanner.Text = I18n.T("扫码枪测试", "Scanner Test");
+            lblScannerCode.Text = I18n.T("（尚未读到条码）", "(No code received yet)");
+            lblScannerHint.Text = I18n.T(
+                "把条码放到扫码枪下读，读到会实时显示（共用连接）",
+                "Place a code under the scanner; it shows here in real time (shared connection)");
+            btnScannerTrigger.Text = I18n.T("发送触发指令", "Send Trigger");
+            grpPlc.Text = I18n.T("PLC 测试", "PLC Test");
+            lblOffset.Text = I18n.T("协议偏移量:", "Offset:");
+            lblOffsetTip.Text = I18n.T(
+                "实际D地址 = 输入地址 + 偏移量（默认0按D地址读写）",
+                "Actual D address = input + offset (0 = read/write by D address)");
+            lblReadAddrTip.Text = I18n.T("读地址测试:", "Read addr test:");
+            btnReadReg.Text = I18n.T("读 取", "Read");
+            lblReadValTip.Text = I18n.T("→ 读到的值:", "→ Value:");
+            lblWriteValTip.Text = I18n.T("写地址测试:", "Write addr test:");
+            btnWriteReg.Text = I18n.T("写 入", "Write");
+            btnReadScanReq.Text = I18n.T("读扫码请求", "Read Scan Req");
+            btnReadCamReq.Text = I18n.T("读相机请求", "Read Cam Req");
+            btnWriteModel.Text = I18n.T("写产品型号", "Write Model");
+            btnResScan0.Text = I18n.T("扫码结果 = 0", "Scan Res = 0");
+            btnResScan1.Text = I18n.T("扫码OK = 1", "Scan OK = 1");
+            btnResScan2.Text = I18n.T("扫码NG = 2", "Scan NG = 2");
+            btnResCamUp.Text = I18n.T("相机OK = 1", "Cam OK = 1");
+            btnResCamDown.Text = I18n.T("相机NG = 2", "Cam NG = 2");
+            btnResCamReset.Text = I18n.T("相机复位 = 0", "Cam Reset = 0");
+            grpLog.Text = I18n.T("操作日志", "Operation Log");
+            RefreshStates(); // 状态标签按当前语言刷新（初始文案也随语言走）
         }
     }
 }

@@ -136,6 +136,10 @@ namespace CommandCenter.Views
         /// （现场 OK=绿 的习惯，成功语义），明确告知"换完后的位置就是这两扇窗"。</summary>
         private static readonly Color SwapDoneColor = Color.FromArgb(130, 220, 130);
 
+        /// <summary>程序号下拉的"不切换"选项文案（V2.15.0 双语）：显示、判断三处共用同一个
+        /// 取值，确保英文模式下"No switch"既能显示、FlushProgramGrid 的字符串比对也匹配。</summary>
+        private static string NoSwitch => I18n.T("不切换", "No switch");
+
         /// <summary>编辑副本（V1.12.28 窗口禁用）：与 _map 同下标表示"该窗口是否启用"，确定时整体写回。</summary>
         private readonly List<bool> _enabled;
 
@@ -315,6 +319,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             BuildProgramGrid();         // 初始化相机程序映射区：下拉 + 表格列
             WireEvents();               // 挂按钮/格子交互
             RefreshCells();             // 首次填充"编号 + 相机·点位"文字
+            ApplyLanguage();            // V2.15.0 国际化：按当前语言初始化文本
         }
 
         /// <summary>
@@ -456,7 +461,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             // 编号是多少（可跳过不连续），现场就在这 0~127 全集里动态选，配几行就是几个程序。
             // 0 也是合法程序号（相机 P000），必须能选到；"不切换"解析为 -1。
             colProgram.Items.Clear();
-            colProgram.Items.Add("不切换");
+            colProgram.Items.Add(NoSwitch);
             for (int p = 0; p <= 127; p++) colProgram.Items.Add(p);
 
             if (_cameras.Count > 0)
@@ -533,7 +538,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 var cam = _cameras[ci];
                 // V2.13.4：无名称时优先 CameraId 真编号、其次行序，与设置页第一列一致
                 string name = string.IsNullOrWhiteSpace(cam.Name)
-                    ? (cam.CameraId > 0 ? $"相机{cam.CameraId}" : $"相机{ci + 1}")
+                    ? (cam.CameraId > 0 ? I18n.T($"相机{cam.CameraId}", $"Cam{cam.CameraId}") : I18n.T($"相机{ci + 1}", $"Cam{ci + 1}"))
                     : cam.Name;
                 cmbCamera.Items.Add($"{name}  {cam.IpAddress}");
             }
@@ -633,7 +638,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             foreach (var item in _slot())
             {
                 // 程序号：<0（不切换）或 >127（越界）→ "不切换"；其余 0~127 合法才放 int。
-                object prog = (item.ProgramNo < 0 || item.ProgramNo > 127) ? "不切换" : (object)item.ProgramNo;
+                object prog = (item.ProgramNo < 0 || item.ProgramNo > 127) ? NoSwitch : (object)item.ProgramNo;
 
                 // 点位列候选补齐：复制表里有点位、但当前矩阵型号候选没有 → 动态加入，
                 // 否则 DataGridViewComboBoxCell 值无效直接弹异常（见方法注释②）。
@@ -665,7 +670,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 // 程序号列："不切换"或空/非法 → -1（不切换）；int 则直接用
                 int program = -1;
                 string progText = row.Cells[1].Value == null ? "" : Convert.ToString(row.Cells[1].Value).Trim();
-                if ("不切换".Equals(progText, StringComparison.OrdinalIgnoreCase) || progText.Length == 0) program = -1;
+                if (NoSwitch.Equals(progText, StringComparison.OrdinalIgnoreCase) || progText.Length == 0) program = -1;
                 else if (int.TryParse(progText, out program) && (program < 0 || program > 127)) program = -1;
                 list.Add(new StationProgramItem { StationNo = station, ProgramNo = program });
             }
@@ -690,7 +695,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             btnReset.Click += (s, e) => ResetAll();
             btnDisable.Click += (s, e) => ToggleSelectedDisabled();
             btnOk.Click += (s, e) => OnOk();
-            lblHint.Text = HintDefault;
+            lblHint.Text = HintDefaultText();
 
             cmbCamera.SelectedIndexChanged += (s, e) =>
             {
@@ -750,7 +755,8 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             {
                 if (dgvPrograms.CurrentRow == null)
                 {
-                    MessageBox.Show("请先单击选中要删除的映射行。", "提示",
+                    MessageBox.Show(I18n.T("请先单击选中要删除的映射行。", "Click to select the mapping row to delete first."),
+                        I18n.T("提示", "Notice"),
                         MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
@@ -772,7 +778,8 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 {
                     _swapA = idx;                      // 第一次点击：记起点并高亮（天蓝，见 RefreshCells）
                     _swapFlash.Clear();                // 起点换成新窗口，先清掉上一次交换完成的闪烁残留
-                    lblHint.Text = "已选中" + (idx + 1) + "号窗口作为交换起点，请再点一个要互换点位的窗口（可跨相机）。";
+                    lblHint.Text = I18n.T("已选中" + (idx + 1) + "号窗口作为交换起点，请再点一个要互换点位的窗口（可跨相机）。",
+                        "Window " + (idx + 1) + " selected as the swap start point, click another window to swap points (cross-camera allowed).");
                     RefreshCells();
                 }
                 else
@@ -790,8 +797,10 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             RefreshCells();
         }
 
-        /// <summary>常驻提示文案（V2.12.1 统一模型版 + V2.13 恢复编辑 + V2.14.18 空窗口，Designer 里的默认 Text 也保持一致）。</summary>
-        private const string HintDefault =
+        /// <summary>常驻提示文案（V2.12.1 统一模型版 + V2.13 恢复编辑 + V2.14.18 空窗口 + V2.15.0 国际化改方法按语言返回；Designer 里的默认 Text 也保持一致）。</summary>
+        private string HintDefaultText()
+        {
+            return I18n.T(
             "每个格子 = 主界面一个显示窗口。上方是【窗口编号】；下方是【归属相机·相机点位号】。\r\n" +
             "默认按\"前上相机后下相机、各相机点位表顺序\"铺排（随下方\"型号\"下拉联动）。\r\n" +
             "【空窗口（无点位）】= 非自适下点位不够、行列乘积多出的占位格：可用【交换位置】把点位\r\n" +
@@ -799,7 +808,18 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             "可选中有点位的窗口后点【编辑点位】（从相机点位表候选里换点；选中的点位若被别的窗口占用会【自动互换】）、\r\n" +
             "【交换位置】（点两个窗口互换，可跨相机、可含空窗口）、【恢复默认】（重置该型号出厂铺排并全部启用）；\r\n" +
             "【右键格子】或选中后点\"禁用/启用\"停用某窗口。\r\n" +
-            "下方\"相机程序映射\"区照常可配：先选相机，型号下拉跟随该相机可选型号 → 点位 → 相机程序号。";
+            "下方\"相机程序映射\"区照常可配：先选相机，型号下拉跟随该相机可选型号 → 点位 → 相机程序号。",
+            "Each cell = one display window. Top: window number. Bottom: owning camera · camera point number.\r\n" +
+            "Default layout: up camera first then down camera, in camera point-table order (follows the Model drop-down below).\r\n" +
+            "[Empty window (no point)] = an extra placeholder cell when non-Auto-Fit rows×columns exceed available points:\r\n" +
+            "use Swap Position to move a point into it (click the empty window + a window that has a point);\r\n" +
+            "empty windows do NOT support Edit Point / Disable (buttons greyed out).\r\n" +
+            "Select a window that has a point and use Edit Point (pick another point from the camera table;\r\n" +
+            "picking an occupied point auto-swaps with that window), Swap Position (click two windows to swap,\r\n" +
+            "cross-camera / empty windows allowed), Reset Default (reset this model's factory layout and enable all);\r\n" +
+            "Right-click a cell or select it and click Disable/Enable to stop a window.\r\n" +
+            "The Camera Program Mapping area below works as usual: pick a camera, the model drop-down follows its models → point → camera program.");
+        }
 
         /// <summary>
         /// 切换"选中的格子"的启用状态（V1.12.28，"禁用/启用"按钮）。
@@ -809,8 +829,9 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         {
             if (_selectedIdx < 0)
             {
-                MessageBox.Show("请先单击选中要禁用/启用的窗口格子（格子会高亮）。\r\n也可直接【右键点击】格子切换。",
-                    "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(I18n.T("请先单击选中要禁用/启用的窗口格子（格子会高亮）。\r\n也可直接【右键点击】格子切换。",
+                    "Click to select the window cell to disable/enable first (the cell will highlight).\r\nYou can also right-click a cell to toggle it."),
+                    I18n.T("提示", "Notice"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
             ToggleWindowDisabled(_selectedIdx);
@@ -824,9 +845,11 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             if (idx < 0 || idx >= _enabled.Count) return;
             if (IsEmptyWindow(idx + 1))
             {
-                MessageBox.Show("该窗口是【空窗口】（未配置点位），不支持禁用/启用。\r\n" +
+                MessageBox.Show(I18n.T("该窗口是【空窗口】（未配置点位），不支持禁用/启用。\r\n" +
                     "如需配置该窗口，请用【交换位置】把某个点位搬进这个窗口。",
-                    "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    "This window is empty (no point configured); it cannot be disabled/enabled.\r\n" +
+                    "To configure it, use Swap Position to move a point into it."),
+                    I18n.T("提示", "Notice"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
             _enabled[idx] = !_enabled[idx];
@@ -863,8 +886,9 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         {
             if (_selectedIdx < 0)
             {
-                MessageBox.Show("请先单击选中要编辑点位的窗口格子（格子会高亮）。", "提示",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(I18n.T("请先单击选中要编辑点位的窗口格子（格子会高亮）。",
+                    "Click to select the window cell to edit first (the cell will highlight)."),
+                    I18n.T("提示", "Notice"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
             var map = _windowEditMap();
@@ -873,9 +897,11 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             if (cur == null)
             {
                 // 空窗口：没有点位可编辑（界面已把按钮置灰，这里仅防御）
-                MessageBox.Show("该窗口是【空窗口】（未配置点位），不能直接编辑点位。\r\n" +
+                MessageBox.Show(I18n.T("该窗口是【空窗口】（未配置点位），不能直接编辑点位。\r\n" +
                     "如需把某个点位放到这个窗口，请用【交换位置】：点这个空窗口 + 一个有点位的窗口。",
-                    "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    "This window is empty (no point configured); it cannot be edited directly.\r\n" +
+                    "To place a point here, use Swap Position: click this empty window + a window that has a point."),
+                    I18n.T("提示", "Notice"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -897,7 +923,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 var table = cam.ProgramsFor(_matrixModel);
                 if (table == null) continue;
                 string camName = string.IsNullOrWhiteSpace(cam.Name)
-                    ? (cam.CameraId > 0 ? $"相机{cam.CameraId}" : $"相机{ci + 1}")
+                    ? (cam.CameraId > 0 ? I18n.T($"相机{cam.CameraId}", $"Cam{cam.CameraId}") : I18n.T($"相机{ci + 1}", $"Cam{ci + 1}"))
                     : cam.Name;
                 // V2.13.4：关联键 = 相机ID（CameraId>0 用真编号，0 回退行序，与 ProductionCoordinator
                 // 的 CameraIdFor 兜底规则一致，保证"编辑候选"与"运行时反查"用同一把钥匙）
@@ -909,16 +935,17 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                         defIdx = options.Count;            // 记住"当前窗口自己点位"的位置，弹窗默认选中它
                     string note = "";
                     if (owner.TryGetValue($"{camId}:{it.StationNo}", out int occ) && occ != _selectedIdx + 1)
-                        note = $"（当前窗口{occ}，选中即互换）";   // 被别的窗口占着 → 明示会自动交换
+                        note = I18n.T($"（当前窗口{occ}，选中即互换）", $" (now in window {occ}; picking it auto-swaps)");   // 被别的窗口占着 → 明示会自动交换
                     options.Add(Tuple.Create(
                         new WindowPointItem { CameraId = camId, StationNo = it.StationNo },
-                        $"{camName}·点位{it.StationNo}{note}"));
+                        $"{camName}·{I18n.T($"点位{it.StationNo}", $"Point {it.StationNo}")}{note}"));
                 }
             }
             if (options.Count == 0)
             {
-                MessageBox.Show("当前型号相机点位表里没有可选的候选点位。", "提示",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(I18n.T("当前型号相机点位表里没有可选的候选点位。",
+                    "No candidate points available in this model's camera point table."),
+                    I18n.T("提示", "Notice"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -926,19 +953,19 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             int sel = -1;
             using (var f = new Form
             {
-                Text = "编辑点位 - 窗口" + (_selectedIdx + 1),
+                Text = I18n.T("编辑点位 - 窗口" + (_selectedIdx + 1), "Edit Point - Window " + (_selectedIdx + 1)),
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false, MinimizeBox = false,
                 StartPosition = FormStartPosition.CenterParent,
                 ClientSize = new Size(330, 110)
             })
             {
-                var lbl = new Label { Text = "请为该窗口选择一个相机点位：", Location = new Point(12, 12), AutoSize = true };
+                var lbl = new Label { Text = I18n.T("请为该窗口选择一个相机点位：", "Select a camera point for this window:"), Location = new Point(12, 12), AutoSize = true };
                 var cmb = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(12, 36), Width = 306 };
                 foreach (var o in options) cmb.Items.Add(o.Item2);
                 cmb.SelectedIndex = defIdx < options.Count ? defIdx : 0;   // 默认当前点位；不在候选则选第一个
-                var ok = new Button { Text = "确定", DialogResult = DialogResult.OK, Location = new Point(236, 70), Width = 82 };
-                var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Location = new Point(148, 70), Width = 82 };
+                var ok = new Button { Text = I18n.T("确定", "OK"), DialogResult = DialogResult.OK, Location = new Point(236, 70), Width = 82 };
+                var cancel = new Button { Text = I18n.T("取消", "Cancel"), DialogResult = DialogResult.Cancel, Location = new Point(148, 70), Width = 82 };
                 f.Controls.Add(lbl); f.Controls.Add(cmb); f.Controls.Add(ok); f.Controls.Add(cancel);
                 f.AcceptButton = ok; f.CancelButton = cancel;
                 if (f.ShowDialog(this) == DialogResult.OK && cmb.SelectedIndex >= 0)
@@ -970,9 +997,12 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 LogHelper.Info($"窗口 {_selectedIdx + 1} 点位改为「{options[sel].Item2}」，原占用窗口 {conflict + 1} 与本窗口互换（禁用状态随点位迁移，点确定后生效）");
                 // V2.14.21：自动互换后同样闪烁提示（与 SwapCells 共用 FlashSwap 高亮"交换完成绿"），
                 // 告知用户"窗口 X ↔ 窗口 Y 已互换、换完后的位置是这两扇"。
-                FlashSwap(_selectedIdx, conflict, "编辑点位完成：窗口 " + (_selectedIdx + 1) + " ↔ 窗口 " +
+                FlashSwap(_selectedIdx, conflict, I18n.T("编辑点位完成：窗口 " + (_selectedIdx + 1) + " ↔ 窗口 " +
                     (conflict + 1) + " 已自动互换点位（绿色高亮的两个窗口就是换完后的位置，点【确定】保存生效）。\r\n" +
-                    HintDefault);
+                    HintDefaultText(),
+                    "Edit point done: window " + (_selectedIdx + 1) + " ↔ window " +
+                    (conflict + 1) + " auto-swapped points (the two green windows are their new positions; press OK to save).\r\n" +
+                    HintDefaultText()));
             }
             else
             {
@@ -996,9 +1026,12 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             _swapFlash.Clear();
             _flashTimer?.Stop();
             lblHint.Text = _swapping
-                ? "交换模式：请依次点击两个要互换点位的窗口（可跨相机；交换的是\"窗口↔归属相机·点位号\"\r\n" +
-                  "的对应关系，不改相机自身的点位/程序表）。再次点击\"交换位置\"按钮可取消交换模式。"
-                : HintDefault;
+                ? I18n.T("交换模式：请依次点击两个要互换点位的窗口（可跨相机；交换的是\"窗口↔归属相机·点位号\"\r\n" +
+                  "的对应关系，不改相机自身的点位/程序表）。再次点击\"交换位置\"按钮可取消交换模式。",
+                  "Swap mode: click two windows to swap their points (cross-camera allowed; swaps the\r\n" +
+                  "\"window ↔ owning camera · point number\" mapping, does not change the camera's point/program table).\r\n" +
+                  "Click Swap Position again to cancel swap mode.")
+                : HintDefaultText();
             RefreshCells();
         }
 
@@ -1043,8 +1076,10 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             RefillStationColumn();
             // V2.14.21：交换完成后把参与互换的两扇窗加进 _swapFlash 绿色闪烁高亮 + 更新提示文案，
             // 明确告知用户"换完后的位置就是这两扇窗"；计时结束自动熄灭（见 _flashTimer.Tick）。
-            FlashSwap(a, b, "交换完成：窗口 " + (a + 1) + " ↔ 窗口 " + (b + 1) +
-                " 已互换点位（绿色高亮的两个窗口就是换完后的位置，点【确定】保存生效）。\r\n" + HintDefault);
+            FlashSwap(a, b, I18n.T("交换完成：窗口 " + (a + 1) + " ↔ 窗口 " + (b + 1) +
+                " 已互换点位（绿色高亮的两个窗口就是换完后的位置，点【确定】保存生效）。\r\n" + HintDefaultText(),
+                "Swap done: window " + (a + 1) + " ↔ window " + (b + 1) +
+                " swapped points (the two green windows are their new positions; press OK to save).\r\n" + HintDefaultText()));
             RefreshCells();
         }
 
@@ -1111,7 +1146,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 if (disabled)
                 {
                     // 禁用：灰底 + 灰字，醒目区分于普通格子；处于高亮状态时用同色粗边框提示
-                    b.Text = $"窗口 {i + 1}\r\n已禁用";
+                    b.Text = I18n.T($"窗口 {i + 1}\r\n已禁用", $"Window {i + 1}\r\nDisabled");
                     b.BackColor = Color.FromArgb(222, 222, 222);
                     b.ForeColor = Color.FromArgb(150, 150, 150);
                     b.UseVisualStyleBackColor = true;
@@ -1122,7 +1157,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 {
                     // 空窗口（V2.14.18）：主界面占位格子、未配置点位（默认=非自适行列乘积多出的格），
                     // 浅灰底 + 灰字提示，可用【交换位置】把点位搬进来；高亮时直接换高亮底色
-                    b.Text = $"窗口 {i + 1}\r\n空窗口（无点位）";
+                    b.Text = I18n.T($"窗口 {i + 1}\r\n空窗口（无点位）", $"Window {i + 1}\r\nEmpty (no point)");
                     b.ForeColor = Color.FromArgb(140, 140, 140);
                     ApplyCellHighlight(b, hl, Color.FromArgb(245, 245, 245));
                 }
@@ -1213,16 +1248,16 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 && map != null && w >= 1 && w <= map.Count)
             {
                 var it = map[w - 1];                 // Points[i] = 窗口 i+1 → (相机ID,点位号)
-                if (it == null) return "空窗口（无点位）";   // 空窗口（V2.14.18）
+                if (it == null) return I18n.T("空窗口（无点位）", "Empty (no point)");   // 空窗口（V2.14.18）
                 var cam = FindCameraById(it.CameraId);
                 if (cam != null)
                 {
                     string camName = string.IsNullOrWhiteSpace(cam.Name)
-                        ? ((cam.CameraId > 0) ? $"相机{cam.CameraId}" : $"相机{IndexOfCameraById(it.CameraId) + 1}")
+                        ? ((cam.CameraId > 0) ? I18n.T($"相机{cam.CameraId}", $"Cam{cam.CameraId}") : I18n.T($"相机{IndexOfCameraById(it.CameraId) + 1}", $"Cam{IndexOfCameraById(it.CameraId) + 1}"))
                         : cam.Name;
-                    return $"{camName}·点位{it.StationNo}";
+                    return $"{camName}·{I18n.T($"点位{it.StationNo}", $"Point {it.StationNo}")}";
                 }
-                return $"窗口{w}";
+                return I18n.T($"窗口{w}", $"Window {w}");
             }
             // 兜底（编辑副本缺失）：退回按相机点位表区间定位（旧逻辑）
             var starts = DisplayConfig.AutoFitCameraStarts(_cameras, _matrixModel);
@@ -1235,12 +1270,12 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 {
                     var it = table[w - starts[i]];
                     string camName = string.IsNullOrWhiteSpace(_cameras[i].Name)
-                        ? ((_cameras[i].CameraId > 0) ? $"相机{_cameras[i].CameraId}" : $"相机{i + 1}")
+                        ? ((_cameras[i].CameraId > 0) ? I18n.T($"相机{_cameras[i].CameraId}", $"Cam{_cameras[i].CameraId}") : I18n.T($"相机{i + 1}", $"Cam{i + 1}"))
                         : _cameras[i].Name;
-                    return $"{camName}·点位{(it == null ? w : it.StationNo)}";
+                    return $"{camName}·{I18n.T($"点位{(it == null ? w : it.StationNo)}", $"Point {(it == null ? w : it.StationNo)}")}";
                 }
             }
-            return $"窗口{w}";
+            return I18n.T($"窗口{w}", $"Window {w}");
         }
 
         /// <summary>按相机ID在配置列表里找相机；找不到返回 null。兜底规则与 ProductionCoordinator
@@ -1347,15 +1382,50 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             if (emptySlots.Count > 0)
             {
                 MessageBox.Show(
-                    "以下【相机+型号】的程序映射表已清空，本次【保留该型号原有映射】、不写入空表：\r\n" +
+                    I18n.T("以下【相机+型号】的程序映射表已清空，本次【保留该型号原有映射】、不写入空表：\r\n" +
                     string.Join("\r\n", emptySlots) +
                     "\r\n\r\n解释：型号表为空时运行时仍会按该型号既有的 programStationPrograms 配置切程序。" +
                     "如确实要让整张型号表失效，请直接编辑 appconfig.json 的 modelStationPrograms 删掉对应型号节点；" +
                     "只删部分点位则直接在表里删掉那几行即可。",
-                    "映射表为空", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    "The following camera+model program mapping tables were emptied; the model's existing mapping is KEPT (no empty table written):\r\n" +
+                    string.Join("\r\n", emptySlots) +
+                    "\r\n\r\nNote: an empty model table still switches programs using the model's existing modelStationPrograms config at runtime." +
+                    "To truly disable a whole model table, edit appconfig.json and remove that model node under modelStationPrograms;" +
+                    "to remove only some points, just delete those rows in the table."),
+                    I18n.T("映射表为空", "Empty mapping table"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
 
             DialogResult = DialogResult.OK;
+        }
+
+        /// <summary>
+        /// V2.15.0 国际化：按当前语言刷新全部静态控件文本（Designer 里的中文只是默认值，
+        /// 运行时由这里覆盖）。本窗体是模态对话框、打开期间语言不会变，只在构造末尾调用一次。
+        /// 程序号下拉的"不切换"文案由 NoSwitch 常量统一（显示/判断三处共用），格子文本由
+        /// RefreshCells / ResolveWindowSource 按语言实时渲染，不在这里处理。
+        /// </summary>
+        private void ApplyLanguage()
+        {
+            Text = I18n.T("窗口/点位与相机程序配置", "Window/Point & Camera Program Config");
+            grpProgram.Text = I18n.T("相机程序映射（点位 → 相机程序号，每台相机各自一张表）",
+                "Camera Program Mapping (point → camera program number, one table per camera)");
+            lblCamera.Text = I18n.T("相机：", "Camera:");
+            lblModel.Text = I18n.T("型号：", "Model:");
+            lblProgHint.Text = I18n.T("按“相机+型号”查表切程序；\r\n型号没配表时回退该相机的旧映射表。",
+                "Programs are switched by camera+model lookup;\r\nfalls back to the camera's legacy table when the model has no table.");
+            btnAddProg.Text = I18n.T("新增映射", "Add Mapping");
+            btnDelProg.Text = I18n.T("删除选中行", "Delete Selected Row");
+            lblProgNote.Text = I18n.T("点位从下拉选（数量=窗口数）；程序号选'不切换'或相机实际程序号（0~127，数量/编号跟相机程序库走，与窗口数无关）",
+                "Pick the point from the drop-down (count = window count); pick 'No switch' or a real camera program number (0~127, count/numbers follow the camera program library, unrelated to window count)");
+            btnEditPoint.Text = I18n.T("编辑点位", "Edit Point");
+            btnSwap.Text = I18n.T("交换位置", "Swap Position");
+            btnReset.Text = I18n.T("恢复默认", "Reset Default");
+            btnDisable.Text = I18n.T("禁用/启用", "Disable/Enable");
+            btnOk.Text = I18n.T("确定", "OK");
+            btnCancel.Text = I18n.T("取消", "Cancel");
+            colStation.HeaderText = I18n.T("点位（选择）", "Point (select)");
+            colProgram.HeaderText = I18n.T("相机程序号（选择）", "Camera Program No. (select)");
+            lblHint.Text = HintDefaultText();
         }
     }
 }

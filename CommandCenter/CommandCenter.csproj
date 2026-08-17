@@ -141,6 +141,7 @@
     <Compile Include="Services\ProductionCoordinator.cs" />
     <Compile Include="Services\ConnectionMonitor.cs" />
     <Compile Include="Utils\ConfigStore.cs" />
+    <Compile Include="Utils\I18n.cs" />
     <Compile Include="Utils\LogHelper.cs" />
     <Compile Include="Utils\SecurityUtil.cs" />
     <Compile Include="Utils\TcpKeepAlive.cs" />

@@ -99,6 +99,9 @@ namespace CommandCenter.Views
         // 统计
         private int _total, _ok, _ng;
 
+        // 序列号"人工补录"按钮悬停提示（V2.15.0 国际化：切语言时刷新文本，故存为字段）
+        private ToolTip _serialTip;
+
         public MainForm()
         {
             InitializeComponent();   // 先解析设计器里的静态控件（否则后续代码引用会拿到 null）
@@ -110,6 +113,7 @@ namespace CommandCenter.Views
             BuildWindowGrid();       // 窗口矩阵（用设计器的 gridCameraWindows 容器，动态重建行列）
             SubscribeEvents();
             _coordinator.Start();
+            ApplyLanguage();   // V2.15.0 国际化：构造末尾统一按配置语言刷新界面文本
         }
 
         /// <summary>组装底层服务（PLC/多相机/图像/协调器）。</summary>
@@ -234,8 +238,8 @@ namespace CommandCenter.Views
         {
             // Label 天然只读、不可聚焦，无需再设 ReadOnly（TextBox 时代才需要）。
             btnManualSerial.Click += (s, e) => PromptManualSerial();        // 人工补录按钮：手动录 SN 唯一入口
-            var tip = new ToolTip();
-            tip.SetToolTip(btnManualSerial, "手动输入/修改当前序列号");
+            _serialTip = _serialTip ?? new ToolTip();
+            _serialTip.SetToolTip(btnManualSerial, I18n.T("手动输入/修改当前序列号", "Enter / modify current serial number"));
         }
 
         /// <summary>点【人工补录】按钮 → 弹手动录入对话框；确定且非空则写协调器并刷新标题栏（V2.14.6 恢复）。</summary>
@@ -270,7 +274,7 @@ namespace CommandCenter.Views
             // 序列号：标题"序列号:"在显示框外（lblSerialTitle），框内只放值（lblSerial，Label 只读框、
             // 弹窗录入，V2.14.6；V2.14.7 由 TextBox 换回 Label）；有值显示值，没有则框内留空
             // （不写"待扫码"），标题+框整体由开关控制显隐
-            lblSerialTitle.Text = "序列号:";
+            lblSerialTitle.Text = I18n.T("序列号:", "Serial:");
             lblSerial.Text = _coordinator.LatestSerialNumber;
 
             // ② 标题栏 OK/NG 计数高亮（V1.5.0 现场反馈"彩色数字不够醒目"）：
@@ -382,7 +386,7 @@ namespace CommandCenter.Views
                 {
                     AutoSize = true,
                     TextAlign = ContentAlignment.MiddleRight,
-                    Text = "● 相机", // V1.10.0：不显示台数，纯状态圆点+相机字样
+                    Text = "● 相机", // V1.10.0：不显示台数，纯状态圆点+相机字样（V2.15.0 国际化）
                     ForeColor = Color.FromArgb(150, 150, 150),
                     Font = camFont
                 };
@@ -422,7 +426,7 @@ namespace CommandCenter.Views
                 _pnlCamOverview.Controls.Add(_cmbCamOverview);
 
                 _camTip = _camTip ?? new ToolTip();
-                _camTip.SetToolTip(_lblCamAggregate, "相机连接状态明细");
+                _camTip.SetToolTip(_lblCamAggregate, I18n.T("相机连接状态明细", "Camera connection detail"));
 
                 pnlTitleBar.Controls.Add(_pnlCamOverview);
 
@@ -437,7 +441,7 @@ namespace CommandCenter.Views
         /// </summary>
         private string CamDisplayName(int i)
         {
-            if (i < 0 || i >= _cameras.Count) return "相机";
+            if (i < 0 || i >= _cameras.Count) return I18n.T("相机", "Cam");
             string name = _cameras[i].DisplayName;
             if (!string.IsNullOrWhiteSpace(name)) return name;
             // 无名称时优先用相机真编号（CameraId>0），没有才退回行序 i+1（与设置页第一列一致）
@@ -445,7 +449,8 @@ namespace CommandCenter.Views
             var cfgList = _config.Cameras;
             if (cfgList != null && i < cfgList.Count && cfgList[i] != null)
                 camId = cfgList[i].CameraId;
-            return camId > 0 ? $"相机{camId}" : $"相机{i + 1}";
+            string camWord = I18n.T("相机", "Cam");
+            return camId > 0 ? camWord + camId : camWord + (i + 1);
         }
 
         /// <summary>
@@ -503,10 +508,10 @@ namespace CommandCenter.Views
             bool allOk = _cameras.Count > 0 && _cameras.All(c => c.IsConnected);
             _lblCamAggregate.ForeColor = allOk ? Color.FromArgb(46, 158, 107)   // 全部连接 → 绿
                                                : Color.FromArgb(229, 72, 77);    // 任一断连 → 红
-            _lblCamAggregate.Text = "● 相机";
+            _lblCamAggregate.Text = I18n.T("● 相机", "● Camera");
 
             // 悬停明细：列出每台"名字+状态"，方便现场快速定位是哪台断了（只显示 IP，不带端口）
-            var lines = _cameras.Select((c, i) => $"{CamDisplayName(i)} {c.IpAddressOnly}：" + (c.IsConnected ? "已连接" : "断连"));
+            var lines = _cameras.Select((c, i) => $"{CamDisplayName(i)} {c.IpAddressOnly}：" + (c.IsConnected ? I18n.T("已连接", "Connected") : I18n.T("断连", "Disconnected")));
             if (_camTip != null) _camTip.SetToolTip(_lblCamAggregate, string.Join("\n", lines));
 
             if (_cmbCamOverview != null) _cmbCamOverview.Invalidate(); // 重绘各下拉项的状态圆点
@@ -770,7 +775,7 @@ namespace CommandCenter.Views
 
             // ④ 提示 + 日志（成功绿字，遵循现场 OK=绿 习惯）
             lblStatus.ForeColor = Color.FromArgb(46, 158, 107);
-            lblStatus.Text = $"型号切换完成: {model}";
+            lblStatus.Text = I18n.T("型号切换完成", "Model switched") + ": " + model;
             LogHelper.Info($"产品型号切换：{model}（已生效并写盘，PLC 型号区已立即下发）");
         }
 
@@ -1061,6 +1066,15 @@ namespace CommandCenter.Views
             // 窗口大小变化时重排标题栏（V1.9.9）：相机灯多时右侧 Dock 区很宽，
             // 窗口缩窄会让左侧字段挤进灯区；Resize 时重新按"当前可用宽度"压缩/恢复字段。
             Resize += (s, e) => RelayoutTitleBar();
+
+            // V2.15.0 国际化：语言切换 → 主界面全量刷新文本（切语言入口在设置窗体，
+            // 事件在 UI 线程触发；保险起见 InvokeRequired 判断回 UI 线程）。
+            I18n.LanguageChanged += (s, e) =>
+            {
+                if (IsDisposed) return;
+                if (InvokeRequired) { BeginInvoke(new Action(ApplyLanguage)); return; }
+                ApplyLanguage();
+            };
 
             FormClosing += (s, e) =>
             {
@@ -1509,15 +1523,70 @@ namespace CommandCenter.Views
             if (IsDisposed) return;
             if (InvokeRequired) { BeginInvoke(new Action<string>(OnStateChanged), text); return; }
             lblStatus.ForeColor = Color.FromArgb(52, 73, 94); // 恢复默认深蓝灰
-            lblStatus.Text = "状态: " + text;
+            lblStatus.Text = I18n.T("状态", "Status") + ": " + text;
         }
 
         /// <summary>刷新标题栏统计与产品型号（型号由下拉框自持显示，无需在这里刷）。</summary>
         private void RefreshTitle()
         {
-            lblTotal.Text = "总数: " + _total;
+            lblTotal.Text = I18n.T("总数", "Total") + ": " + _total;
             lblOk.Text = "OK: " + _ok;
             lblNg.Text = "NG: " + _ng;
+        }
+
+        /// <summary>
+        /// 主界面全量语言刷新（V2.15.0 国际化）：切换语言后重设所有静态/动态 UI 文本并重排标题栏。
+        /// 调用时机：① 构造末尾（按配置语言初始化）；② I18n.LanguageChanged 事件（切语言实时生效）；
+        /// ③ ApplyRuntimeConfig 热更末尾（重建后控件文本复位）。仅 UI 线程调用。
+        /// 运行时文本（计数/状态栏）也在这里重取；协调器状态经 CurrentStateUiText 取当前语言文案。
+        /// </summary>
+        private void ApplyLanguage()
+        {
+            if (IsDisposed) return;
+
+            // ① 标题栏静态文本（OK/NG/PLC 等专有名词不翻译，保持现场习惯）
+            lblProductPrefix.Text = I18n.T(
+                string.IsNullOrWhiteSpace(_config.Display.ProductModelPrefix) ? "产品型号" : _config.Display.ProductModelPrefix,
+                "Model") + ":";
+            lblSerialTitle.Text = I18n.T("序列号:", "Serial:");
+            btnSettings.Text = I18n.T("系统设置", "Settings");
+            btnManualSerial.Text = I18n.T("人工补录", "Manual Entry");
+            lblScannerStatus.Text = I18n.T("● 扫码枪", "● Scanner");
+            this.Text = I18n.T("上位机控制中心", "Host Computer Control Center");
+            if (_serialTip != null)
+                _serialTip.SetToolTip(btnManualSerial, I18n.T("手动输入/修改当前序列号", "Enter / modify current serial number"));
+
+            // ② 相机灯文本（≤2 台独立灯 / ≥3 台聚合标签 + 悬停明细）
+            if (_lblCamStatuses != null)
+                for (int i = 0; i < _lblCamStatuses.Length; i++)
+                    if (_lblCamStatuses[i] != null)
+                        _lblCamStatuses[i].Text = $"● {CamDisplayName(i)}";
+            if (_lblCamAggregate != null) _lblCamAggregate.Text = I18n.T("● 相机", "● Camera");
+            if (_camTip != null && _lblCamAggregate != null)
+                _camTip.SetToolTip(_lblCamAggregate, I18n.T("相机连接状态明细", "Camera connection detail"));
+
+            // ③ 计数与状态栏（运行时文本）
+            RefreshTitle();
+            RefreshCameraAggregateStatus();
+            if (_coordinator != null)
+            {
+                string st = _coordinator.CurrentStateUiText;
+                if (!string.IsNullOrEmpty(st))
+                {
+                    lblStatus.ForeColor = Color.FromArgb(52, 73, 94);
+                    lblStatus.Text = I18n.T("状态", "Status") + ": " + st;
+                }
+            }
+
+            // ④ 窗口矩阵各格的悬停提示（双击放大/还原）
+            foreach (var w in _windowControls.Values)
+                try { w?.ApplyLanguage(); } catch { }
+
+            // ⑤ PLC 灯悬停提示（语言变化后重新生成，见 UpdatePlcStatus）
+            UpdatePlcStatus();
+
+            // ⑥ 英文文案通常更长，重排标题栏
+            RelayoutTitleBar();
         }
 
         /// <summary>
@@ -1567,6 +1636,7 @@ namespace CommandCenter.Views
             _coordinator.Start();
             RelayoutTitleBar();
             RefreshTitle();
+            ApplyLanguage();   // V2.15.0 国际化：热更后按新语言统一刷新界面文本
 
             LogHelper.Info("配置已保存并热生效（服务层已按新配置重建）");
         }

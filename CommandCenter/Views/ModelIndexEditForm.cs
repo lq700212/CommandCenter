@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
 using CommandCenter.Models;
+using CommandCenter.Utils;
 
 namespace CommandCenter.Views
 {
@@ -78,6 +79,24 @@ namespace CommandCenter.Views
             // SelectedRows、"选中"列勾选的行会漏）。
             grid.KeyDown += Grid_KeyDown;
             LoadFromConfig();
+            ApplyLanguage(); // V2.15.0 国际化：按当前语言初始化文本
+        }
+
+        /// <summary>
+        /// V2.15.0 国际化：按当前语言刷新本窗体全部界面文字（横幅/表头/按钮/标题）。
+        /// 在构造函数末尾调用（模态对话框打开瞬间按当前语言初始化；模态期间语言不会变化）。
+        /// </summary>
+        private void ApplyLanguage()
+        {
+            this.Text = I18n.T("产品型号配置", "Model Config");
+            lblBanner.Text = I18n.T("产品型号配置", "Model Config");
+            grid.Columns["colSel"].HeaderText = I18n.T("选中", "Sel");
+            grid.Columns["colIndex"].HeaderText = I18n.T("序号", "Index");
+            grid.Columns["colModel"].HeaderText = I18n.T("型号名称", "Model Name");
+            btnOk.Text = I18n.T("确 定", "OK");
+            btnCancel.Text = I18n.T("取 消", "Cancel");
+            btnAdd.Text = I18n.T("新 增", "Add");
+            btnDelete.Text = I18n.T("删除选中", "Delete Selected");
         }
 
         /// <summary>把当前映射填充进表格（前几行 = 已有型号与序号）。</summary>
@@ -123,8 +142,10 @@ namespace CommandCenter.Views
         {
             if (!DeleteRows())
             {
-                MessageBox.Show(this, "请先勾选要删除的行（左侧复选框），或直接选中一行/多行后再删除。",
-                    "产品型号配置", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, I18n.T(
+                    "请先勾选要删除的行（左侧复选框），或直接选中一行/多行后再删除。",
+                    "Select the rows to delete (check the left box), or select one/multiple rows first."),
+                    I18n.T("产品型号配置", "Model Config"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
 
@@ -210,15 +231,19 @@ namespace CommandCenter.Views
                 int idx;
                 if (idxObj == null || !int.TryParse(idxObj.ToString(), out idx) || idx < 0 || idx > 65535)
                 {
-                    MessageBox.Show(this, $"型号 [{name}] 的序号无效，必须是 0~65535 的整数。",
-                        "产品型号配置", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(this, I18n.T(
+                        $"型号 [{name}] 的序号无效，必须是 0~65535 的整数。",
+                        $"Invalid index for model [{name}]. It must be an integer 0~65535."),
+                        I18n.T("产品型号配置", "Model Config"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     DialogResult = DialogResult.None;   // 撤销默认 OK，留在窗体
                     return;
                 }
                 if (!seen.Add(name))
                 {
-                    MessageBox.Show(this, $"型号 [{name}] 重复出现，请合并为一行。",
-                        "产品型号配置", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(this, I18n.T(
+                        $"型号 [{name}] 重复出现，请合并为一行。",
+                        $"Model [{name}] appears more than once. Please merge into one row."),
+                        I18n.T("产品型号配置", "Model Config"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     DialogResult = DialogResult.None;
                     return;
                 }

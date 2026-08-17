@@ -348,7 +348,7 @@ namespace CommandCenter.Services
             _running = true;
             HookScannerEvents();
             SafeChange(_positionTimer, 0, PollMs); // 立即首轮，之后每 100ms（V2.14.19 由 200ms 缩短）
-            SetState("等待 PLC 请求");
+            SetState("等待 PLC 请求", "Waiting for PLC request");
         }
 
         /// <summary>
@@ -418,7 +418,7 @@ namespace CommandCenter.Services
         {
             _running = false;
             SafeChange(_positionTimer, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
-            SetState("已暂停");
+            SetState("已暂停", "Paused");
         }
 
         /// <summary>恢复流程。</summary>
@@ -428,7 +428,7 @@ namespace CommandCenter.Services
             {
                 _running = true;
                 SafeChange(_positionTimer, 0, PollMs);
-                SetState("等待 PLC 请求");
+                SetState("等待 PLC 请求", "Waiting for PLC request");
             }
         }
 
@@ -563,12 +563,12 @@ namespace CommandCenter.Services
                     try { sc.SendTrigger(); }
                     catch (Exception ex) { LogHelper.Warn("扫码枪触发异常：" + ex.Message); }
                 }
-                SetState("PLC 请求扫码：等待 SN");
+                SetState("PLC 请求扫码：等待 SN", "PLC scan request: waiting for SN");
             }
             else
             {
                 // 无扫码枪：SN 走手动输入（SetManualSerial），等待期间不报超时误伤
-                SetState("PLC 请求扫码：等待手动输入 SN");
+                SetState("PLC 请求扫码：等待手动输入 SN", "PLC scan request: waiting for manual SN input");
             }
             LogHelper.Info("收到 PLC 扫码请求（40001=1）");
         }
@@ -592,7 +592,7 @@ namespace CommandCenter.Services
                                                  // （否则下一轮 BeginScanChannel 不清，会把上一轮的码
                                                  //  当成新一轮的 SN 误报 OK——见 BeginScanChannel 注释）
                     _chStep = 1;
-                    SetState("扫码完成，等待 PLC 复位请求");
+                    SetState("扫码完成，等待 PLC 复位请求", "Scan complete, waiting for PLC reset");
                     LogHelper.Info($"扫码 OK：SN={LatestSerialNumber}，已上报型号[{_productModel}]与结果(1)");
                 }
                 else if (_serialErrorSeen)
@@ -609,7 +609,7 @@ namespace CommandCenter.Services
                     _chStep = 1;
                     LogHelper.Warn("扫码枪读码失败，结果已写 2 通知 PLC（PLC 死等人工补录）");
                     ErrorRaised?.Invoke("扫码枪读码失败：未取得序列号，请人工补录");
-                    SetState("扫码失败，等待人工补录");
+                    SetState("扫码失败，等待人工补录", "Scan failed, waiting for manual entry");
                 }
                 else if ((DateTime.UtcNow - _scanArriveUtc).TotalMilliseconds >= ScanWaitMs)
                 {
@@ -620,7 +620,7 @@ namespace CommandCenter.Services
                     _chStep = 1;
                     LogHelper.Warn($"扫码等待 SN 超时（{ScanWaitMs}ms），结果已写 2 通知 PLC（等待人工补录）");
                     ErrorRaised?.Invoke("扫码等待 SN 超时：未取得序列号，请人工补录");
-                    SetState("扫码超时，等待人工补录");
+                    SetState("扫码超时，等待人工补录", "Scan timeout, waiting for manual entry");
                 }
                 return;
             }
@@ -638,7 +638,7 @@ namespace CommandCenter.Services
                 _scanResultWriteUtc = DateTime.UtcNow;   // V2.14.43：记扫码结果写时刻（排查日志，补录覆盖也算一次写）
                 _scanResultWritten = 1;
                 _serialReceived = false;          // 补录的码已消费，防残留污染下一轮
-                SetState("扫码 OK（人工补录），等待 PLC 复位请求");
+                SetState("扫码 OK（人工补录），等待 PLC 复位请求", "Scan OK (manual entry), waiting for PLC reset");
                 LogHelper.Info($"人工补录完成，扫码结果已由 2 覆盖为 1：SN={LatestSerialNumber}");
             }
             // 【V2.14.41 复位确认改"边沿记忆"】PLC 扫描加快后，"请求=0"可能只保持极短窗口、
@@ -654,7 +654,7 @@ namespace CommandCenter.Services
                 _scanResultWritten = 0;           // V2.14.33：结果已复位
                 _activeCh = ChNone;
                 _scanReqResetSeen = false;        // V2.14.41：通道释放，下一轮 BeginScanChannel 重新初始化
-                SetState("等待 PLC 请求");
+                SetState("等待 PLC 请求", "Waiting for PLC request");
                 LogHelper.Info("PLC 已复位扫码请求，上位机复位扫码结果"
                     + (_scanResultWriteUtc == default(DateTime)
                         ? "（结果未写）"
@@ -704,14 +704,14 @@ namespace CommandCenter.Services
                 _chStep = 1;
                 _taskDone = true;   // 无 Task 后台工作，通道随时可复位（等 PLC 复位请求即可）
                 LogHelper.Info($"点位{stationNo} 已禁用或无相机，上报跳过(3)（{camLabel}）");
-                SetState($"点位{stationNo} 已禁用，跳过拍照");
+                SetState($"点位{stationNo} 已禁用，跳过拍照", $"Point {stationNo} disabled, shot skipped");
                 return;
             }
 
             _chanResult = -1;
             _chStep = 1;    // 步骤1：拍照进行中（判定即写，Task 里判定一出就落结果，不等图归档）
             _taskDone = false;  // V2.13.7：Task 结束（判定+取图+归档+显示全做完）才允许通道释放
-            SetState($"点位{stationNo} 触发 {camLabel} 拍照");
+            SetState($"点位{stationNo} 触发 {camLabel} 拍照", $"Point {stationNo}: {camLabel} shooting");
             LogHelper.Info($"***************************流程状态：点位{stationNo} 触发 {camLabel} 拍照（窗口{windowIndex}）*******************************");
 
             // 触发+取图+归档+显示 全部在后台线程，完成后只回传 _chanResult 给轮询线程
@@ -785,7 +785,7 @@ namespace CommandCenter.Services
                     _plc.WriteCameraResult(cfg, code);
                     _chanResultWriteUtc = DateTime.UtcNow;   // V2.14.43：记写结果时刻（排查日志）
                     _chStep = 2;
-                    SetState($"点位{_pendStation} 已上报结果({code})，等待 PLC 复位请求");
+                    SetState($"点位{_pendStation} 已上报结果({code})，等待 PLC 复位请求", $"Point {_pendStation} result({code}) sent, waiting for PLC reset");
                     LogHelper.Info($"相机[{CameraLabel(camIdx)}] 点位{_pendStation} step1 兜底补写结果({code})到 D{cfg.PlcResultAddress}");
                 }
                 return;
@@ -868,7 +868,7 @@ namespace CommandCenter.Services
                 _reqResetSeen = false;      // 通道释放：下一轮 BeginCameraChannel 重新初始化各标志
                 _resultCleared = false;
                 _reqAdvancedSeen = false;   // V2.14.44：随通道一起复位
-                SetState("等待 PLC 请求");
+                SetState("等待 PLC 请求", "Waiting for PLC request");
             }
         }
 
@@ -1558,17 +1558,33 @@ namespace CommandCenter.Services
 
         private readonly object _stateLock = new object();
         private string _lastState = "";
+        private string _lastStateEn = "";
 
-        /// <summary>发流程状态（日志 + 事件）。相同的状态不重复发（防日志刷爆）。</summary>
-        private void SetState(string text)
+        /// <summary>
+        /// 当前流程状态的"界面显示文本"（V2.15.0 国际化）：按当前语言返回 zh/en 对应文案，
+        /// 供 MainForm 切语言时刷新状态栏（SetState 相同状态不重复发，切语言后靠本属性重取）。
+        /// </summary>
+        public string CurrentStateUiText
+        {
+            get { lock (_stateLock) return I18n.T(_lastState, _lastStateEn); }
+        }
+
+        /// <summary>
+        /// 发流程状态（日志 + 事件）。
+        /// 【V2.15.0 国际化】日志（LogHelper）始终写中文（工程师排查用，不受语言切换影响）；
+        /// StateChanged 事件（UI 状态栏显示）按当前语言抛 zh/en 对应文案。
+        /// 相同的状态不重复发（防日志刷爆）；切语言后状态栏刷新走 CurrentStateUiText。
+        /// </summary>
+        private void SetState(string zh, string en)
         {
             lock (_stateLock)
             {
-                if (_lastState == text) return;
-                _lastState = text;
-                LogHelper.Info("流程状态：" + text);
+                if (_lastState == zh) return;
+                _lastState = zh;
+                _lastStateEn = en;
+                LogHelper.Info("流程状态：" + zh);
             }
-            StateChanged?.Invoke(text);
+            StateChanged?.Invoke(I18n.T(zh, en));
         }
 
         public void Dispose()

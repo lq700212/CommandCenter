@@ -94,6 +94,14 @@ namespace CommandCenter.Models
         /// 防止现场操作员随意修改设备/相机/存图等关键配置。
         /// </summary>
         public SecurityConfig Security { get; set; } = new SecurityConfig();
+
+        /// <summary>
+        /// 界面语言（V2.15.0 国际化）："zh-CN" 中文 / "en-US" 英文，默认中文。
+        /// 设置窗体"显示"区有语言下拉：选中即预览生效（I18n.Language 热更）、保存写盘；
+        /// 主界面/对话框文本经 I18n.T 按本值切换，无需重启软件。
+        /// 日志（LogHelper）不受本值影响，始终中文（工程师排查用）。
+        /// </summary>
+        public string Language { get; set; } = "zh-CN";
     }
 
     /// <summary>

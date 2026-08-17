@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Windows.Forms;
+using CommandCenter.Utils;
 
 namespace CommandCenter.Controls
 {
@@ -54,8 +55,12 @@ namespace CommandCenter.Controls
         /// <summary>悬停提示（V2.10.7）：提示操作员可双击放大/还原该窗口。</summary>
         private readonly ToolTip _toolTip;
 
-        /// <summary>悬停气泡提示文案（V2.10.7，开关关闭后再开启时恢复用）。</summary>
-        private const string DoubleClickTipText = "双击放大（全屏查看）；再双击还原";
+        /// <summary>悬停气泡提示文案（V2.10.7，开关关闭后再开启时恢复用；V2.15.0 国际化按当前语言取）。</summary>
+        private string DoubleClickTipText =>
+            I18n.T("双击放大（全屏查看）；再双击还原", "Double-click to zoom (full screen); double-click again to restore");
+
+        /// <summary>悬停提示当前是否开启（V2.10.8 开关状态；语言切换时按此状态刷新文本）。</summary>
+        private bool _toolTipEnabled = true;
 
         /// <summary>
         /// 构造：创建图像区、编号标签并摆好位置。
@@ -128,8 +133,7 @@ namespace CommandCenter.Controls
             //   不要只挂 UserControl 自身——鼠标实际落在子控件上，单独挂父控件会提示不出来。
             //   显隐由配置 DisplayConfig.WindowToolTipVisible 控制（V2.10.8），构造默认显示。
             _toolTip = new ToolTip();
-            _toolTip.SetToolTip(_pictureBox, DoubleClickTipText);
-            _toolTip.SetToolTip(_windowIndexLabel, DoubleClickTipText);
+            ApplyToolTip();
         }
 
         /// <summary>
@@ -168,9 +172,25 @@ namespace CommandCenter.Controls
         /// <param name="visible">true=悬停显示气泡提示，false=关闭提示</param>
         public void SetToolTipVisible(bool visible)
         {
-            if (visible)
+            _toolTipEnabled = visible;
+            ApplyToolTip();
+        }
+
+        /// <summary>
+        /// 语言切换时刷新本窗口文本（V2.15.0 国际化）：目前只有悬停气泡提示，按开关状态重设。
+        /// 由 MainForm.ApplyLanguage 遍历所有窗口调用；在 UI 线程执行。
+        /// </summary>
+        public void ApplyLanguage()
+        {
+            if (_toolTipEnabled) ApplyToolTip();
+        }
+
+        /// <summary>按开关状态设置/移除悬停气泡（V2.10.8；文本按当前语言取）。</summary>
+        private void ApplyToolTip()
+        {
+            if (_toolTipEnabled)
             {
-                // 恢复提示（文本是常量，与构造时保持一致）
+                // 恢复提示（文本按当前语言）
                 _toolTip.SetToolTip(_pictureBox, DoubleClickTipText);
                 _toolTip.SetToolTip(_windowIndexLabel, DoubleClickTipText);
             }

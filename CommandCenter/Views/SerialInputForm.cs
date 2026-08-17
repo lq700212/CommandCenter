@@ -80,8 +80,11 @@ namespace CommandCenter.Views
                 if (string.IsNullOrEmpty(code))
                 {
                     // 空提交被拦截：留在窗体提示，防误清空导致存图目录错乱
-                    MessageBox.Show(this, "序列号不能为空。\n若无需序列号请点【取消】。",
-                        "手动输入序列号", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(this, I18n.T(
+                        "序列号不能为空。\n若无需序列号请点【取消】。",
+                        "Serial number cannot be empty.\nIf no serial is needed, click Cancel."),
+                        I18n.T("手动输入序列号", "Manual Serial Input"),
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     DialogResult = DialogResult.None;                 // 撤销默认 OK，保持窗体打开
                     return;
                 }
@@ -98,6 +101,20 @@ namespace CommandCenter.Views
                 if (sc != null) sc.SerialNumberScanned += OnScannerScanned;
             }
             FormClosed += (s, e) => UnsubscribeScanners();
+            ApplyLanguage(); // V2.15.0 国际化：按当前语言初始化文本
+        }
+
+        /// <summary>
+        /// V2.15.0 国际化：按当前语言刷新本窗体全部界面文字。
+        /// 在构造函数末尾调用（模态对话框打开瞬间按当前语言初始化；模态期间语言不会变化）。
+        /// </summary>
+        private void ApplyLanguage()
+        {
+            this.Text = I18n.T("手动输入序列号", "Manual Serial Input");
+            lblBanner.Text = I18n.T("手动输入序列号", "Manual Serial Input");
+            lblSerialTitle.Text = I18n.T("序列号:", "Serial:");
+            btnOk.Text = I18n.T("确 定", "OK");
+            btnCancel.Text = I18n.T("取 消", "Cancel");
         }
 
         /// <summary>

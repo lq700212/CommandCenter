@@ -101,6 +101,7 @@ namespace CommandCenter.Views
 
             LoadFromConfig();               // 把当前配置值填进各输入框
             WireButtonEvents();             // 添加/删除相机按钮事件
+            ApplyLanguage();                // V2.15.0 国际化：按配置语言初始化本窗体全部文本
         }
 
         /// <summary>把现有配置值填充到控件（配置来源是上层传来的 _cfg 实例）。</summary>
@@ -130,6 +131,8 @@ namespace CommandCenter.Views
             // 扫码枪表格：先建列，再逐行填数据（V1.8.1 起支持多台）
             SetupScannerGridColumns();
             LoadScannerRows();
+            // V2.15.0 界面语言：按钮无选中项，按钮文本由 ApplyLanguage() 按当前语言统一设置，
+            // 这里不需要初始化（构造末尾 ApplyLanguage 会执行）。
         }
 
         /// <summary>
@@ -163,11 +166,13 @@ namespace CommandCenter.Views
                 nudCols.Value = Math.Max(1, Math.Min(7, _cfg.Display.Columns));
             }
             // V2.13：点位编辑已放开（两模式都可编辑，见 WindowPointForm），ToolTip 说明可编辑能力
-            tip.SetToolTip(btnEditPoints, AutoFitPointsButtonTip);
+            tip.SetToolTip(btnEditPoints, AutoFitPointsButtonTipText());
         }
 
-        /// <summary>勾选"自适应"后弹出的提示文案：明示自适下的行为（V2.12.1 统一模型说明；V2.13 更新；V2.14.18 非自适=行列乘积）。</summary>
-        private const string AutoFitDisabledHint =
+        /// <summary>勾选"自适应"后弹出的提示文案：明示自适下的行为（V2.12.1 统一模型说明；V2.13 更新；V2.14.18 非自适=行列乘积；V2.15.0 国际化改方法按语言返回）。</summary>
+        private string AutoFitDisabledHintText()
+        {
+            return I18n.T(
             "已开启【自适应】：窗口矩阵按\"当前产品型号 + 各相机点位表\"自动铺排（行列自动算）。\r\n" +
             "自适应只影响【行/列形状】，不影响【点位配置】：\r\n" +
             "· 显示窗口 行/列（勾选自适应时由系统自动计算；不勾时手填【行×列】即窗口总数，\r\n" +
@@ -175,15 +180,35 @@ namespace CommandCenter.Views
             "   用【交换位置】把点位分配过去）；\r\n" +
             "· 窗口/点位配置里的【编辑点位】【交换位置】【恢复默认】两模式下都可用（结果存按型号的 WindowPointMaps）；\r\n" +
             "  空窗口不支持【编辑点位】【禁用/启用】（选中时按钮自动置灰），只可【交换位置】。\r\n" +
-            "仍可用：【禁用/启用】窗口、相机程序映射（点位→程序号）。";
+            "仍可用：【禁用/启用】窗口、相机程序映射（点位→程序号）。",
+            "Auto Fit enabled: the window matrix is laid out automatically by the current product model +\r\n" +
+            "each camera's point table (rows/columns are auto-computed).\r\n" +
+            "Auto Fit only affects the row/column shape, not point assignment:\r\n" +
+            "· Display rows/columns (auto-computed when checked; otherwise manual rows×columns = total windows;\r\n" +
+            "   extra cells are \"empty windows\" — still shown to fill the display area, assign points to them\r\n" +
+            "   via Swap Position in Window/Point Config);\r\n" +
+            "· Edit Point / Swap Position / Reset Default work in both modes (stored per-model in WindowPointMaps);\r\n" +
+            "   Empty windows do NOT support Edit Point / Disable (buttons greyed out), only Swap Position.\r\n" +
+            "Still available: Disable/Enable windows, camera program mapping (point → program).");
+        }
 
-        /// <summary>"窗口/点位配置..."按钮 ToolTip（V2.12.1 统一模型；V2.13 起支持手动编辑；V2.13.1 交换放开跨相机；V2.14.2 编辑点位自动互换 + 取消不生效）。</summary>
-        private const string AutoFitPointsButtonTip =
+        /// <summary>"窗口/点位配置..."按钮 ToolTip（V2.12.1 统一模型；V2.13 起支持手动编辑；V2.13.1 交换放开跨相机；V2.14.2 编辑点位自动互换 + 取消不生效；V2.15.0 国际化改方法按语言返回）。</summary>
+        private string AutoFitPointsButtonTipText()
+        {
+            return I18n.T(
             "窗口/点位配置：格子显示\"归属相机·点位号\"，矩阵跟随【型号】联动。\r\n" +
             "默认按\"前上相机后下相机\"铺排；可【编辑点位】（从相机点位表全部点位里选，选到被占用点位\r\n" +
             "自动与该窗口互换）、【交换位置】（任意两窗口互换点位，含跨相机；交换的是\"窗口↔点位\"对应，\r\n" +
             "不改相机点位/程序表）、【恢复默认】（重置该型号铺排并全部启用）、【禁用/启用】窗口、\r\n" +
-            "并配置【相机程序映射】（相机+型号 → 点位 → 相机程序号）。改动点【确定】才写回，点【取消】不生效。";
+            "并配置【相机程序映射】（相机+型号 → 点位 → 相机程序号）。改动点【确定】才写回，点【取消】不生效。",
+            "Window/Point Config: each cell shows \"camera·point number\", the matrix follows the selected model.\r\n" +
+            "Default layout: up camera first, then down camera. You can Edit Point (pick from all points of the\r\n" +
+            "model's camera tables; picking an occupied point auto-swaps with that window), Swap Position\r\n" +
+            "(swap two windows' points, including cross-camera; swaps the window↔point mapping, does NOT change\r\n" +
+            "camera point/program tables), Reset Default (reset this model's layout and enable all windows),\r\n" +
+            "Disable/Enable windows, and configure Camera Program Mapping (camera+model → point → program).\r\n" +
+            "Changes apply on OK; Cancel keeps the old values.");
+        }
 
         /// <summary>
         /// 刷新"配置目录结构..."按钮的 ToolTip：把当前目录结构（层级用 / 拼接）动态挂到按钮上，
@@ -192,9 +217,11 @@ namespace CommandCenter.Views
         private void RefreshDirPreview()
         {
             var dirs = _cfg.Image.SubDirs ?? new List<string>();
-            string cur = dirs.Count > 0 ? string.Join("/", dirs) : "（未配置）";
-            tip.SetToolTip(btnEditDirs,
-                "可视化编辑存图目录结构（目录层级列表 + 文件名规则），并实时预览 OK/NG 落盘路径。\r\n当前结构：" + cur);
+            string cur = dirs.Count > 0 ? string.Join("/", dirs) : I18n.T("（未配置）", "(not configured)");
+            // V2.15.0 国际化：前缀文案双语，动态"当前结构"拼接在后（与语言无关的部分保持原文）
+            tip.SetToolTip(btnEditDirs, I18n.T(
+                "可视化编辑存图目录结构（目录层级列表 + 文件名规则），并实时预览 OK/NG 落盘路径。\r\n当前结构：" + cur,
+                "Edit image directory structure (level list + file name rules) with a live OK/NG preview.\r\nCurrent structure: " + cur));
         }
 
         /// <summary>给相机表格建好列结构（列固定，运行时加一次即可，不用进设计器序列化）。
@@ -487,13 +514,22 @@ namespace CommandCenter.Views
         /// </summary>
         private void WireButtonEvents()
         {
+            // V2.15.0 国际化：语言切换按钮点击 → 直接切换中/英文（I18n.Language 触发
+            // LanguageChanged，MainForm 收到后全量热刷新；本窗体也同步刷新文字），无需重启；
+            // 点【保存】才写盘持久化。按钮文本 = 目标语言名（见 ApplyLanguage）。
+            btnToggleLanguage.Click += (s, e) =>
+            {
+                I18n.Language = (I18n.Language == "en-US") ? "zh-CN" : "en-US";
+                ApplyLanguage();        // 设置窗体自身文字立即按新语言刷新（按钮文本随之更新）
+            };
+
             // V2.12.0 自适应开关：勾选变化即时同步相关控件可用状态；
             // 刚勾选时弹气泡明示"自适下哪些功能不可用"，避免误操作（见 UpdateAutoFitUi / AutoFitDisabledHint）
             chkAutoFit.CheckedChanged += (s, e) =>
             {
                 UpdateAutoFitUi();
                 if (chkAutoFit.Checked)
-                    tip.Show(AutoFitDisabledHint, chkAutoFit, 150, 28, 9000);
+                    tip.Show(AutoFitDisabledHintText(), chkAutoFit, 150, 28, 9000);
             };
 
             // V2.14.14：产品型号配置按钮 → 打开"产品型号配置"弹窗，
@@ -651,8 +687,158 @@ namespace CommandCenter.Views
             }
 
             // 兜底：确实没有可删的行（表格没有焦点/没有任何行）才提示
-            MessageBox.Show($"请先点击表格中要删除的{rowName}行（整行高亮），再点\"删除选中\"。",
-                "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            // V2.15.0 国际化：行名（"相机"/"扫码枪(TCP)"/"扫码枪(串口)"）按中文原值映射成英文提示文案
+            string rowNameEn = rowName.Contains("TCP") ? "scanner (TCP)"
+                : rowName.Contains("串口") ? "scanner (Serial)" : "camera";
+            MessageBox.Show(I18n.T(
+                $"请先点击表格中要删除的{rowName}行（整行高亮），再点\"删除选中\"。",
+                $"Please select the {rowNameEn} row to delete (full row highlighted) first, then click \"Delete Selected\"."),
+                I18n.T("提示", "Notice"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        /// <summary>
+        /// V2.15.0 国际化：按当前语言刷新本窗体全部界面文字（静态标签/按钮/表格列头/悬停气泡）。
+        /// 在构造函数末尾（首次按配置语言初始化）与语言下拉切换时调用；Designer 里的静态中文
+        /// 文本保持原样（方便 VS 设计器维护布局），运行时统一在这里覆盖成当前语言。
+        /// </summary>
+        private void ApplyLanguage()
+        {
+            // ---- 窗体标题与静态标签/按钮（Designer 里是中文，运行时按语言覆盖）----
+            this.Text = I18n.T("系统设置", "System Settings");
+            lblPlcIp.Text = I18n.T("PLC IP:", "PLC IP:");
+            lblPlcPort.Text = I18n.T("端口:", "Port:");
+            btnModelConfig.Text = I18n.T("产品型号配置…", "Model Config…");
+            lblRows.Text = I18n.T("显示窗口行:", "Display Rows:");
+            lblCols.Text = I18n.T("列:", "Columns:");
+            lblDir.Text = I18n.T("图片保存根目录:", "Image Root Dir:");
+            btnEditDirs.Text = I18n.T("配置目录结构...", "Configure Dirs...");
+            lblFile.Text = I18n.T("文件名模板:", "File Name Template:");
+            lblPoints.Text = I18n.T("窗口点位:", "Window Points:");
+            btnEditPoints.Text = I18n.T("窗口/点位配置...", "Window/Point Config...");
+            lblOkNg.Text = I18n.T("OK/NG显示:", "OK/NG Display:");
+            chkTitleOkNg.Text = I18n.T("标题栏高亮", "Title Highlight");
+            chkWindowOkNg.Text = I18n.T("窗口徽标", "Window Badge");
+            chkWindowIndex.Text = I18n.T("显示窗口编号", "Show Window Index");
+            chkWindowToolTip.Text = I18n.T("悬停提示", "Hover ToolTip");
+            chkAutoFit.Text = I18n.T("自适应", "Auto Fit");
+            // 语言切换按钮：文本 = 目标语言名（点击后界面切到该语言），语言名本身不翻译、自解释。
+            // 中文界面显示 "English"（点一下变英文）、英文界面显示 "中文"（点一下变中文）。
+            btnToggleLanguage.Text = (I18n.Language == "en-US") ? "中文" : "English";
+            tip.SetToolTip(btnToggleLanguage, I18n.T("点击切换界面语言（无需重启，点【保存】写盘）",
+                "Click to switch UI language (no restart; press Save to persist)"));
+            lblCams.Text = I18n.T("相机列表:", "Cameras:");
+            btnAddCam.Text = I18n.T("添加一台", "Add");
+            btnDelCam.Text = I18n.T("删除选中", "Delete Selected");
+            lblScannersTcp.Text = I18n.T("扫码枪列表(TCP):", "Scanners (TCP):");
+            btnAddScannerTcp.Text = I18n.T("添加一台", "Add");
+            btnDelScannerTcp.Text = I18n.T("删除选中", "Delete Selected");
+            lblScannersSerial.Text = I18n.T("扫码枪列表(串口):", "Scanners (Serial):");
+            btnAddScannerSerial.Text = I18n.T("添加一台", "Add");
+            btnDelScannerSerial.Text = I18n.T("删除选中", "Delete Selected");
+            btnSave.Text = I18n.T("保存", "Save");
+            btnCancel.Text = I18n.T("取消", "Cancel");
+
+            // ---- 表格列头（列在运行时 SetupXxxGridColumns 创建，HeaderText 这里按语言刷新）----
+            if (gridCameras.Columns["CameraId"] != null)
+            {
+                gridCameras.Columns["CameraId"].HeaderText = I18n.T("相机ID", "Cam ID");
+                gridCameras.Columns["Name"].HeaderText = I18n.T("相机名称(上/下)", "Name (Up/Down)");
+                gridCameras.Columns["IpAddress"].HeaderText = I18n.T("相机IP", "IP");
+                gridCameras.Columns["CommandPort"].HeaderText = I18n.T("触发端口", "Trigger Port");
+                gridCameras.Columns["FtpUploadDir"].HeaderText = I18n.T("FTP取图目录（留空用全局目录）", "FTP Dir (empty=global)");
+                gridCameras.Columns["ImageSource"].HeaderText = I18n.T("取图方式", "Source");
+                gridCameras.Columns["PlcRequestAddress"].HeaderText = I18n.T("PLC请求索引(0=未配置/必填)", "PLC Req Addr (0=off)");
+                gridCameras.Columns["PlcResultAddress"].HeaderText = I18n.T("PLC结果索引(0=未配置/必填)", "PLC Res Addr (0=off)");
+            }
+            if (gridScannersTcp.Columns["Enabled"] != null)
+            {
+                gridScannersTcp.Columns["Enabled"].HeaderText = I18n.T("启用", "Enabled");
+                gridScannersTcp.Columns["IpAddress"].HeaderText = "IP";
+                gridScannersTcp.Columns["Port"].HeaderText = I18n.T("端口", "Port");
+                gridScannersTcp.Columns["TriggerCommand"].HeaderText = I18n.T("触发指令", "Trigger");
+                gridScannersTcp.Columns["IgnoreScanTexts"].HeaderText = I18n.T("忽略文本", "Ignore Texts");
+            }
+            if (gridScannersSerial.Columns["Enabled"] != null)
+            {
+                gridScannersSerial.Columns["Enabled"].HeaderText = I18n.T("启用", "Enabled");
+                gridScannersSerial.Columns["PortName"].HeaderText = I18n.T("串口名", "Port");
+                gridScannersSerial.Columns["BaudRate"].HeaderText = I18n.T("波特率", "Baud");
+                gridScannersSerial.Columns["StopBits"].HeaderText = I18n.T("停止位", "StopBits");
+                gridScannersSerial.Columns["Parity"].HeaderText = I18n.T("校验位", "Parity");
+                gridScannersSerial.Columns["IgnoreScanTexts"].HeaderText = I18n.T("忽略文本", "Ignore Texts");
+            }
+
+            // ---- 悬停气泡（Designer 里的静态中文提示，运行时按语言刷新）----
+            tip.SetToolTip(txtPlcIp, I18n.T(
+                "上位机从站监听绑定 IP（V1.12.11 起 PLC 做主站、上位机做从站）。\r\n填 0.0.0.0 监听所有网卡，或填本机指定 IP（如 19.87.6.230）；\r\n保存后即时生效（自动重启从站监听）。",
+                "Slave bind IP (PLC is the master, this PC is the Modbus TCP slave).\r\nUse 0.0.0.0 to listen on all NICs, or a specific local IP (e.g. 19.87.6.230).\r\nTakes effect immediately after Save (slave restarts automatically)."));
+            tip.SetToolTip(nudPlcPort, I18n.T(
+                "上位机从站监听端口（Modbus TCP 标准 502，需与汇川主站通讯指令里的端口一致）。\r\n保存后即时生效（自动重启从站监听）。",
+                "Slave listen port (Modbus TCP standard 502, must match the master's comm instruction port).\r\nTakes effect immediately after Save."));
+            tip.SetToolTip(btnModelConfig, I18n.T(
+                "打开【产品型号配置】对话框（V2.14.14）：用表格维护\"型号名称 ↔ PLC 序号(40007)\"映射。\r\n表格两列：序号、型号名称；前几行默认预载当前已有型号与序号，可增删改。\r\n【确定】把当前对应关系保存到配置（重启后自动加载），【取消】关闭不保存。\r\n现场默认 Z121=1、U171=2；每次扫码上位机先写 40007=本序号，再写 40008~40012=型号 ASCII 字符串。",
+                "Model Config dialog: maintain the \"model name ↔ PLC index (40007)\" mapping in a table.\r\nTwo columns: index, model name. Default rows are preloaded from current config; add/edit/delete freely.\r\nOK writes back to config, Cancel discards. Site defaults: Z121=1, U171=2."));
+            tip.SetToolTip(nudRows, I18n.T(
+                "主界面显示窗口的行数。窗口总数=行×列；保存后即时生效。\r\n新增窗口的存图点位默认=窗口编号，可在下方\"窗口/点位配置...\"里改。\r\n勾选\"自适应\"后本框自动置灰（行数由相机点位表自动计算）。",
+                "Number of rows in the main window matrix. Total windows = rows×columns.\r\nNew windows default to point = window index, changeable in Window/Point Config below.\r\nGreyed out while Auto Fit is checked (rows auto-computed from camera point tables)."));
+            tip.SetToolTip(nudCols, I18n.T(
+                "主界面显示窗口的列数。窗口总数=行×列；保存后即时生效。\r\n新增窗口的存图点位默认=窗口编号，可在下方\"窗口/点位配置...\"里改。\r\n勾选\"自适应\"后本框自动置灰（列数由相机点位表自动计算）。",
+                "Number of columns in the main window matrix. Total windows = rows×columns.\r\nGreyed out while Auto Fit is checked (columns auto-computed from camera point tables)."));
+            tip.SetToolTip(txtSaveDir, I18n.T(
+                "图片保存的根目录（绝对路径）。\r\n实际目录结构按\"配置目录结构...\"里的层级逐级创建。",
+                "Root directory for saved images (absolute path).\r\nSub-structure is created per the levels in Configure Dirs..."));
+            tip.SetToolTip(txtFileNameTpl, I18n.T(
+                "图片文件名规则，占位符会自动替换：\r\n{点位}→窗口点位号（如 1.png）  {SN}→序列号  {OKNG}→OK 或 NG\r\n{年}/{月}/{日}→日期  {时间}→毫秒时间戳；其余文字原样保留。\r\n目录结构里的层级同样支持这些占位符。",
+                "Image file name rule; placeholders are replaced automatically:\r\n{点位}=window point (e.g. 1.png)  {SN}=serial  {OKNG}=OK or NG\r\n{年}/{月}/{日}=date  {时间}=ms timestamp; other text is kept as-is.\r\nDirectory levels support the same placeholders."));
+            tip.SetToolTip(btnAddCam, I18n.T(
+                "在列表末尾添加一台相机（默认值可直接改 IP / 端口 / FTP 上传目录）。",
+                "Add a camera at the end of the list (edit IP / port / FTP dir as needed)."));
+            tip.SetToolTip(chkTitleOkNg, I18n.T(
+                "标题栏的 OK / NG 计数用\"实心彩色色块 + 白字\"高亮（绿底=OK、红底=NG），\r\n比普通彩色文字醒目得多。取消则回退彩色文字样式。保存后即时生效。",
+                "Title-bar OK/NG counters use a solid color block with white text (green=OK, red=NG).\r\nUncheck to fall back to plain colored text. Takes effect immediately after Save."));
+            tip.SetToolTip(chkWindowOkNg, I18n.T(
+                "主界面每个显示窗口右下角叠加一个【矩形框 OK/NG 徽标】（样子同标题栏色块，\r\n颜色随 \"OK颜色/NG颜色\" 配置）。默认开启（V2.14.24）。保存后即时生效。",
+                "Each display window shows a rectangular OK/NG badge at its bottom-right corner\r\n(colors follow the OK/NG color config). On by default. Takes effect immediately after Save."));
+            tip.SetToolTip(chkWindowIndex, I18n.T(
+                "主界面每个显示窗口左上角是否显示【窗口编号】（半透明白底 + 深蓝灰字，辅助现场定位第几路）。\r\n默认勾选；现场嫌编号碍眼可取消勾选，保存后即时生效。",
+                "Show the window number at the top-left of each display window (semi-transparent white background).\r\nOn by default; uncheck to hide. Takes effect immediately after Save."));
+            tip.SetToolTip(chkWindowToolTip, I18n.T(
+                "鼠标放到主界面任一显示窗口内停留片刻，是否弹出【双击放大/还原】气泡提示。\r\n默认勾选（方便新手操作员发现双击功能）；现场嫌气泡挡画面可取消勾选，保存后即时生效。",
+                "Show the \"double-click to zoom\" bubble when hovering over a display window.\r\nOn by default; uncheck if the bubble blocks the view. Takes effect immediately after Save."));
+            tip.SetToolTip(chkAutoFit, I18n.T(
+                "勾选【自适应】后主界面窗口矩阵【不再手动指定行列】，而是按当前产品型号 + 各相机\r\n\"点位→程序号\"表自动铺排（窗口总数=各相机点位和、前上相机后下相机）。\r\n\r\n【自适应只影响行/列形状，不影响点位配置】\r\n· 显示窗口 行/列 输入框（勾选时行列由系统自动算，不勾时可手填排列宽度）；\r\n· 窗口/点位配置里的【编辑点位】【交换位置】【恢复默认】两模式下都可编辑；\r\n仍可用：【禁用/启用】窗口、相机程序映射（点位→程序号）。",
+                "Auto Fit: the window matrix is no longer sized manually — rows/columns are computed from\r\nthe current model + each camera's point→program table (total = sum of camera points,\r\nup camera first then down camera).\r\n\r\nAuto Fit only affects the row/column shape, not point assignment:\r\n· Rows/columns inputs are auto-computed while checked;\r\n· Edit Point / Swap Position / Reset Default stay available in both modes;\r\nStill available: Disable/Enable windows, camera program mapping."));
+            tip.SetToolTip(btnDelCam, I18n.T(
+                "删除选中的相机行；未选中时先点选要删的行。",
+                "Delete the selected camera row; select a row first if none is selected."));
+            tip.SetToolTip(lblScannersTcp, I18n.T(
+                "TCP 扫码枪列表：基恩士 SR 系列以太网扫码枪，一台一行。\r\n任何一台扫到的条码都会更新当前序列号（标题栏与存图目录同步）。\r\n\"启用\"不打勾则这台不接入。",
+                "TCP scanners: KEYENCE SR ethernet scanners, one per row.\r\nAny scanned code updates the current serial number (title bar and save dirs).\r\nUnchecked \"Enabled\" rows are not connected."));
+            tip.SetToolTip(lblScannersSerial, I18n.T(
+                "串口扫码枪列表：RS-232 串口扫码枪，一台一行。\r\n串口扫码枪上电即读码、无需触发指令（与 TCP 不同）。\r\n\"启用\"不打勾则这台不接入。",
+                "Serial scanners: RS-232 scanners, one per row.\r\nSerial scanners read on power-up and need no trigger command (unlike TCP).\r\nUnchecked \"Enabled\" rows are not connected."));
+            tip.SetToolTip(btnAddScannerTcp, I18n.T(
+                "添加一台 TCP 扫码枪（默认 19.87.6.100 / 9004 / LON，可直接改）。",
+                "Add a TCP scanner (default 19.87.6.100 / 9004 / LON)."));
+            tip.SetToolTip(btnDelScannerTcp, I18n.T(
+                "删除选中的 TCP 扫码枪行；未选中时先点选要删的行。",
+                "Delete the selected TCP scanner row; select a row first if none is selected."));
+            tip.SetToolTip(btnAddScannerSerial, I18n.T(
+                "添加一台串口扫码枪（默认 COM3 / 115200 / 1 / None，可直接改）。",
+                "Add a serial scanner (default COM3 / 115200 / 1 / None)."));
+            tip.SetToolTip(btnDelScannerSerial, I18n.T(
+                "删除选中的串口扫码枪行；未选中时先点选要删的行。",
+                "Delete the selected serial scanner row; select a row first if none is selected."));
+            tip.SetToolTip(btnSave, I18n.T(
+                "保存所有设置并写盘到 Config/appconfig.json，保存后即时生效（V1.6.0 免重启）。\r\n服务层按新配置自动重建，设备短暂断连后几秒内自动连回。",
+                "Save all settings to Config/appconfig.json and apply immediately (no restart needed).\r\nServices rebuild on the new config; devices reconnect within a few seconds."));
+            tip.SetToolTip(btnCancel, I18n.T(
+                "放弃本次修改并关闭，不写盘。",
+                "Discard changes and close without saving."));
+
+            // 两个动态 ToolTip（含当前配置内容）随语言刷新
+            tip.SetToolTip(btnEditPoints, AutoFitPointsButtonTipText());
+            RefreshDirPreview();
         }
 
         /// <summary>
@@ -674,8 +860,12 @@ namespace CommandCenter.Views
                 string idTxt = r.Cells["CameraId"].Value == null ? "" : r.Cells["CameraId"].Value.ToString();
                 if (int.TryParse(idTxt, out id) && id > 0 && !camIds.Add(id))
                 {
-                    MessageBox.Show($"相机ID不能重复：已存在「相机{id}」。请把其中一台改成别的编号（>0），" +
-                        "或清空该项让保存时自动补一个不重复的编号。", "相机ID重复",
+                    MessageBox.Show(I18n.T(
+                        $"相机ID不能重复：已存在「相机{id}」。请把其中一台改成别的编号（>0），" +
+                        "或清空该项让保存时自动补一个不重复的编号。",
+                        $"Camera ID duplicated: camera {id} already exists. Change one to a different number (>0), " +
+                        "or leave it empty so an unused ID is assigned automatically on save."),
+                        I18n.T("相机ID重复", "Duplicate Camera ID"),
                         MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return; // 中止本次保存，_cfg 未做任何回写
                 }
@@ -712,6 +902,8 @@ namespace CommandCenter.Views
             _cfg.Display.WindowOkNgVisible = chkWindowOkNg.Checked; // V2.10.3：窗口右下角 OK/NG 徽标开关（V2.14.24 默认开；徽标"拿到相机结果才显示"见 CameraDisplayControl）
             _cfg.Display.WindowIndexVisible = chkWindowIndex.Checked; // V2.10.4：窗口左上角窗口编号开关
             _cfg.Display.WindowToolTipVisible = chkWindowToolTip.Checked; // V2.10.8：窗口悬停气泡提示开关
+            // V2.15.0 界面语言：写盘持久化（按钮点击已即时切换全局语言，保存确保重启后保持当前语言）
+            _cfg.Language = I18n.Language;
             _cfg.Image.SaveRootDir = txtSaveDir.Text.Trim();
             _cfg.Image.FileNameTemplate = txtFileNameTpl.Text.Trim();
             // 目录结构由 DirTreeEditForm 直接写入 _cfg.Image.SubDirs，这里不用回写；
