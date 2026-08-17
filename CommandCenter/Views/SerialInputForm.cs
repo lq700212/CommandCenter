@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
+using CommandCenter.Services;
+using CommandCenter.Utils;
 
 namespace CommandCenter.Views
 {
@@ -31,6 +34,9 @@ namespace CommandCenter.Views
     ///   - 【确定】时输入 trim 后为空 → 弹提示留在窗体，不允许清空提交（防止误清空序列号
     ///     导致本件存图目录归档错乱；想要"不留 SN"直接【取消】）；
     ///   - 【确定】且非空 → DialogResult.OK 关闭，调用方读 SerialNumber 属性写入协调器。
+    ///   - **【读到真码自动关闭（V2.14.48）】**：本窗打开期间若扫码枪读到一条真码
+    ///     （触发 IScanner.SerialNumberScanned），说明人工补录已不需要（扫码路径已把
+    ///     40004 覆盖成 1），本窗自动以"取消"语义关闭——操作员无需再手动输入，省一次操作。
     /// 本窗体不做任何通讯 IO，只收集文本，永远在 UI 主线程使用。
     /// </summary>
     public partial class SerialInputForm : Form
@@ -41,13 +47,22 @@ namespace CommandCenter.Views
         /// </summary>
         public string SerialNumber { get; private set; } = "";
 
+        /// <summary>订阅的扫码枪服务（用于窗口打开期间监听"读到真码"自动关闭）。</summary>
+        private readonly IEnumerable<IScanner> _scanners;
+
+        /// <summary>已因"读到真码"自动关闭的标志：防扫码枪连续推码时重复 Close（只在 UI 线程访问）。</summary>
+        private bool _autoClosed;
+
         /// <summary>创建手动输入序列号对话框。</summary>
         /// <param name="current">当前已生效的序列号（扫码收码/上次输入），用于预填方便修改。</param>
-        public SerialInputForm(string current)
+        /// <param name="scanners">扫码枪服务列表（V2.14.48）：本窗打开期间订阅每台枪的
+        /// SerialNumberScanned，读到真码说明人工补录已不需要，自动关闭；null=不监听（旧行为）。</param>
+        public SerialInputForm(string current, IEnumerable<IScanner> scanners = null)
         {
             // Designer 已建好全部控件与外观（见 SerialInputForm.Designer.cs），这里只补业务：
             // 预填 + 全选聚焦 + 回车/Esc + 确定空校验。
             InitializeComponent();
+            _scanners = scanners ?? new List<IScanner>();
 
             // ── 预填当前 SN 并全选：直接打字即覆盖旧值 ────────────────
             txtValue.Text = current ?? "";
@@ -73,6 +88,47 @@ namespace CommandCenter.Views
                 SerialNumber = code;
                 DialogResult = DialogResult.OK;                      // 非空才真正放行关闭
             };
+
+            // 【V2.14.48 读到真码自动关闭】窗口打开期间订阅每台扫码枪的 SerialNumberScanned：
+            // 一旦读到真码，说明人工补录已不需要（扫码路径已把 40004 覆盖成 1、协调器已置
+            // _serialReceived），本窗自动以"取消"语义（Cancel）关闭——MainForm 收到非 OK
+            // 不会调 SetManualSerial，避免与扫码路径重复写入。订阅/退订成对维护防泄漏。
+            foreach (var sc in _scanners)
+            {
+                if (sc != null) sc.SerialNumberScanned += OnScannerScanned;
+            }
+            FormClosed += (s, e) => UnsubscribeScanners();
+        }
+
+        /// <summary>
+        /// 扫码枪读到真码（V2.14.48）：工作线程事件，BeginInvoke 切回 UI 线程自动关闭本窗。
+        /// 真码由扫码路径统一处理（MainForm.OnSerialScanned 更新序列号、协调器写结果 1），
+        /// 这里只负责弹窗自己退场，不参与业务判定。
+        /// </summary>
+        private void OnScannerScanned(object sender, string code)
+        {
+            if (IsDisposed) return;
+            try
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    if (IsDisposed || _autoClosed) return;   // 防重复关闭（连续推码/多枪同时读到）
+                    _autoClosed = true;
+                    LogHelper.Info("手动输入序列号窗口打开期间扫码枪读到真码，自动关闭（无需人工补录）：" + code);
+                    DialogResult = DialogResult.Cancel;      // 非 OK：读到的码由扫码路径处理，不重复提交
+                    Close();
+                }));
+            }
+            catch { /* 窗体即将释放时 BeginInvoke 可能失败，直接忽略（本窗马上关闭） */ }
+        }
+
+        /// <summary>退订扫码枪读码事件（FormClosed 调用，成对维护防泄漏）。</summary>
+        private void UnsubscribeScanners()
+        {
+            foreach (var sc in _scanners)
+            {
+                if (sc != null) sc.SerialNumberScanned -= OnScannerScanned;
+            }
         }
     }
 }

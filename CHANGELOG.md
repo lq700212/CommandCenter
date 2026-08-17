@@ -1,5 +1,31 @@
 # 版本改动记录
 
+## V2.14.48（2026-08-17）扫码枪异常弹窗 / 手动补录弹窗：打开期间读到真码自动关闭（免人工补录）
+
+> 现场场景：扫码枪读码失败弹出 ScannerFailForm（或操作员点【人工补录】打开 SerialInputForm）后，
+> 扫码枪往往紧接着就恢复了、扫到真码——此时人工补录已经不需要（扫码路径会自动把 40004 从 2
+> 覆盖成 1），但旧实现弹窗还一直开着，操作员要么手动点掉、要么重复录入，白做一次操作。
+
+### 改动内容
+
+- **`Views/ScannerFailForm.cs`**：构造新增可选参数 `scanners`（`IEnumerable<IScanner>`，null=不监听）。
+  窗口打开期间订阅每台扫码枪的 `SerialNumberScanned`：读到真码 → `BeginInvoke` 回 UI 线程以
+  "稍后处理"语义（`DialogResult.Cancel`）自动关闭——MainForm 收到非 OK 不会再弹手动录入窗；
+  `FormClosed` 成对退订防事件泄漏，`_autoClosed` 标志防扫码枪连续推码重复 Close。
+- **`Views/SerialInputForm.cs`**：构造同样新增可选参数 `scanners`。打开期间读到真码 → 以"取消"语义
+  自动关闭——真码已由扫码路径处理（MainForm.OnSerialScanned 更新序列号、协调器写结果 1），
+  不重复调 `SetManualSerial`，避免与扫码路径重复写入。
+- **`Views/MainForm.cs`**：`PromptManualSerial` 与 `OnScannerFailPrompt` 两处创建弹窗时把
+  `_scanners`（`List<IScanner>`，扫码枪服务列表）传入，启用自动关闭。
+
+### 为什么这么改
+
+- 弹窗只做"人看的提醒"，读到真码说明业务已自己续上（扫码路径写 1 覆盖 2），弹窗继续挂着没有意义，
+  自动关闭省操作员一次点击、且不再让"补录窗口与扫码收码抢输入"；
+- 订阅/退订成对维护 + `BeginInvoke` 回 UI 线程（模态 `ShowDialog` 的消息循环会处理该消息），
+  事件无泄漏、不碰非 UI 线程；
+- 自动关闭一律走"非 OK"，避免误触发人工补录流程，与 V2.14.32/33"弹窗不参与业务判定"约定一致。
+
 ## V2.14.47（2026-08-17）新一轮清窗同步重置窗口徽标：扫码时各窗口右下角 OK/NG 徽标一并复位为绿 OK
 
 > 上一轮相机的 NG 判定会以红色 NG 徽标残留在对应窗口右下角；PLC 发来新一轮扫码请求

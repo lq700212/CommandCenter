@@ -242,7 +242,7 @@ namespace CommandCenter.Views
         private void PromptManualSerial()
         {
             if (IsDisposed) return;
-            using (var dlg = new SerialInputForm(_coordinator.LatestSerialNumber))
+            using (var dlg = new SerialInputForm(_coordinator.LatestSerialNumber, _scanners))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;   // 取消/关闭：不生效，保留原 SN
                 string code = dlg.SerialNumber.Trim();
@@ -1250,7 +1250,7 @@ namespace CommandCenter.Views
             // 点【稍后处理】→ 仅提醒、暂不补录（V2.14.33：PLC 死等 2，操作员稍后经主界面
             // 【人工补录】按钮 btnManualSerial 补录，协调器把 40004 从 2 覆盖成 1 流程才继续）；
             // 关闭后若勾选【今日不再提醒】→ 记录当天日期，当日后续失败不再弹窗（跨弹窗实例全局生效）。
-            using (var dlg = new ScannerFailForm(text))
+            using (var dlg = new ScannerFailForm(text, _scanners))
             {
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                     PromptManualSerial();
