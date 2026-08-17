@@ -59,6 +59,7 @@ namespace CommandCenter.Views
             this.lblScannerStatus = new System.Windows.Forms.Label();
             this.lblCamPlaceholder = new System.Windows.Forms.Label();
             this.btnSettings = new System.Windows.Forms.Button();
+            this.btnToggleLanguage = new System.Windows.Forms.Button();
             this.btnManualSerial = new System.Windows.Forms.Button();
             this.lblSep2 = new System.Windows.Forms.Label();
             this.lblNg = new System.Windows.Forms.Label();
@@ -91,6 +92,7 @@ namespace CommandCenter.Views
             // 运行时 InitTitleBarRuntime 生成真灯后会把占位隐藏（隐藏控件不占 Dock 空间）。
             this.pnlTitleBar.Controls.Add(this.lblCamPlaceholder);
             this.pnlTitleBar.Controls.Add(this.btnSettings);
+            this.pnlTitleBar.Controls.Add(this.btnToggleLanguage);
             this.pnlTitleBar.Controls.Add(this.lblSep2);
             this.pnlTitleBar.Controls.Add(this.lblNg);
             this.pnlTitleBar.Controls.Add(this.lblOk);
@@ -165,6 +167,26 @@ namespace CommandCenter.Views
             this.btnSettings.TabIndex = 9;
             this.btnSettings.Text = "系统设置";
             this.btnSettings.UseVisualStyleBackColor = false;
+            // 
+            // btnToggleLanguage
+            // 界面语言切换按钮（V2.15.0 国际化，V2.15.1 从设置窗体移到主界面标题栏）：
+            // 排布在【系统设置】按钮右侧（RelayoutTitleBar 的 seq 数组里 btnSettings 之后即最右）。
+            // 点击直接切换中/英文（中文界面 → English、英文界面 → 中文），立即热生效并写盘持久化。
+            // 按钮文本 = "目标语言名"（语言名本身不翻译，自解释），由 ApplyLanguage() 按当前语言设置。
+            // 外观与 btnSettings 完全一致：蓝底白字、Flat 无边框、微软雅黑 9F、88×30。
+            // 运行期位置由 RelayoutTitleBar 重排（Designer 里的 Location 只是初始值）。
+            // 
+            this.btnToggleLanguage.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
+            this.btnToggleLanguage.FlatAppearance.BorderSize = 0;
+            this.btnToggleLanguage.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnToggleLanguage.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.btnToggleLanguage.ForeColor = System.Drawing.Color.White;
+            this.btnToggleLanguage.Location = new System.Drawing.Point(853, 9);
+            this.btnToggleLanguage.Name = "btnToggleLanguage";
+            this.btnToggleLanguage.Size = new System.Drawing.Size(88, 30);
+            this.btnToggleLanguage.TabIndex = 10;
+            this.btnToggleLanguage.Text = "English";
+            this.btnToggleLanguage.UseVisualStyleBackColor = false;
             // 
             // lblSep2
             // 
@@ -402,6 +424,7 @@ namespace CommandCenter.Views
         private Label lblNg;
         private Label lblSep2;
         private Button btnSettings;
+        private Button btnToggleLanguage;
         private Label lblPlcStatus;
         private Label lblScannerStatus;
         private Label lblCamPlaceholder;

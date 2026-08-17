@@ -131,8 +131,8 @@ namespace CommandCenter.Views
             // 扫码枪表格：先建列，再逐行填数据（V1.8.1 起支持多台）
             SetupScannerGridColumns();
             LoadScannerRows();
-            // V2.15.0 界面语言：按钮无选中项，按钮文本由 ApplyLanguage() 按当前语言统一设置，
-            // 这里不需要初始化（构造末尾 ApplyLanguage 会执行）。
+            // V2.15.0 界面语言：切换入口在主界面标题栏（btnToggleLanguage，V2.15.1 移出本窗体），
+            // 这里不需要任何语言初始化；I18n.Language 由主界面维护，保存时随 _cfg.Language 兜底写盘。
         }
 
         /// <summary>
@@ -514,16 +514,8 @@ namespace CommandCenter.Views
         /// </summary>
         private void WireButtonEvents()
         {
-            // V2.15.0 国际化：语言切换按钮点击 → 直接切换中/英文（I18n.Language 触发
-            // LanguageChanged，MainForm 收到后全量热刷新；本窗体也同步刷新文字），无需重启；
-            // 点【保存】才写盘持久化。按钮文本 = 目标语言名（见 ApplyLanguage）。
-            btnToggleLanguage.Click += (s, e) =>
-            {
-                I18n.Language = (I18n.Language == "en-US") ? "zh-CN" : "en-US";
-                ApplyLanguage();        // 设置窗体自身文字立即按新语言刷新（按钮文本随之更新）
-            };
-
-            // V2.12.0 自适应开关：勾选变化即时同步相关控件可用状态；
+            // V2.15.1 起语言切换入口移到主界面标题栏（btnToggleLanguage，见 MainForm），
+            // 本窗体不再提供语言控件；保存时仍写 _cfg.Language（见 OnSave 前配置回写逻辑）。
             // 刚勾选时弹气泡明示"自适下哪些功能不可用"，避免误操作（见 UpdateAutoFitUi / AutoFitDisabledHint）
             chkAutoFit.CheckedChanged += (s, e) =>
             {
@@ -721,11 +713,6 @@ namespace CommandCenter.Views
             chkWindowIndex.Text = I18n.T("显示窗口编号", "Show Window Index");
             chkWindowToolTip.Text = I18n.T("悬停提示", "Hover ToolTip");
             chkAutoFit.Text = I18n.T("自适应", "Auto Fit");
-            // 语言切换按钮：文本 = 目标语言名（点击后界面切到该语言），语言名本身不翻译、自解释。
-            // 中文界面显示 "English"（点一下变英文）、英文界面显示 "中文"（点一下变中文）。
-            btnToggleLanguage.Text = (I18n.Language == "en-US") ? "中文" : "English";
-            tip.SetToolTip(btnToggleLanguage, I18n.T("点击切换界面语言（无需重启，点【保存】写盘）",
-                "Click to switch UI language (no restart; press Save to persist)"));
             lblCams.Text = I18n.T("相机列表:", "Cameras:");
             btnAddCam.Text = I18n.T("添加一台", "Add");
             btnDelCam.Text = I18n.T("删除选中", "Delete Selected");
@@ -902,7 +889,8 @@ namespace CommandCenter.Views
             _cfg.Display.WindowOkNgVisible = chkWindowOkNg.Checked; // V2.10.3：窗口右下角 OK/NG 徽标开关（V2.14.24 默认开；徽标"拿到相机结果才显示"见 CameraDisplayControl）
             _cfg.Display.WindowIndexVisible = chkWindowIndex.Checked; // V2.10.4：窗口左上角窗口编号开关
             _cfg.Display.WindowToolTipVisible = chkWindowToolTip.Checked; // V2.10.8：窗口悬停气泡提示开关
-            // V2.15.0 界面语言：写盘持久化（按钮点击已即时切换全局语言，保存确保重启后保持当前语言）
+            // V2.15.0 界面语言：写盘持久化（切换入口在主界面标题栏，按钮点击即切即存；
+            // 这里按当前全局语言兜底写盘，保证任何保存动作都落一次语言配置）
             _cfg.Language = I18n.Language;
             _cfg.Image.SaveRootDir = txtSaveDir.Text.Trim();
             _cfg.Image.FileNameTemplate = txtFileNameTpl.Text.Trim();

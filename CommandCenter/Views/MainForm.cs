@@ -70,6 +70,7 @@ namespace CommandCenter.Views
         private Label _lblCamAggregate;             // 相机总连接状态标签（≥3台模式）：全部连接才绿色，否则红色
         private Panel _pnlCamOverview;              // ≥3台模式的容器：把总标签+下拉框装一起，统一垂直居中
         private ToolTip _camTip;                    // 总状态标签的悬停明细提示（列出每台相机连/断）
+        private ToolTip _langTip;                   // 语言切换按钮的悬停提示（V2.15.1，惰性创建）
         private ToolTip _plcTip;                    // PLC 灯悬停提示（说明三态灯当前含义，V1.12.11）
         private bool _modelComboInit;     // 型号下拉程序内初始化/刷新时防误触 SelectedIndexChanged
         private bool _modelComboWired;    // 型号下拉事件是否已挂线（构造与热更都会走 InitModelCombo，只挂一次）
@@ -208,6 +209,16 @@ namespace CommandCenter.Views
 
             // ③ 设置按钮事件（设计器只做外观，交互在这里挂线，只挂一次）
             btnSettings.Click += (s, e) => OpenSettings();
+
+            // ③' 语言切换按钮（V2.15.1 从设置窗体移到标题栏）：点击直接切换中/英文，
+            //    立即热生效（I18n.Language 触发 LanguageChanged → ApplyLanguage 全量刷新）并写盘持久化。
+            //    按钮文本 = 目标语言名，由 ApplyLanguage() 设置（见 btnToggleLanguage 处理）。
+            btnToggleLanguage.Click += (s, e) =>
+            {
+                _config.Language = (I18n.Language == "en-US") ? "zh-CN" : "en-US";
+                I18n.Language = _config.Language;
+                ConfigStore.Save(_config);
+            };
 
             // ④ 序列号框交互（V2.14.6 恢复弹窗，替代 V1.12.19 框内直录）：lblSerial 只读展示框
             //    （扫码枪收码自动填充，OnSerialScanned 直接覆盖文本），手动补录/改 SN 用点右侧
@@ -633,9 +644,9 @@ namespace CommandCenter.Views
             ApplyConfigVisibility();
 
             // 排布顺序固定：产品前缀 → 型号下拉(V2.8) → 序列号标题 → 序列号框 → 人工补录按钮(V2.14.6)
-            // → | → 总数 → OK → NG → | → 系统设置按钮
+            // → | → 总数 → OK → NG → | → 系统设置按钮 → 语言切换按钮(V2.15.1，最右)
             Control[] seq = { lblProductPrefix, cmbModel, lblSerialTitle, lblSerial, btnManualSerial,
-                              lblSep1, lblTotal, lblOk, lblNg, lblSep2, btnSettings };
+                              lblSep1, lblTotal, lblOk, lblNg, lblSep2, btnSettings, btnToggleLanguage };
 
             // 右侧 Dock 区（PLC 灯 + 相机聚拢容器）占用的总宽：Dock.Right 控件从右往左叠，
             // 每个控件之间留 6px 视觉间距（间距是内在间距，宽幅估算 ±几像素不影响正确性）。
@@ -1550,6 +1561,12 @@ namespace CommandCenter.Views
                 "Model") + ":";
             lblSerialTitle.Text = I18n.T("序列号:", "Serial:");
             btnSettings.Text = I18n.T("系统设置", "Settings");
+            // 语言切换按钮文本 = 目标语言名（点击后界面切到该语言），语言名本身不翻译、自解释：
+            // 中文界面显示 "English"（点一下变英文）、英文界面显示 "中文"（点一下变中文）。
+            btnToggleLanguage.Text = (I18n.Language == "en-US") ? "中文" : "English";
+            _langTip = _langTip ?? new ToolTip();
+            _langTip.SetToolTip(btnToggleLanguage, I18n.T("点击切换界面语言（立即生效并保存）",
+                "Click to switch UI language (applies & saves immediately)"));
             btnManualSerial.Text = I18n.T("人工补录", "Manual Entry");
             lblScannerStatus.Text = I18n.T("● 扫码枪", "● Scanner");
             this.Text = I18n.T("上位机控制中心", "Host Computer Control Center");
@@ -1585,8 +1602,10 @@ namespace CommandCenter.Views
             // ⑤ PLC 灯悬停提示（语言变化后重新生成，见 UpdatePlcStatus）
             UpdatePlcStatus();
 
-            // ⑥ 英文文案通常更长，重排标题栏
-            RelayoutTitleBar();
+            // ⑥ V2.15.1 用户要求：切换语言时标题栏控件位置【保持不变】——
+            //    不再调 RelayoutTitleBar()（此前英文文案更长会按 PreferredWidth 重排，
+            //    导致系统设置/语言/人工补录等按钮与字段位置移动）。
+            //    标题栏排布只在窗体 Resize 时重算（见 Resize 事件挂接处）。
         }
 
         /// <summary>

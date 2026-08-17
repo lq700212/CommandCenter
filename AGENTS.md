@@ -252,7 +252,7 @@ OK/NG 才回退标准格式逐位判定。改动相机读应答/判定逻辑必�
 | `CommandCenter/Services/ImageStore.cs` | 相机 FTP 推图监听 + 图片归档（SaveImageFilePair 双格式 jpeg+iv4p） |
 | `CommandCenter/Models/AppConfig.cs` | 全部可配置项模型（相机/PLC/显示/图像/扫码/安全） |
 | `CommandCenter/Utils/ConfigStore.cs` | appconfig.json 读写（小驼峰序列化） |
-| `CommandCenter/Utils/I18n.cs` | 界面国际化（V2.15.0）：`I18n.T("中文","English")` 双参内联翻译，`I18n.Language`（zh-CN/en-US，默认中文，setter 触发 LanguageChanged 由 MainForm 热刷新）；日志保持中文，OK/NG/PLC/IP/SN 专有名词不翻译。新增界面文本一律用 `I18n.T` 双语 |
+| `CommandCenter/Utils/I18n.cs` | 界面国际化（V2.15.0）：`I18n.T("中文","English")` 双参内联翻译，`I18n.Language`（zh-CN/en-US，默认中文，setter 触发 LanguageChanged 由 MainForm 热刷新）；日志保持中文，OK/NG/PLC/IP/SN 专有名词不翻译。新增界面文本一律用 `I18n.T` 双语。**切换入口在主界面标题栏【系统设置】按钮右侧的 `btnToggleLanguage`（V2.15.1 起，点击即切即存）** |
 | `CommandCenter/Utils/SecurityUtil.cs` | 管理员密码 SHA-256 哈希 + 记住密码 DPAPI 加解密（登录/改密码/回填共用） |
 | `CommandCenter/Views/LoginForm.cs` | 账号登录对话框（管理员 admin / 开发者 dev 双账号，按角色分流进设置或功能测试，V1.9.0/V1.12.0） |
 | `CommandCenter/Views/DevTestForm.cs` | 功能测试窗体（开发者专用：相机 T1/T2 触发（T2 取图闪图存图，V1.12.24）+ PLC 寄存器交互 + 扫码枪读码展示/发触发指令，复用主窗体连接，V1.12.0） |

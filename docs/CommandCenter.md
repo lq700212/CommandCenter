@@ -289,12 +289,13 @@
   **存图定期清理（V2.14.12）**：只保留最近 `KeepDays` 天（默认 30，0=不自动清理）的存图目录，
   后台每天自动删除过期日期目录（连子目录整棵删），只动保存根目录、不动相机 FTP 取图目录。
 - **安全**：管理员登录开关、账号、记住密码相关（账号维护在登录框完成，见 §四）。
-- **界面语言（V2.15.0 国际化）**：通用区【语言切换按钮】`btnToggleLanguage`（自适应勾选右侧）——
-  按钮文本=目标语言名（中文界面显示 "English"、英文界面显示 "中文"），**点击即热切换**（主界面
-  与各对话框文字立即切换、无需重启），点【保存】写盘持久化（`appconfig.json` 顶层 `language`，
-  默认 `zh-CN`，重启保持）。**只翻译界面文字，日志保持中文**（便于国内远程排查）；OK/NG、PLC、IP、
-  SN、相机/点位编号等专有名词与数据不翻译。切语言入口只在设置窗体（模态对话框打开期间语言不会变，
-  各弹窗打开瞬间按当前语言初始化即可）。
+- **界面语言（V2.15.0 国际化；V2.15.1 入口移到主界面）**：主界面标题栏【系统设置】按钮右侧的
+  【语言切换按钮】`btnToggleLanguage`（外观与系统设置按钮一致：蓝底白字）——
+  按钮文本=目标语言名（中文界面显示 "English"、英文界面显示 "中文"），**点击即切换**（主界面
+  与各对话框文字立即切换、无需重启），**点击即写盘**（`appconfig.json` 顶层 `language`，默认
+  `zh-CN`，重启保持）。**只翻译界面文字，日志保持中文**（便于国内远程排查）；OK/NG、PLC、IP、
+  SN、相机/点位编号等专有名词与数据不翻译。切语言入口只在主界面标题栏（模态对话框打开期间语言
+  不会变，各弹窗打开瞬间按当前语言初始化即可）。
 
 > ⚠️ **FTP 取图（V1.12.22 定稿；V2.13.3 修正目录配对）**：FTP 推图由**基恩士工程师在相机软件（IV Navigator）里
 > 配置**，相机作 FTP 客户端把照片推到**本机 `D:\IV存图\2`（相机1/上相机 19.87.6.213）与 `D:\IV存图\1`
@@ -1608,12 +1609,20 @@ SubDirs 为空时用模型默认含 `{相机}` 的四层 `{年月日}/{SN}/{相�
 
 > 本部分保留原 `通讯接入.md` 的版本演进记录，最新在前。
 
+- V2.15.1（2026-08-18，语言切换按钮移到主界面标题栏）：主界面标题栏【系统设置】按钮右侧新增
+  `btnToggleLanguage`（外观与系统设置按钮一致：蓝底白字、Flat 无边框、88×30，排布在
+  `RelayoutTitleBar` seq 数组末尾即最右），按钮文本=目标语言名（中文界面显示 "English"、英文界面
+  显示 "中文"），**点击即切即存**（`_config.Language` 翻转 → `I18n.Language` 热刷新 → `ConfigStore.Save`
+  立即写盘，不依赖设置窗体"保存"）。`SettingsForm` 移除语言控件（保留 OnSave 兜底写
+  `_cfg.Language = I18n.Language`）。**切换语言时标题栏控件位置保持不变**（`ApplyLanguage()` 不再调
+  `RelayoutTitleBar()`，排布只在窗体 Resize 时重算）。涉及 `MainForm`/`SettingsForm`。同步 CHANGELOG（V2.15.1）。
 - V2.15.0（2026-08-18，界面国际化：中/英文双语、设置窗体语言下拉即时热切换、重启保持）：新增
   `Utils/I18n.cs` 轻量国际化核心（`I18n.T("中文","English")` 双参内联翻译、`I18n.Language` 配置
   `zh-CN`/`en-US` 默认中文、setter 触发 `LanguageChanged` 事件由主窗体 `ApplyLanguage()` 全量热刷新）。
   设置窗体通用区新增【语言切换按钮】`btnToggleLanguage`（自适应勾选右侧；按钮文本=目标语言名：
   中文界面显示 "English"、英文界面显示 "中文"，点击即热切换、点保存才写盘、重启保持
-  （`AppConfig.Language`，默认 `zh-CN`）。原实现是下拉框但忘加 `Controls.Add` 导致不显示，改按钮一并修复）。全部界面双语化（各窗体构造末尾调
+  （`AppConfig.Language`，默认 `zh-CN`）。原实现是下拉框但忘加 `Controls.Add` 导致不显示，改按钮一并修复。
+  **V2.15.1 起该入口已移到主界面标题栏**）。全部界面双语化（各窗体构造末尾调
   `ApplyLanguage()`，Designer 静态文本为中文默认值、运行时按语言覆盖）：MainForm 标题栏/窗口矩阵/
   状态灯/相机灯/计数/ToolTip、ProductionCoordinator 业务状态文案（`SetState(zh,en)` 双参）、
   CameraDisplayControl、LoginForm/SerialInputForm/ScannerFailForm/DevTestForm/ModelIndexEditForm/
