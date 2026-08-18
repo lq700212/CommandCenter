@@ -1,5 +1,50 @@
 # 版本改动记录
 
+## V2.15.5（2026-08-18）设置窗体布局适配英文标题：第二列控件左缘统一 200、标签区完整显示
+
+> 需求：SettingsForm 切英文后，`Image Root Dir:` / `File Name Template:` 等英文标签变长，
+> 原第二列控件左缘 130 离标签太近，AutoSize 标签右缘（最长 166px）会顶到输入框，标题显示不完整。
+
+### 改动内容
+
+- **`Views/SettingsForm.Designer.cs`（布局坐标）**：第二列控件左边缘统一从 130 右移到 **180**
+  （标签区 20~180，最长英文标签 `File Name Template:` 146px 右缘 166，留 14px 间距）：
+  - `txtPlcIp`(宽 150→110，右缘 290 为 `lblPlcPort` 让位)、`nudRows`、`txtSaveDir`(宽 790→740，
+    右缘 920 不变)、`btnEditDirs`、`txtFileNameTpl`(宽 790→740)、`btnEditPoints`、`chkTitleOkNg`
+    —— 这 7 个控件左缘全部对齐在 X=180；
+  - 同行伴生控件按行内相对间距联动右移，保证英文下不重叠：`lblPlcPort`/`nudPlcPort`/`btnModelConfig`
+    (→306/356/456)、`lblCols`/`nudCols`/`chkAutoFit`(→260/340/420)、`chkWindowIndex`/`chkWindowToolTip`
+    (→340/515，`Show Window Index` 英文 166px 右缘 506 < 515)、`chkWindowOkNg`(→315，与 `Title
+    Highlight` 右缘 305 留 10px)。
+  - **每行控件垂直居中对齐（V2.15.5 二次修订）**：`lblPoints`(窗口点位标签) Top 220→221，与
+    `btnEditPoints`(H30) 中心精确对齐——此前该行标签中心差按钮 1px。其余各行（PLC/窗口行列/
+    图片保存根目录/文件名模板/OK-NG）标签中心与行内最高控件已对齐，仅输入框(H25)与按钮(H26)/
+    标签(H20)存在 0.5px 奇偶极限差（亚像素、视觉不可见）。harness 实测：row4/6/7 spread=0、
+    row1/2/3/5 spread=0.5px，DPI=96 下全部处于像素级最优。
+- 注释同步：`txtSaveDir`/`txtFileNameTpl` 宽度说明更新为 720（左缘 200 给英文标题让位）。
+- 验证：csc harness 实测中/英两种语言——7 控件左缘恒为 180、6 个左侧标签右缘均 ≤180（完整显示、
+  不重叠）、相邻控件英文下均不重叠；Debug 构建通过 + 冒烟存活。
+- 文档同步：docs 第八部分新增 V2.15.5。
+
+## V2.15.4（2026-08-18）功能测试窗体新增"显示扫码枪异常弹窗"按钮：开发者可单独验收 ScannerFailForm 样式
+
+> 需求：Developer 账号进功能测试窗体后，能一键弹"扫码枪异常提醒"对话框（ScannerFailForm），
+> 方便联调/验收其外观与交互（对齐 LoginForm 的蓝横幅+白面板+蓝主按钮样式）。
+
+### 改动内容
+
+- **`Views/DevTestForm`（扫码枪测试区）**：`btnScannerTrigger` 右侧新增按钮 `btnShowScannerFail`
+  （"显示扫码枪异常弹窗"/"Scanner Error Dialog"，208×27，同一行靠右排布）。
+  - 点击 `BtnShowScannerFail_Click` → `new ScannerFailForm("ERROR", _scanners)` → `ShowDialog`：
+    传示例失败文本（lblFailText 行可见）+ 主窗体传入的扫码枪列表（打开期间真读到真码会自动
+    以"稍后处理"语义关闭，顺带验证 V2.14.48 行为）；返回后把【人工补录】/【稍后处理】选择
+    写进操作日志。纯 UI、不做任何通讯，可反复点击。
+  - Designer 分部文件同步补控件实例化/`grpScanner.Controls.Add`/属性块/字段声明，类注释 ASCII
+    布局图同步更新；`ApplyLanguage` 补按钮双语文本。
+  - **`Views/ScannerFailForm`**：`btnManual`（【人工补录】蓝色主按钮）英文文案 `"Manual Input"` →
+    `"Manual"`，与主界面 `btnManualSerial` 英文（Manual）保持一致、按钮内更紧凑。
+- 文档同步：docs 第八部分新增 V2.15.4。
+
 ## V2.15.3（2026-08-18）修复"重启后界面语言不保持"：构造时把配置语言同步给全局 I18n
 
 > 现场反馈：关闭程序前切成英文，重启后界面又变回中文。根因：`MainForm` 构造加载配置后

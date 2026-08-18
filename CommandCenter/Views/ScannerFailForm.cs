@@ -115,7 +115,7 @@ namespace CommandCenter.Views
                 "Scanner failed to read. Please check the scanner:\n· Power / TCP connection\n· Trigger command matches the scanner settings");
             chkMuteToday.Text = I18n.T("今日不再提醒", "Don't remind today");
             btnLater.Text = I18n.T("稍后处理", "Later");
-            btnManual.Text = I18n.T("人工补录", "Manual Input");
+            btnManual.Text = I18n.T("人工补录", "Manual");
         }
 
         /// <summary>

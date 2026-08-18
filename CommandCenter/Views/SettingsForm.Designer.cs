@@ -134,16 +134,16 @@ namespace CommandCenter.Views
             // txtPlcIp
             // PLC IP 地址（EditorBrowsable 保持默认，值由 LoadFromConfig 从配置填充）
             //
-            this.txtPlcIp.Location = new System.Drawing.Point(130, 18);
+            this.txtPlcIp.Location = new System.Drawing.Point(180, 18);
             this.txtPlcIp.Name = "txtPlcIp";
-            this.txtPlcIp.Size = new System.Drawing.Size(150, 25);
+            this.txtPlcIp.Size = new System.Drawing.Size(110, 25);
             this.txtPlcIp.TabIndex = 1;
             this.txtPlcIp.Text = "19.87.6.1";
             //
             // lblPlcPort
             //
             this.lblPlcPort.AutoSize = true;
-            this.lblPlcPort.Location = new System.Drawing.Point(296, 21);
+            this.lblPlcPort.Location = new System.Drawing.Point(306, 21);
             this.lblPlcPort.Name = "lblPlcPort";
             this.lblPlcPort.Size = new System.Drawing.Size(46, 19);
             this.lblPlcPort.TabIndex = 2;
@@ -152,7 +152,7 @@ namespace CommandCenter.Views
             // nudPlcPort
             // PLC 通讯端口（Modbus TCP），范围校验 1~65535
             //
-            this.nudPlcPort.Location = new System.Drawing.Point(346, 18);
+            this.nudPlcPort.Location = new System.Drawing.Point(356, 18);
             this.nudPlcPort.Maximum = new decimal(new int[] { 65535, 0, 0, 0 });
             this.nudPlcPort.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             this.nudPlcPort.Name = "nudPlcPort";
@@ -166,7 +166,7 @@ namespace CommandCenter.Views
             // V2.14.24：设置页"产品型号"下拉（lblModel+cmbModel）已删——当前型号唯一入口是主界面
             // 标题栏下拉，型号集合的增删与序号映射统一在本按钮弹窗维护。
             //
-            this.btnModelConfig.Location = new System.Drawing.Point(446, 18);
+            this.btnModelConfig.Location = new System.Drawing.Point(456, 18);
             this.btnModelConfig.Name = "btnModelConfig";
             this.btnModelConfig.Size = new System.Drawing.Size(120, 26);
             this.btnModelConfig.TabIndex = 34;
@@ -185,7 +185,7 @@ namespace CommandCenter.Views
             // nudRows
             // 显示窗口行数（1~10），决定矩阵几行
             //
-            this.nudRows.Location = new System.Drawing.Point(130, 60);
+            this.nudRows.Location = new System.Drawing.Point(180, 60);
             this.nudRows.Maximum = new decimal(new int[] { 10, 0, 0, 0 });
             this.nudRows.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             this.nudRows.Name = "nudRows";
@@ -196,7 +196,7 @@ namespace CommandCenter.Views
             // lblCols
             //
             this.lblCols.AutoSize = true;
-            this.lblCols.Location = new System.Drawing.Point(200, 63);
+            this.lblCols.Location = new System.Drawing.Point(260, 63);
             this.lblCols.Name = "lblCols";
             this.lblCols.Size = new System.Drawing.Size(34, 19);
             this.lblCols.TabIndex = 6;
@@ -205,7 +205,7 @@ namespace CommandCenter.Views
             // nudCols
             // 显示窗口列数（1~7，与自适应列上限一致，V2.14.15），决定矩阵几列
             //
-            this.nudCols.Location = new System.Drawing.Point(230, 60);
+            this.nudCols.Location = new System.Drawing.Point(340, 60);
             this.nudCols.Maximum = new decimal(new int[] { 7, 0, 0, 0 });
             this.nudCols.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             this.nudCols.Name = "nudCols";
@@ -223,11 +223,12 @@ namespace CommandCenter.Views
             this.lblDir.Text = "图片保存根目录:";
             //
             // txtSaveDir
-            // 图片保存根目录（绝对路径），右侧预留到滚动面板边缘（宽 790，窗体加宽后右缘 920）
+            // 图片保存根目录（绝对路径），左侧给英文标题留出完整显示区（左缘 180），
+            // 右侧预留到滚动面板边缘（宽 740，右缘 920）
             //
-            this.txtSaveDir.Location = new System.Drawing.Point(130, 102);
+            this.txtSaveDir.Location = new System.Drawing.Point(180, 102);
             this.txtSaveDir.Name = "txtSaveDir";
-            this.txtSaveDir.Size = new System.Drawing.Size(790, 25);
+            this.txtSaveDir.Size = new System.Drawing.Size(740, 25);
             this.txtSaveDir.TabIndex = 9;
             this.txtSaveDir.Text = "E:\\Images";
             //
@@ -235,7 +236,7 @@ namespace CommandCenter.Views
             // 打开"图片存储目录结构配置"对话框（DirTreeEditForm），可视化编辑目录层级与文件名规则。
             // 当前目录结构（动态）显示在该按钮的 ToolTip 里，界面不再放常驻灰字标签。
             //
-            this.btnEditDirs.Location = new System.Drawing.Point(130, 139);
+            this.btnEditDirs.Location = new System.Drawing.Point(180, 139);
             this.btnEditDirs.Name = "btnEditDirs";
             this.btnEditDirs.Size = new System.Drawing.Size(160, 30);
             this.btnEditDirs.TabIndex = 11;
@@ -253,11 +254,12 @@ namespace CommandCenter.Views
             //
             // txtFileNameTpl
             // 图片文件名模板。原右侧的占位符常驻标签已删，说明并入悬停 ToolTip；
-            // 输入框一路加宽到面板右缘（宽 790），与"图片保存根目录"对齐。
+            // 输入框一路加宽到面板右缘（宽 740，左缘 180 与"图片保存根目录"对齐，
+            // 右侧给英文标题让出完整显示区）。
             //
-            this.txtFileNameTpl.Location = new System.Drawing.Point(130, 181);
+            this.txtFileNameTpl.Location = new System.Drawing.Point(180, 181);
             this.txtFileNameTpl.Name = "txtFileNameTpl";
-            this.txtFileNameTpl.Size = new System.Drawing.Size(790, 25);
+            this.txtFileNameTpl.Size = new System.Drawing.Size(740, 25);
             this.txtFileNameTpl.TabIndex = 13;
             this.txtFileNameTpl.Text = "{点位}";
             //
@@ -265,7 +267,7 @@ namespace CommandCenter.Views
             // 窗口→存图点位 配置标题（点位默认=窗口编号，可在可视化矩阵里自定义）
             //
             this.lblPoints.AutoSize = true;
-            this.lblPoints.Location = new System.Drawing.Point(20, 220);
+            this.lblPoints.Location = new System.Drawing.Point(20, 221);
             this.lblPoints.Name = "lblPoints";
             this.lblPoints.Size = new System.Drawing.Size(96, 19);
             this.lblPoints.TabIndex = 15;
@@ -275,7 +277,7 @@ namespace CommandCenter.Views
             // 打开"窗口与存图点位配置"对话框（WindowPointForm），可视化改每个窗口的存图点位、
             // 交换窗口位置；默认点位=窗口编号，改动随本次"保存"一起写盘。
             //
-            this.btnEditPoints.Location = new System.Drawing.Point(130, 216);
+            this.btnEditPoints.Location = new System.Drawing.Point(180, 216);
             this.btnEditPoints.Name = "btnEditPoints";
             this.btnEditPoints.Size = new System.Drawing.Size(150, 30);
             this.btnEditPoints.TabIndex = 16;
@@ -297,7 +299,7 @@ namespace CommandCenter.Views
             // V1.5.0 默认开；关闭则回退普通彩色文字
             //
             this.chkTitleOkNg.AutoSize = true;
-            this.chkTitleOkNg.Location = new System.Drawing.Point(130, 251);
+            this.chkTitleOkNg.Location = new System.Drawing.Point(180, 251);
             this.chkTitleOkNg.Name = "chkTitleOkNg";
             this.chkTitleOkNg.Size = new System.Drawing.Size(111, 23);
             this.chkTitleOkNg.TabIndex = 15;
@@ -310,7 +312,7 @@ namespace CommandCenter.Views
             // 保持现状画面干净），勾选后保存即时生效。
             //
             this.chkWindowOkNg.AutoSize = true;
-            this.chkWindowOkNg.Location = new System.Drawing.Point(255, 251);
+            this.chkWindowOkNg.Location = new System.Drawing.Point(315, 251);
             this.chkWindowOkNg.Name = "chkWindowOkNg";
             this.chkWindowOkNg.Size = new System.Drawing.Size(102, 23);
             this.chkWindowOkNg.TabIndex = 16;
@@ -323,7 +325,7 @@ namespace CommandCenter.Views
             // 画面更干净。与"窗口/点位配置..."按钮同处一行、垂直居中对齐。
             //
             this.chkWindowIndex.AutoSize = true;
-            this.chkWindowIndex.Location = new System.Drawing.Point(290, 219);
+            this.chkWindowIndex.Location = new System.Drawing.Point(340, 219);
             this.chkWindowIndex.Name = "chkWindowIndex";
             this.chkWindowIndex.Size = new System.Drawing.Size(102, 23);
             this.chkWindowIndex.TabIndex = 17;
@@ -336,7 +338,7 @@ namespace CommandCenter.Views
             // 现场觉得气泡挡画面可取消勾选。位于"显示窗口编号"右侧、垂直居中对齐。
             //
             this.chkWindowToolTip.AutoSize = true;
-            this.chkWindowToolTip.Location = new System.Drawing.Point(414, 219);
+            this.chkWindowToolTip.Location = new System.Drawing.Point(515, 219);
             this.chkWindowToolTip.Name = "chkWindowToolTip";
             this.chkWindowToolTip.Size = new System.Drawing.Size(90, 23);
             this.chkWindowToolTip.TabIndex = 18;
@@ -349,7 +351,7 @@ namespace CommandCenter.Views
             // 与"显示窗口行/列"同一行、紧跟列框右侧，垂直居中。
             //
             this.chkAutoFit.AutoSize = true;
-            this.chkAutoFit.Location = new System.Drawing.Point(320, 61);
+            this.chkAutoFit.Location = new System.Drawing.Point(420, 61);
             this.chkAutoFit.Name = "chkAutoFit";
             this.chkAutoFit.Size = new System.Drawing.Size(90, 23);
             this.chkAutoFit.TabIndex = 33;

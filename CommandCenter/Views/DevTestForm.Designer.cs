@@ -46,6 +46,7 @@ namespace CommandCenter.Views
             this.btnSwProg2 = new System.Windows.Forms.Button();
             this.grpScanner = new System.Windows.Forms.GroupBox();
             this.btnScannerTrigger = new System.Windows.Forms.Button();
+            this.btnShowScannerFail = new System.Windows.Forms.Button();
             this.lblScannerCode = new System.Windows.Forms.Label();
             this.lblScannerHint = new System.Windows.Forms.Label();
             this.lblScannerState = new System.Windows.Forms.Label();
@@ -268,6 +269,7 @@ namespace CommandCenter.Views
             // 扫码枪为"设备主动推码"模式：主窗体已 Open 并持续监听，这里订阅事件实时展示
             // 
             this.grpScanner.Controls.Add(this.btnScannerTrigger);
+            this.grpScanner.Controls.Add(this.btnShowScannerFail);
             this.grpScanner.Controls.Add(this.lblScannerCode);
             this.grpScanner.Controls.Add(this.lblScannerHint);
             this.grpScanner.Controls.Add(this.lblScannerState);
@@ -340,6 +342,20 @@ namespace CommandCenter.Views
             this.btnScannerTrigger.TabIndex = 4;
             this.btnScannerTrigger.Text = "发送触发指令";
             this.btnScannerTrigger.UseVisualStyleBackColor = true;
+            // 
+            // btnShowScannerFail
+            // 显示"扫码枪异常提醒"对话框（V2.15.4 开发者测试入口）：点击直接弹 ScannerFailForm，
+            // 供联调/验收其外观与交互（传示例失败文本 + 本窗体扫码枪列表，打开期间读到真码
+            // 会自动关闭，顺带验证 V2.14.48 行为）。仅 new + ShowDialog，不触发扫码枪、不做通讯。
+            // 位置：与 btnScannerTrigger 同行右侧（btnScannerTrigger 右缘 530 + 10px 间距 = 540）。
+            // 
+            this.btnShowScannerFail.Font = new System.Drawing.Font("Microsoft YaHei", 9F);
+            this.btnShowScannerFail.Location = new System.Drawing.Point(540, 92);
+            this.btnShowScannerFail.Name = "btnShowScannerFail";
+            this.btnShowScannerFail.Size = new System.Drawing.Size(208, 27);
+            this.btnShowScannerFail.TabIndex = 5;
+            this.btnShowScannerFail.Text = "显示扫码枪异常弹窗";
+            this.btnShowScannerFail.UseVisualStyleBackColor = true;
             // 
             // grpPlc
             // PLC 测试区（V1.12.0 增强 + V2.7 协议适配）：协议偏移量配置 + 读地址/写地址测试 + V2.7 业务信号。
@@ -783,6 +799,7 @@ namespace CommandCenter.Views
         private Label lblScannerState;
         private Label lblScannerCode;
         private Button btnScannerTrigger;
+        private Button btnShowScannerFail;
         private Label lblScannerHint;
         private GroupBox grpPlc;
         private Label lblPlcState;

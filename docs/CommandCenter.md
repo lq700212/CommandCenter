@@ -1609,6 +1609,23 @@ SubDirs 为空时用模型默认含 `{相机}` 的四层 `{年月日}/{SN}/{相�
 
 > 本部分保留原 `通讯接入.md` 的版本演进记录，最新在前。
 
+- V2.15.5（2026-08-18，设置窗体布局适配英文标题）：`SettingsForm` 第二列控件（`txtPlcIp`/`nudRows`/
+  `txtSaveDir`/`btnEditDirs`/`txtFileNameTpl`/`btnEditPoints`/`chkTitleOkNg`）左缘统一从 130 右移到
+  **180**，左侧标签区 20~180 容纳全部英文标题（最长 `File Name Template:` 146px，右缘 166 不碰控件）；
+  `txtSaveDir`/`txtFileNameTpl` 宽 790→740（右缘 920 不变）、`txtPlcIp` 宽 150→110（给 `Port:` 让位），
+  同行伴生控件按间距联动右移（`lblPlcPort`/`nudPlcPort`/`btnModelConfig`、`lblCols`/`nudCols`/
+  `chkAutoFit`、`chkWindowIndex`/`chkWindowToolTip`、`chkWindowOkNg`），英文下互不重叠；
+  每行控件垂直居中对齐（`lblPoints` Top 220→221 与按钮中心对齐，其余行标签中心与行内最高控件
+  一致，仅 0.5px 奇偶极限差）。
+  仅布局坐标改动、无行为变化。同步 CHANGELOG（V2.15.5）。
+
+- V2.15.4（2026-08-18，功能测试窗体新增"显示扫码枪异常弹窗"测试按钮）：`DevTestForm` 扫码枪
+  测试区 `btnScannerTrigger` 右侧新增 `btnShowScannerFail`（"显示扫码枪异常弹窗"/"Scanner Error
+  Dialog"），点击直接 `new ScannerFailForm("ERROR", _scanners)` + `ShowDialog`——传示例失败文本
+  与主窗体传入的扫码枪列表，供开发者单独验收 ScannerFailForm 外观/交互（含打开期间读到真码
+  自动关闭的 V2.14.48 行为）；纯 UI、不做通讯，选择结果写操作日志。涉及 `DevTestForm`
+  （含 Designer 分部与类注释 ASCII 图）。同步 CHANGELOG（V2.15.4）。
+
 - V2.15.3（2026-08-18，修复"重启后界面语言不保持"）：`MainForm` 构造在 `ConfigStore.Load()` 后
   未把配置里持久化的 `language` 同步给全局 `I18n.Language`（它恒为默认 `zh-CN`），导致关闭前
   切到英文、重启又变回中文。修复：构造里 `_config = ConfigStore.Load()` 之后立即

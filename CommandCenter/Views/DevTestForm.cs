@@ -31,7 +31,7 @@ namespace CommandCenter.Views
     ///     │   右侧:[lblTestImagePath 最近存图路径]（T2 后自动取图闪图存图）│
     /// ├────────────────────────────────────────────────────────────────┤
     /// │【扫码枪】扫码枪:[cmbScanner▾] 状态:[lblScannerState]            │
-    /// │   [btnScannerTrigger 发送触发指令]                               │
+    /// │   [btnScannerTrigger 发送触发指令][btnShowScannerFail 显示异常弹窗]│
     /// │   最近读到条码:[lblScannerCode 大字]                            │
     /// │   提示:把条码放到扫码枪下读取，读到会实时显示（与主窗体共用连接）  │
     /// ├────────────────────────────────────────────────────────────────┤
@@ -175,6 +175,8 @@ namespace CommandCenter.Views
 
             // 发送触发指令按钮：基恩士 SR 连上后需发 LON 才读码；扫码枪突然不读时可手动重发
             btnScannerTrigger.Click += BtnScannerTrigger_Click;
+            // V2.15.4 测试入口：弹"扫码枪异常提醒"对话框看样式/交互（纯 UI，不碰通讯）
+            btnShowScannerFail.Click += BtnShowScannerFail_Click;
         }
 
         /// <summary>扫码枪收到条码（工作线程触发）：把内容显示到界面大字区与日志。</summary>
@@ -185,6 +187,24 @@ namespace CommandCenter.Views
                 lblScannerCode.Text = code ?? "";
                 AppendLog($"扫码枪读到条码：{code}");
             });
+        }
+
+        /// <summary>
+        /// 显示"扫码枪异常提醒"对话框（V2.15.4 开发者测试入口）：点击直接弹 ScannerFailForm，
+        /// 供联调/验收其外观与交互。传示例失败文本（可直观看到 lblFailText 失败文本行）与主窗体
+        /// 传入的扫码枪列表（打开期间若真读到一条真码，本窗会自动以"稍后处理"语义关闭，
+        /// 顺带验证 V2.14.48 行为）。本方法只 new + ShowDialog，不触发扫码枪、不做任何通讯，
+        /// 可反复点击；返回后把用户选择写进操作日志。
+        /// </summary>
+        private void BtnShowScannerFail_Click(object sender, EventArgs e)
+        {
+            using (var dlg = new ScannerFailForm("ERROR", _scanners))
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                    AppendLog(I18n.T("扫码枪异常弹窗：【人工补录】", "Scanner error dialog: [Manual Input]"));
+                else
+                    AppendLog(I18n.T("扫码枪异常弹窗：【稍后处理】/自动关闭", "Scanner error dialog: [Later] / auto closed"));
+            }
         }
 
         /// <summary>
@@ -892,6 +912,7 @@ namespace CommandCenter.Views
                 "把条码放到扫码枪下读，读到会实时显示（共用连接）",
                 "Place a code under the scanner; it shows here in real time (shared connection)");
             btnScannerTrigger.Text = I18n.T("发送触发指令", "Send Trigger");
+            btnShowScannerFail.Text = I18n.T("显示扫码枪异常弹窗", "Scanner Error Dialog");
             grpPlc.Text = I18n.T("PLC 测试", "PLC Test");
             lblOffset.Text = I18n.T("协议偏移量:", "Offset:");
             lblOffsetTip.Text = I18n.T(
