@@ -109,6 +109,13 @@ namespace CommandCenter.Views
 
             _config = ConfigStore.Load();
 
+            // V2.15.3 修复"重启语言不保持"：把配置里持久化的语言（language 字段）同步给全局
+            // I18n.Language，否则它永远停留在默认"zh-CN"，启动后界面恒中文（关闭前切到英文、
+            // 重启又变回中文）。放在这里（Load 后、一切界面文本初始化之前）同步：
+            // 后续 BuildServices/InitTitleBarRuntime/ApplyLanguage 里的 I18n.T 全都按配置语言取值；
+            // setter 触发的 LanguageChanged 此刻尚无订阅者（SubscribeEvents 在后面），安全。
+            I18n.Language = _config.Language;
+
             BuildServices();         // PLC/多相机/图像/协调器 就绪（相机灯数量依赖 _cameras）
             InitTitleBarRuntime();   // 按配置补全标题栏：文案/可见性/型号下拉/动态相机灯/紧凑重排
             BuildWindowGrid();       // 窗口矩阵（用设计器的 gridCameraWindows 容器，动态重建行列）

@@ -1,5 +1,25 @@
 # 版本改动记录
 
+## V2.15.3（2026-08-18）修复"重启后界面语言不保持"：构造时把配置语言同步给全局 I18n
+
+> 现场反馈：关闭程序前切成英文，重启后界面又变回中文。根因：`MainForm` 构造加载配置后
+> **从未把 `appconfig.json` 顶层 `language`（默认 `zh-CN`）同步给全局 `I18n.Language`**，
+> 而 `I18n.Language` 静态字段恒为默认中文 → 无论配置里存了什么语言，每次启动界面都按中文渲染。
+
+### 改动内容
+
+- **`Views/MainForm` 构造函数**：`_config = ConfigStore.Load()` 之后、一切界面文本初始化之前，
+  `I18n.Language = _config.Language` —— 后续 `BuildServices`/`InitTitleBarRuntime`/`ApplyLanguage`
+  里的 `I18n.T` 全部按配置语言取值，重启即恢复到上次设定的语言。
+  - 安全性：`I18n.Language` setter 只认 `en-US`、非法值回落中文（配置被手改脏也不崩）；
+    setter 触发的 `LanguageChanged` 此刻尚无订阅者（`SubscribeEvents` 在后面），无副作用。
+
+### 为什么这么改
+
+- 语言选择是"用户偏好"，必须跨重启保持（切换即写盘是 V2.15.1 已做的事，缺的只是**启动时读回来**）；
+- 放在构造最前同步，避免中间态：若不提前同步，`SetupSerialEditor`/`InitTitleBarFields` 等早期
+  `I18n.T` 会先用中文初始化、最后由 `ApplyLanguage` 再刷一遍（结果对、但多一次无效刷新）。
+
 ## V2.15.2（2026-08-18）人工补录按钮英文文案缩短为 "Manual" + 语言切换写盘失败兜底
 
 > 两处小修：① 英文界面下【人工补录】按钮 "Manual Entry" 文本宽度（约 84px）逼近按钮宽度

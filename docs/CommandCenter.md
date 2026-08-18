@@ -1609,6 +1609,12 @@ SubDirs 为空时用模型默认含 `{相机}` 的四层 `{年月日}/{SN}/{相�
 
 > 本部分保留原 `通讯接入.md` 的版本演进记录，最新在前。
 
+- V2.15.3（2026-08-18，修复"重启后界面语言不保持"）：`MainForm` 构造在 `ConfigStore.Load()` 后
+  未把配置里持久化的 `language` 同步给全局 `I18n.Language`（它恒为默认 `zh-CN`），导致关闭前
+  切到英文、重启又变回中文。修复：构造里 `_config = ConfigStore.Load()` 之后立即
+  `I18n.Language = _config.Language`（setter 只认 `en-US`、非法值回落中文；此刻 `SubscribeEvents`
+  尚未执行、LanguageChanged 无订阅者，同步安全）。涉及 `MainForm`。同步 CHANGELOG（V2.15.3）。
+
 - V2.15.1（2026-08-18，语言切换按钮移到主界面标题栏）：主界面标题栏【系统设置】按钮右侧新增
   `btnToggleLanguage`（外观与系统设置按钮一致：蓝底白字、Flat 无边框、88×30，排布在
   `RelayoutTitleBar` seq 数组末尾即最右），按钮文本=目标语言名（中文界面显示 "English"、英文界面
