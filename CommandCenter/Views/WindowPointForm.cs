@@ -820,6 +820,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             const int zhGrpTop = 368;     // grpProgram 顶部
             const int zhBtnTop = 614;     // 底部按钮行 y
             const int zhClientH = 664;    // 窗体客户区高度
+            const int zhDisableW = 100;   // btnDisable 宽度（中文设计器原值）
 
             if (I18n.Language == "en-US")
             {
@@ -838,6 +839,13 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 btnDisable.Top = zhBtnTop + shift;
                 btnOk.Top = zhBtnTop + shift;
                 btnCancel.Top = zhBtnTop + shift;
+                // V2.15.9：btnDisable 英文文本 "Disable/Enable" 比中文"禁用/启用"宽，原 100px
+                // 放不下会截断/换行——英文界面按文本实测宽度 + 左右 padding 撑开按钮宽度（上限 185，
+                // 右缘 535 不越过右侧 btnOk 左缘 540，150% DPI 下文本实测 ≈178px 也能完整放下）；
+                // 中文界面保持原 100px（else 分支恢复）。注意必须在 ApplyLanguage 设置完英文文本后
+                // 调用（见 ApplyLanguage 末尾），否则测到的还是中文"禁用/启用"宽度。
+                var dw = TextRenderer.MeasureText(btnDisable.Text, btnDisable.Font).Width + 24;
+                btnDisable.Width = Math.Max(zhDisableW, Math.Min(dw, 185));
                 ClientSize = new Size(ClientSize.Width, zhClientH + shift);
             }
             else
@@ -852,6 +860,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 btnDisable.Top = zhBtnTop;
                 btnOk.Top = zhBtnTop;
                 btnCancel.Top = zhBtnTop;
+                btnDisable.Width = zhDisableW;
                 ClientSize = new Size(ClientSize.Width, zhClientH);
             }
         }
@@ -867,16 +876,9 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             "【交换位置】（点两个窗口互换，可跨相机、可含空窗口）、【恢复默认】（重置该型号出厂铺排并全部启用）；\r\n" +
             "【右键格子】或选中后点\"禁用/启用\"停用某窗口。\r\n" +
             "下方\"相机程序映射\"区照常可配：先选相机，型号下拉跟随该相机可选型号 → 点位 → 相机程序号。",
-            "Each cell = one display window. Top: window number. Bottom: owning camera · camera point number.\r\n" +
-            "Default layout: up camera first then down camera, in camera point-table order (follows the Model drop-down below).\r\n" +
-            "[Empty window (no point)] = an extra placeholder cell when non-Auto-Fit rows×columns exceed available points:\r\n" +
-            "use Swap Position to move a point into it (click the empty window + a window that has a point);\r\n" +
-            "empty windows do NOT support Edit Point / Disable (buttons greyed out).\r\n" +
-            "Select a window that has a point and use Edit Point (pick another point from the camera table;\r\n" +
-            "picking an occupied point auto-swaps with that window), Swap Position (click two windows to swap,\r\n" +
-            "cross-camera / empty windows allowed), Reset Default (reset this model's factory layout and enable all);\r\n" +
-            "Right-click a cell or select it and click Disable/Enable to stop a window.\r\n" +
-            "The Camera Program Mapping area below works as usual: pick a camera, the model drop-down follows its models → point → camera program.");
+            "Each cell = one display window (Top: window # / Bottom: camera·point).\r\n" +
+            "Select a cell: Edit Point / Swap Position / Reset Default; right-click a cell to Disable/Enable.\r\n" +
+            "Empty (no point): use Swap Position to move a point in. Below: camera → model → point → program.");
         }
 
         /// <summary>
@@ -1086,9 +1088,9 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             lblHint.Text = _swapping
                 ? I18n.T("交换模式：请依次点击两个要互换点位的窗口（可跨相机；交换的是\"窗口↔归属相机·点位号\"\r\n" +
                   "的对应关系，不改相机自身的点位/程序表）。再次点击\"交换位置\"按钮可取消交换模式。",
-                  "Swap mode: click two windows to swap their points (cross-camera allowed; swaps the\r\n" +
-                  "\"window ↔ owning camera · point number\" mapping, does not change the camera's point/program table).\r\n" +
-                  "Click Swap Position again to cancel swap mode.")
+                  "Swap mode: click two windows to swap their points (cross-camera OK; only the\r\n" +
+                  "\"window ↔ camera·point\" mapping changes — the camera's point/program tables stay unchanged).\r\n" +
+                  "Click Swap Position again to cancel.")
                 : HintDefaultText();
             RefreshCells();
         }
@@ -1137,7 +1139,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             FlashSwap(a, b, I18n.T("交换完成：窗口 " + (a + 1) + " ↔ 窗口 " + (b + 1) +
                 " 已互换点位（绿色高亮的两个窗口就是换完后的位置，点【确定】保存生效）。\r\n" + HintDefaultText(),
                 "Swap done: window " + (a + 1) + " ↔ window " + (b + 1) +
-                " swapped points (the two green windows are their new positions; press OK to save).\r\n" + HintDefaultText()));
+                " swapped (green = new positions; press OK to save).\r\n" + HintDefaultText()));
             RefreshCells();
         }
 
@@ -1484,6 +1486,11 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             colStation.HeaderText = I18n.T("点位（选择）", "Point (select)");
             colProgram.HeaderText = I18n.T("相机程序号（选择）", "Camera Program No. (select)");
             lblHint.Text = HintDefaultText();
+            // V2.15.9：按钮/提示文本设置完后再按语言重算布局与 btnDisable 宽度。不能只依赖
+            // lblHint.TextChanged（WireEvents 里首次触发时 btnDisable.Text 还是中文设计值"禁用/启用"，
+            // 英文"Disable/Enable"宽度根本没被测量；且 ApplyLanguage 里 lblHint.Text 设为与当前相同
+            // 的文本不触发事件）——这里显式调用一次，确保英文按钮宽度按英文文本实测撑开。
+            ApplyHintHeightForLanguage();
         }
     }
 }

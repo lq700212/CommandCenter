@@ -1,5 +1,33 @@
 # 版本改动记录
 
+## V2.15.8（2026-08-18）窗口点位配置窗体英文提示精简：仅英文界面、中文保持原样
+
+> 需求：WindowPointForm 切英文后顶部 lblHint 操作说明文本过长（默认提示实测 720px 宽渲染约
+> 14 行 / 230px 高，V2.15.6 的英文撑高布局虽能完整显示，但整块提示占窗体近三分之一，观感臃肿）。
+> **中文界面完全不动**（提示仍为原文案，Designer 42px 两行版式不变），仅精简英文措辞。
+
+### 改动内容
+
+- **`Views/WindowPointForm.cs` `HintDefaultText()`（仅英文参数）**：默认提示从 10 段压缩到 7 段，
+  去掉冗余句式与逐条解释，保留全部关键操作信息：格子含义（上=窗口编号/下=相机·点位）、默认
+  铺排规则（前上相机后下相机、随型号联动）、空窗口处理（交换位置搬点位、不支持编辑/禁用）、
+  编辑点位/交换位置/恢复默认三个操作、右键禁用启用、下方相机程序映射操作顺序；
+  **V2.15.9 再压缩到 3 段（实测 720px 宽 140px/约9 行 → 60px/约 4 行）**：英文单词宽是中文几倍，
+  同样信息量英文占行数远超中文——保留核心（格子含义/四个操作/空窗口处理/下方程序映射操作顺序），
+  把"默认铺排规则、编辑点位自动互换、空窗口不支持编辑"等次要说明移除（中文保持完整原文案不动）；
+- **`ToggleSwapMode()`（仅英文参数）**：交换模式提示精简为 3 行（原来含冗长解释）；
+- **`SwapCells()` 交换完成提示（仅英文参数）**：开头短句由 "swapped points (the two green windows
+  are their new positions...)" 精简为 "swapped (green = new positions...)"。
+- **`ApplyHintHeightForLanguage()`（仅英文界面）**：`btnDisable` 英文文本 "Disable/Enable" 比中文
+  "禁用/启用"宽，原 100px 放不下会截断/换行——英文分支按 `TextRenderer.MeasureText` 实测文本宽度
+  + padding 撑开按钮宽度（下限 100、上限 **185**，右缘 535 不越过右侧 btnOk 左缘 540）；
+  中文分支保持原 100px 设计值。**根因修复（V2.15.9 复盘）**：此前只靠 `lblHint.TextChanged` 触发，
+  而它在 `WireEvents` 里首次触发时 `btnDisable.Text` 还是中文设计值"禁用/启用"（`ApplyLanguage`
+  在其后才执行），英文文本宽度根本没被测量——已改为 `ApplyLanguage` 末尾显式调用
+  `ApplyHintHeightForLanguage()` 一次，确保英文按钮宽度按英文文本实测撑开。
+- 中英文结构保持一致（默认/交换模式/交换完成都拼接默认提示），只是英文措辞更紧凑；
+  英文撑高布局（V2.15.6 `ApplyHintHeightForLanguage`）自动按新文案实测高度排版，无需额外改动。
+
 ## V2.15.7（2026-08-18）图片目录配置窗体布局适配英文标题：仅英文界面动态调整、中文保持原版式
 
 > 需求：DirTreeEditForm 切英文后，`Current Level Name/Rule:` / `File Name Rule:` 等英文标签
