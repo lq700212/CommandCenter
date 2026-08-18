@@ -217,7 +217,19 @@ namespace CommandCenter.Views
             {
                 _config.Language = (I18n.Language == "en-US") ? "zh-CN" : "en-US";
                 I18n.Language = _config.Language;
-                ConfigStore.Save(_config);
+                // V2.15.2：写盘失败不弹未处理异常——语言切换已即时生效（内存 + 界面），
+                // 落盘只影响"重启后是否保持"，失败仅记日志 + 双语提示，绝不中断操作。
+                // （ConfigStore.Save 内部 catch 后 throw，必须在这里兜住。）
+                try { ConfigStore.Save(_config); }
+                catch (Exception ex)
+                {
+                    LogHelper.Warn("语言切换：配置写盘失败（重启后可能恢复原语言）" + ex.Message);
+                    MessageBox.Show(
+                        I18n.T("界面语言已切换，但配置保存失败，重启后可能恢复原语言。",
+                               "Language switched, but saving config failed; it may revert after restart."),
+                        I18n.T("提示", "Notice"),
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             };
 
             // ④ 序列号框交互（V2.14.6 恢复弹窗，替代 V1.12.19 框内直录）：lblSerial 只读展示框
@@ -1567,7 +1579,7 @@ namespace CommandCenter.Views
             _langTip = _langTip ?? new ToolTip();
             _langTip.SetToolTip(btnToggleLanguage, I18n.T("点击切换界面语言（立即生效并保存）",
                 "Click to switch UI language (applies & saves immediately)"));
-            btnManualSerial.Text = I18n.T("人工补录", "Manual Entry");
+            btnManualSerial.Text = I18n.T("人工补录", "Manual");
             lblScannerStatus.Text = I18n.T("● 扫码枪", "● Scanner");
             this.Text = I18n.T("上位机控制中心", "Host Computer Control Center");
             if (_serialTip != null)
