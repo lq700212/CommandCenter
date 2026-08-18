@@ -1475,8 +1475,6 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 "Programs are switched by camera+model lookup;\r\nfalls back to the camera's legacy table when the model has no table.");
             btnAddProg.Text = I18n.T("新增映射", "Add Mapping");
             btnDelProg.Text = I18n.T("删除选中行", "Delete Selected Row");
-            lblProgNote.Text = I18n.T("点位从下拉选（数量=窗口数）；程序号选'不切换'或相机实际程序号（0~127，数量/编号跟相机程序库走，与窗口数无关）",
-                "Pick the point from the drop-down (count = window count); pick 'No switch' or a real camera program number (0~127, count/numbers follow the camera program library, unrelated to window count)");
             btnEditPoint.Text = I18n.T("编辑点位", "Edit Point");
             btnSwap.Text = I18n.T("交换位置", "Swap Position");
             btnReset.Text = I18n.T("恢复默认", "Reset Default");

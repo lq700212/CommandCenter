@@ -30,6 +30,10 @@
   "DevTestForm" 统一改"开发者模式窗体 DeveloperModeForm（原名 DevTestForm）"；README 目录结构、
   AGENTS.md 开发者账号约定（原"④ 开发者密码不支持界面修改"改为"账号管理例外"）、docs 第一部分
   账号表/功能测试节/第八部分版本全部同步。
+- **WindowPointForm 移除 lblProgNote 说明标签**：相机程序映射区（grpProgram）底部原本有一行
+  灰色说明"点位从下拉选（数量=窗口数）；程序号选'不切换'或相机实际程序号（0~127…）"，操作员
+  反馈冗余、占用映射区高度，直接删除（控件声明/布局/`Controls.Add`/字段/国际化 `ApplyLanguage`
+  文本五处全清）。删除后 grpProgram 内控件位置不变、运行与保存均无影响；设计器布局注释同步更新。
 
 ### 设计要点
 

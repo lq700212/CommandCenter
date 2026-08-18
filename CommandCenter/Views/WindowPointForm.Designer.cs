@@ -7,8 +7,8 @@ namespace CommandCenter.Views
     /// 布局请对照 WindowPointForm.cs 类注释里的 ASCII 布局图：
     ///   顶部说明标签（lblHint，随"交换模式"提示实时切换文案）
     ///   窗口↔点位矩阵（pnlMatrix + tblMatrix，格子是运行时代码生成的 Button，不在设计器里）
-    ///   相机程序映射区（grpProgram）：相机下拉 cmbCamera + 点位/程序号表格 dgvPrograms +
-    ///     btnAddProg/btnDelProg 新增删除 + lblProgNote 说明（V1.12.25 同页混排新增）
+    ///  相机程序映射区（grpProgram）：相机下拉 cmbCamera + 点位/程序号表格 dgvPrograms +
+    ///     btnAddProg/btnDelProg 新增删除（V1.12.25 同页混排新增；lblProgNote 说明已删）
     ///   底部：编辑点位 / 交换位置 / 恢复默认 / 确定 / 取消
     /// </summary>
     partial class WindowPointForm
@@ -36,7 +36,6 @@ namespace CommandCenter.Views
             this.btnOk = new System.Windows.Forms.Button();
             this.btnCancel = new System.Windows.Forms.Button();
             this.grpProgram = new System.Windows.Forms.GroupBox();
-            this.lblProgNote = new System.Windows.Forms.Label();
             this.lblProgHint = new System.Windows.Forms.Label();
             this.btnAddProg = new System.Windows.Forms.Button();
             this.btnDelProg = new System.Windows.Forms.Button();
@@ -84,7 +83,6 @@ namespace CommandCenter.Views
             // 
             // grpProgram
             // 
-            this.grpProgram.Controls.Add(this.lblProgNote);
             this.grpProgram.Controls.Add(this.lblProgHint);
             this.grpProgram.Controls.Add(this.btnAddProg);
             this.grpProgram.Controls.Add(this.btnDelProg);
@@ -195,16 +193,6 @@ namespace CommandCenter.Views
             this.btnDelProg.Text = "删除选中行";
             this.btnDelProg.UseVisualStyleBackColor = true;
             // 
-            // lblProgNote
-            // 
-            this.lblProgNote.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(150)))), ((int)(((byte)(150)))), ((int)(((byte)(150)))));
-            this.lblProgNote.Location = new System.Drawing.Point(224, 202);
-            this.lblProgNote.Name = "lblProgNote";
-            this.lblProgNote.Size = new System.Drawing.Size(480, 26);
-            this.lblProgNote.TabIndex = 14;
-            this.lblProgNote.Text = "点位从下拉选（数量=窗口数）；程序号选'不切换'或相机实际程序号（0~127，数量/编号跟相机程序库走，与窗口数无关）";
-            this.lblProgNote.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            // 
             // btnEditPoint
             // 
             this.btnEditPoint.Location = new System.Drawing.Point(20, 614);
@@ -303,7 +291,6 @@ namespace CommandCenter.Views
         private Button btnOk;
         private Button btnCancel;
         private GroupBox grpProgram;
-        private Label lblProgNote;
         private Label lblProgHint;
         private Button btnAddProg;
         private Button btnDelProg;
