@@ -1,5 +1,46 @@
 # 版本改动记录
 
+## V2.15.6（2026-08-18）登录窗体改密码面板适配英文标题：密码输入框左缘右移、宽度收窄
+
+> 需求：LoginForm 改密码面板（`pnlChangePwd`，经 `ShowChangePwdPanel` 显示）切英文后，
+> `Current Password:`/`New Password:`/`Confirm Password:` 等英文标签变长（最长 133px），
+> 原输入框左缘 112 太近（标签区仅 88px），标题显示不完整。
+
+### 改动内容
+
+- **`Views/LoginForm.Designer.cs`（布局坐标）**：三个密码输入框左缘统一 112→**170**、宽度
+  240→**182**（右缘 352 不变），标签区 24~170 完整容纳最长英文标签 `Confirm Password:`
+  （右缘 157，留 13px 间距）：`txtOldPwd`/`txtNewPwd`/`txtNewPwd2`。
+  **（V2.15.6 修订）按语言区分布局**：Designer 静态值恢复中文原版式（左缘 112、宽 240），
+  `ApplyLanguage` 末尾按 `I18n.Language` 动态切换——中文界面用原宽版式（标签短、无需让位），
+  仅英文界面收窄右移（左缘 170、宽 182）让 `Current Password:` 等英文标题完整显示、不重叠。
+  **（V2.15.6 再修订）改密码提示 `lblPwdHint` 英文居中**：英文提示文字较长（约 366px）时
+  `Left = (pnlChangePwd.ClientSize.Width - lblPwdHint.Width) / 2` 在面板内左右居中（实测
+  center=190=面板中线）；中文提示短，保持原左对齐（左缘 114，与输入框文字起点对齐）。
+  `btnSavePwd` 英文文本 `"Save Changes"`→`"Save"`（按钮更紧凑，与主界面按钮单词化风格一致）。
+- **`Views/WindowPointForm.cs`（V2.15.6 补充，lblHint 按语言撑高）**：WindowPointForm 顶部
+  `lblHint` 设计器固定 42px（约 2 行）——中文提示恰好放下，但**英文提示文本很长**（默认提示
+  10 段、720px 宽下渲染约 14 行、实测需约 264px），42px 下只显示 2 行多被截断。修复：
+  `lblHint.TextChanged` 挂钩新增 `ApplyHintHeightForLanguage()`——**英文时**用
+  `TextRenderer.MeasureText(WordBreak)` 按当前文案实测完整高度设给 `lblHint.Height`
+  （实测 264px），`pnlMatrix`/`grpProgram`/底部按钮行全部下移相同偏移、窗体加高
+  （664→886px），互不重叠、文本完整可见；**中文时恢复设计器原布局值**（42/64/368/614/664）
+  完全不动。任何提示文案变化（默认/交换模式/互换完成）都经 TextChanged 自动重算。
+  ⚠️ 英文下窗体整体加高到约 886px，屏幕可用高度不足（如 768px）时可能超出，需现场确认。
+- **`Views/SettingsForm.Designer.cs`（V2.15.6 补充，配置目录/窗口点位按钮加宽）**：英文下
+  `btnEditDirs`(`Configure Dirs...` 需约 134px)、`btnEditPoints`(`Window/Point Config...`
+  需约 181px) 原宽 160/150 放不下文本被截断。加宽：`btnEditDirs` 160→**200**（右侧本行空，
+  自由加宽，与 `btnEditPoints` 等宽 200）、`btnEditPoints` 150→**200**（右缘 380，为让位把同行 `chkWindowIndex` 340→**390**、
+  `chkWindowToolTip` 515→**555**，各自右缘 537/716 < 窗体 960，且与按钮/彼此留 ≥10px 间距）。
+  中文下按钮变宽无副作用。仅布局坐标改动。
+- 验证：csc harness 实测——WindowPointForm：zh-CN 下 hint H=42/matrix T=64/grp T=368/btnOk
+  T=614/窗体 664 与设计器一致、无重叠；en-US 下 hint H=264/matrix T=286/grp T=590/btnOk
+  T=836/窗体 886、无重叠；LoginForm：zh-CN 输入框 L=112/W=240、en-US L=170/W=182，
+  两种语言标签均完整显示不重叠；SettingsForm：en-US 下 btnEditDirs W=190(textNeed=134)、
+  btnEditPoints W=200(textNeed=181) 均 fits、与 chkWindowIndex/chkWindowToolTip 间距 ≥10px
+  不重叠；Debug 构建通过 + 冒烟存活。
+- 文档同步：docs 第八部分新增 V2.15.6。
+
 ## V2.15.5（2026-08-18）设置窗体布局适配英文标题：第二列控件左缘统一 200、标签区完整显示
 
 > 需求：SettingsForm 切英文后，`Image Root Dir:` / `File Name Template:` 等英文标签变长，

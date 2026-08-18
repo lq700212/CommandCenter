@@ -238,7 +238,7 @@ namespace CommandCenter.Views
             //
             this.btnEditDirs.Location = new System.Drawing.Point(180, 139);
             this.btnEditDirs.Name = "btnEditDirs";
-            this.btnEditDirs.Size = new System.Drawing.Size(160, 30);
+            this.btnEditDirs.Size = new System.Drawing.Size(200, 30);
             this.btnEditDirs.TabIndex = 11;
             this.btnEditDirs.Text = "配置目录结构...";
             this.btnEditDirs.UseVisualStyleBackColor = true;
@@ -279,7 +279,7 @@ namespace CommandCenter.Views
             //
             this.btnEditPoints.Location = new System.Drawing.Point(180, 216);
             this.btnEditPoints.Name = "btnEditPoints";
-            this.btnEditPoints.Size = new System.Drawing.Size(150, 30);
+            this.btnEditPoints.Size = new System.Drawing.Size(200, 30);
             this.btnEditPoints.TabIndex = 16;
             this.btnEditPoints.Text = "窗口/点位配置...";
             this.btnEditPoints.UseVisualStyleBackColor = true;
@@ -325,7 +325,7 @@ namespace CommandCenter.Views
             // 画面更干净。与"窗口/点位配置..."按钮同处一行、垂直居中对齐。
             //
             this.chkWindowIndex.AutoSize = true;
-            this.chkWindowIndex.Location = new System.Drawing.Point(340, 219);
+            this.chkWindowIndex.Location = new System.Drawing.Point(390, 219);
             this.chkWindowIndex.Name = "chkWindowIndex";
             this.chkWindowIndex.Size = new System.Drawing.Size(102, 23);
             this.chkWindowIndex.TabIndex = 17;
@@ -338,7 +338,7 @@ namespace CommandCenter.Views
             // 现场觉得气泡挡画面可取消勾选。位于"显示窗口编号"右侧、垂直居中对齐。
             //
             this.chkWindowToolTip.AutoSize = true;
-            this.chkWindowToolTip.Location = new System.Drawing.Point(515, 219);
+            this.chkWindowToolTip.Location = new System.Drawing.Point(555, 219);
             this.chkWindowToolTip.Name = "chkWindowToolTip";
             this.chkWindowToolTip.Size = new System.Drawing.Size(90, 23);
             this.chkWindowToolTip.TabIndex = 18;

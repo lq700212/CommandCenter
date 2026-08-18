@@ -338,9 +338,28 @@ namespace CommandCenter.Views
             lblOldPwd.Text = I18n.T("原密码:", "Current Password:");
             lblNewPwd.Text = I18n.T("新密码:", "New Password:");
             lblNewPwd2.Text = I18n.T("确认密码:", "Confirm Password:");
-            btnSavePwd.Text = I18n.T("保存修改", "Save Changes");
+            btnSavePwd.Text = I18n.T("保存修改", "Save");
             btnBack.Text = I18n.T("返回登录", "Back to Login");
             lblPwdHint.Text = I18n.T("新密码至少 6 位，改后需用新密码登录", "New password must be at least 6 characters; use it next login");
+
+            // V2.15.6：改密码面板输入框布局随语言切换——中文标签短（原密码:/新密码:/确认密码:），
+            // 用宽输入框（左缘 112、宽 240）；英文标签变长（Current Password: 等最长 133px），
+            // 输入框收窄并右移（左缘 170、宽 182）让左侧标题完整显示、互不重叠。
+            // Designer 静态值保持中文版式（方便 VS 设计器维护），这里按语言覆盖。
+            bool en = I18n.Language == "en-US";
+            int pwdLeft = en ? 170 : 112;
+            int pwdWidth = en ? 182 : 240;
+            txtOldPwd.Location = new System.Drawing.Point(pwdLeft, txtOldPwd.Top);
+            txtOldPwd.Width = pwdWidth;
+            txtNewPwd.Location = new System.Drawing.Point(pwdLeft, txtNewPwd.Top);
+            txtNewPwd.Width = pwdWidth;
+            txtNewPwd2.Location = new System.Drawing.Point(pwdLeft, txtNewPwd2.Top);
+            txtNewPwd2.Width = pwdWidth;
+
+            // V2.15.6：改密码提示（lblPwdHint）英文文字较长（约 366px），在改密码面板内左右居中；
+            // 中文提示较短，保持原左对齐（左缘 114，与输入框文字起点对齐）。
+            // 注意：AutoSize 下 Width 已随上一步 lblPwdHint.Text 更新，这里按最终宽度算 Left。
+            lblPwdHint.Left = en ? (pnlChangePwd.ClientSize.Width - lblPwdHint.Width) / 2 : 114;
         }
     }
 }

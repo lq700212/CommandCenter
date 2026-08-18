@@ -695,6 +695,10 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             btnReset.Click += (s, e) => ResetAll();
             btnDisable.Click += (s, e) => ToggleSelectedDisabled();
             btnOk.Click += (s, e) => OnOk();
+            // V2.15.6：lblHint 提示文案一变化就按语言重算高度——英文提示文本长（默认提示实测需约
+            // 230px/14 行，42px 只显示 2 行被截断），必须撑高完整显示并让下方控件/窗体跟随下移；
+            // 中文保持设计器原样（42px）不动。挂这里确保任何文案（默认/交换模式/互换完成）都自动生效。
+            lblHint.TextChanged += (s, e) => ApplyHintHeightForLanguage();
             lblHint.Text = HintDefaultText();
 
             cmbCamera.SelectedIndexChanged += (s, e) =>
@@ -798,6 +802,60 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         }
 
         /// <summary>常驻提示文案（V2.12.1 统一模型版 + V2.13 恢复编辑 + V2.14.18 空窗口 + V2.15.0 国际化改方法按语言返回；Designer 里的默认 Text 也保持一致）。</summary>
+        /// <summary>
+        /// V2.15.6：按语言调整 lblHint 高度与下方控件布局（中文保持设计器原样）。
+        /// 背景：lblHint 设计器固定 42px（约 2 行），中文提示两行恰好放下；但英文提示文本很长
+        /// （默认提示含 10 段、720px 宽下渲染约 14 行、实测需约 230px），42px 下只显示 2 行多被截断。
+        /// 做法：英文时用 TextRenderer.MeasureText 按当前文案实测完整高度（WordBreak 自动换行）设给
+        /// lblHint.Height，并让 pnlMatrix / grpProgram / 底部按钮行全部下移相同偏移、窗体加高，保证
+        /// 各部分互不重叠、文本完整可见；中文时恢复设计器原布局值。切换语言或提示文案变化时经
+        /// lblHint.TextChanged 自动调用（见 WireEvents）。
+        /// 注意：lblHint 是 AutoSize=false 的固定高度 Label，文本变化不会自动撑高，必须显式设 Height。
+        /// </summary>
+        private void ApplyHintHeightForLanguage()
+        {
+            // 设计器原布局常量（中文默认值）：
+            const int zhHintH = 42;       // lblHint 高度
+            const int zhMatrixTop = 64;   // pnlMatrix 顶部
+            const int zhGrpTop = 368;     // grpProgram 顶部
+            const int zhBtnTop = 614;     // 底部按钮行 y
+            const int zhClientH = 664;    // 窗体客户区高度
+
+            if (I18n.Language == "en-US")
+            {
+                // 英文：实测当前文案完整高度（WordBreak 按标签宽度自动换行，同 Label 实际渲染）
+                var size = TextRenderer.MeasureText(lblHint.Text, lblHint.Font,
+                    new Size(lblHint.Width, int.MaxValue), TextFormatFlags.WordBreak);
+                // 高度下限取原 42px（文案再短也不缩回，避免文字挤成一行时窗体乱跳）
+                int enH = Math.Max(zhHintH, size.Height + 4);
+                int shift = enH - zhHintH;   // 全部下方控件统一下移偏移
+                lblHint.Height = enH;
+                pnlMatrix.Top = zhMatrixTop + shift;
+                grpProgram.Top = zhGrpTop + shift;
+                btnEditPoint.Top = zhBtnTop + shift;
+                btnSwap.Top = zhBtnTop + shift;
+                btnReset.Top = zhBtnTop + shift;
+                btnDisable.Top = zhBtnTop + shift;
+                btnOk.Top = zhBtnTop + shift;
+                btnCancel.Top = zhBtnTop + shift;
+                ClientSize = new Size(ClientSize.Width, zhClientH + shift);
+            }
+            else
+            {
+                // 中文：恢复设计器原布局
+                lblHint.Height = zhHintH;
+                pnlMatrix.Top = zhMatrixTop;
+                grpProgram.Top = zhGrpTop;
+                btnEditPoint.Top = zhBtnTop;
+                btnSwap.Top = zhBtnTop;
+                btnReset.Top = zhBtnTop;
+                btnDisable.Top = zhBtnTop;
+                btnOk.Top = zhBtnTop;
+                btnCancel.Top = zhBtnTop;
+                ClientSize = new Size(ClientSize.Width, zhClientH);
+            }
+        }
+
         private string HintDefaultText()
         {
             return I18n.T(

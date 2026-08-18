@@ -1609,6 +1609,21 @@ SubDirs 为空时用模型默认含 `{相机}` 的四层 `{年月日}/{SN}/{相�
 
 > 本部分保留原 `通讯接入.md` 的版本演进记录，最新在前。
 
+- V2.15.6（2026-08-18，登录窗体改密码面板适配英文标题）：`LoginForm` 改密码面板（`pnlChangePwd`）
+  三个密码输入框（`txtOldPwd`/`txtNewPwd`/`txtNewPwd2`）**按语言区分布局**：Designer 静态值保持
+  中文原版式（左缘 112、宽 240），`ApplyLanguage` 末尾按 `I18n.Language` 动态切换——中文界面用
+  原宽版式；英文界面输入框收窄右移（左缘 170、宽 182，右缘 352 不变），标签区 24~170 完整容纳
+  `Current Password:`/`New Password:`/`Confirm Password:`（最长 133px 右缘 157，不重叠）；
+  改密码提示 `lblPwdHint` 英文界面左右居中（`Left=(面板宽-文字宽)/2`），中文保持原左对齐；
+  `btnSavePwd` 英文文本改 `"Save"`。另有 `WindowPointForm` 顶部 `lblHint` **按语言撑高**：
+  中文保持设计器原样（42px），英文提示文本长（实测需约 264px/14 行），经 `lblHint.TextChanged`
+  挂钩 `ApplyHintHeightForLanguage()` 用 `TextRenderer.MeasureText(WordBreak)` 实测完整高度撑高
+  `lblHint`，`pnlMatrix`/`grpProgram`/底部按钮行跟随下移、窗体加高（664→886px）完整显示
+  （⚠️ 英文下窗体约 886px 高，768px 屏可能超屏）。另有 `SettingsForm` 的 `btnEditDirs`
+  （`Configure Dirs...`）与 `btnEditPoints`（`Window/Point Config...`）统一加宽到 **200px**
+  容纳英文文本，同行 `chkWindowIndex`/`chkWindowToolTip` 340/515→390/555 右移让位。
+  仅布局坐标改动、无行为变化。同步 CHANGELOG（V2.15.6）。
+
 - V2.15.5（2026-08-18，设置窗体布局适配英文标题）：`SettingsForm` 第二列控件（`txtPlcIp`/`nudRows`/
   `txtSaveDir`/`btnEditDirs`/`txtFileNameTpl`/`btnEditPoints`/`chkTitleOkNg`）左缘统一从 130 右移到
   **180**，左侧标签区 20~180 容纳全部英文标题（最长 `File Name Template:` 146px，右缘 166 不碰控件）；
