@@ -240,7 +240,7 @@ namespace CommandCenter.Utils
         ///   的路径（恢复默认/点位表长度变化重置）仍会得到"先下后上"的翻转铺排。
         /// 【安全性】只重排"两台默认相机恰好颠倒且各恰出现一次"的情形；自定义相机/单独一台默认
         ///   相机/已正确顺序的列表都不干预。WindowPointMaps/PLC 通道地址/存图目录全以 CameraId 或
-        ///   配置对象为键，重排列表顺序无任何副作用（主界面相机灯/DevTestForm 按下标与配置对齐，
+        ///   配置对象为键，重排列表顺序无任何副作用（主界面相机灯/开发者模式窗体按下标与配置对齐，
         ///   按新顺序重建即可）。
         /// </summary>
         private static void EnsureDefaultCameraOrder(Models.AppConfig cfg)

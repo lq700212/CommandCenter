@@ -418,7 +418,7 @@ namespace CommandCenter.Services
             return item != null && item.ModelIndex > 0 ? item.ModelIndex : 0;
         }
 
-        // ──────────────── 通用 D 地址读写（DevTestForm 功能测试用）────────────────
+        // ──────────────── 通用 D 地址读写（开发者模式窗体 DeveloperModeForm 用）────────────────
         // 从站模式下"读/写 PLC 任意寄存器"改为读写上位机自己 DataStore 寄存器区，
         // 验证从站数据存储读写正常（PLC 主站随后会读到这些值）。
 

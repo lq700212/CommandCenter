@@ -1,5 +1,43 @@
 # 版本改动记录
 
+## V2.15.10（2026-08-18）功能测试窗体更名"开发者模式"+ 新增账号管理区（防错机制）
+
+> 需求一：开发者账号登录进入的窗体（原名"功能测试 DevTestForm"）从名字上体现不出用途，更名为
+> "开发者模式"（DeveloperModeForm），文件/类名/引用同步改名。需求二（防错机制）：现场管理员在
+> 登录框改密码后可能忘记新密码、把自己锁在系统设置外——开发者用 dev 账号进入开发者模式窗体后，
+> 应能看到全部账号并**直接重置任一账号密码**，让管理员恢复正常使用。
+
+### 改动内容
+
+- **窗体更名（V2.15.10）**：`Views/DevTestForm.cs/.Designer.cs/.resx` → `Views/DeveloperModeForm.*`
+  （`git mv` 保留历史）；类名 `DevTestForm` → `DeveloperModeForm`、`partial class` 同步；构造签名
+  追加 `AppConfig config` 参数（MainForm 传整个 `_config`）；窗体标题/日志文案改
+  "开发者模式"/"Developer Mode"。角色分流（Admin→SettingsForm、Developer→DeveloperModeForm）、
+  复用主窗体连接不新建、关闭不 Dispose、`csproj` Compile/EmbeddedResource 引用全部同步改名。
+  涉及：`Views/DeveloperModeForm.cs`、`Views/MainForm.cs`（`OpenSettings` 分流 + 传 `_config`）、
+  `CommandCenter.csproj`。
+- **账号管理区（防错机制）**：窗体顶部新增 `grpAccount` 账号管理区——`dgvAccounts` 表格
+  （账号/角色/启用/密码四列，密码只显示掩码"●●●●●●"或"未设置"，**绝不放明文/哈希**）列出
+  `SecurityConfig` 全部账号（admin + dev，行 Tag 存角色键定位哈希字段）；选中行后底部输入新密码
+  两次（**≥6 位、两次一致**）点【修改密码】（`BtnChangePwd_Click`）即重置——只落 SHA-256 哈希
+  （`SecurityUtil.HashPassword`，与 LoginForm 改密码同一规则）→ `ConfigStore.Save(_config)` 写盘
+  → 清双角色"记住密码"记录（旧记录回填会登录失败 + 保持互斥约定）→ 刷新表格并保持选中行。
+  **安全红线不变**：不存明文、不显示哈希。**除账号管理外本窗体仍不产生任何配置改动**。
+- **布局**：原四个 GroupBox 整体下移 146px（grpCamera 12→158、grpScanner 232→378、grpPlc 368→514、
+  grpLog 756→902），窗体 `ClientSize` 800×932→**800×1080**；grpAccount 内 dgvAccounts 736×78、
+  底部操作行（选中账号/新密码/确认密码/修改密码按钮）。
+- **代码注释/文档**：MainForm/LoginForm/AppConfig/ImageStore/PlcService/ConfigStore 注释里的
+  "DevTestForm" 统一改"开发者模式窗体 DeveloperModeForm（原名 DevTestForm）"；README 目录结构、
+  AGENTS.md 开发者账号约定（原"④ 开发者密码不支持界面修改"改为"账号管理例外"）、docs 第一部分
+  账号表/功能测试节/第八部分版本全部同步。
+
+### 设计要点
+
+- 账号管理是开发者模式窗体唯一的"配置改动"出口，其它区域仍是"只测不配"——AGENTS.md 约定已同步。
+- 改密码不要求验证原密码（防错机制场景下原密码未知），靠开发者账号权限本身保证安全；
+  但新密码仍强制 ≥6 位且两次一致，与全局密码策略一致。
+- 记住密码记录在改密码后一并清除，避免新密码生效后旧记录自动回填导致登录失败。
+
 ## V2.15.8（2026-08-18）窗口点位配置窗体英文提示精简：仅英文界面、中文保持原样
 
 > 需求：WindowPointForm 切英文后顶部 lblHint 操作说明文本过长（默认提示实测 720px 宽渲染约

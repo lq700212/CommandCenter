@@ -1685,7 +1685,7 @@ namespace CommandCenter.Views
         /// 弹 LoginForm 登录，只有验证通过才放行），防止现场操作员随意改关键配置。
         /// 【V1.12.0 双账号分流】LoginForm 校验通过后按角色（login.Role）决定打开哪个界面：
         ///   - LoginRole.Admin → 系统设置窗体 SettingsForm（改配置，原行为）；
-        ///   - LoginRole.Developer → 功能测试窗体 DevTestForm（相机/PLC 通讯验证）。
+        ///   - LoginRole.Developer → 开发者模式窗体 DeveloperModeForm（原名 DevTestForm，相机/PLC 通讯验证 + 账号管理）。
         /// 开发者账号进入功能测试后不写盘、不改配置，且复用主窗体已建好的 PLC/相机连接。
         /// </summary>
         private void OpenSettings()
@@ -1699,15 +1699,14 @@ namespace CommandCenter.Views
                     if (login.ShowDialog(this) != DialogResult.OK)
                         return; // 取消/连续失败：不进任何界面
 
-                    // 开发者账号 → 功能测试窗体（V1.12.0）：复用主窗体已有连接，不新建
+                    // 开发者账号 → 开发者模式窗体（原名 DevTestForm，V2.15.10 更名）：复用主窗体已有连接，不新建；
+                    // V2.15.10 追加整个 _config 供"账号管理"区改密码写盘（SecurityConfig + ConfigStore.Save）
                     if (login.Role == LoginRole.Developer)
                     {
-                        // 传入 PLC/相机/扫码枪服务实例与相机扫码配置：测试窗体直接复用、不建新连接；
-                        // V1.12.24 追加 ImageStore + 相机配置 + 当前 SN 快照，供"T2 取图→闪图→存图"测试
-                        using (var test = new DevTestForm(_plc, _cameras, _scanners, _config.Scanners,
-                            _imageStore, _config.Cameras, _coordinator?.LatestSerialNumber ?? ""))
+                        using (var test = new DeveloperModeForm(_plc, _cameras, _scanners, _config.Scanners,
+                            _imageStore, _config.Cameras, _coordinator?.LatestSerialNumber ?? "", _config))
                             test.ShowDialog(this);
-                        return; // 测试窗体关闭后不触发保存/热更（测试不产生配置改动）
+                        return; // 开发者模式窗体关闭后不触发保存/热更（除账号管理区外不产生配置改动）
                     }
                     // 其余（Admin）继续走系统设置
                 }

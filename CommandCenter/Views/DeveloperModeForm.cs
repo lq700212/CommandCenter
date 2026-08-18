@@ -13,7 +13,9 @@ using CommandCenter.Utils;
 namespace CommandCenter.Views
 {
     /// <summary>
-    /// 功能测试窗体（V1.12.0，仅开发者账号 dev 可进）：PLC/相机/扫码枪通讯链路手动验证工具。
+    /// 开发者模式窗体（原名 DevTestForm，V2.15.10 更名；V1.12.0 起，仅开发者账号 dev 可进）：
+    /// PLC/相机/扫码枪通讯链路手动验证工具 + 账号管理（防错机制：现场管理员忘密码时，
+    /// 开发者可在此重置任意账号密码，见下方"账号管理"区说明）。
     ///
     /// 【背景】PLC 业务逻辑（到位→触发→等图→上报）还没写完时，需要先单独验证
     /// "相机↔上位机""PLC↔上位机""扫码枪↔上位机"几条链路是否通。此窗体只做
@@ -21,14 +23,19 @@ namespace CommandCenter.Views
     ///
     /// 【界面布局】
     /// ┌────────────────────────────────────────────────────────────────┐
-    /// │ ▓ 功能测试（开发者）                                            │
+    /// │ ▓ 开发者模式                                                     │
     /// ├────────────────────────────────────────────────────────────────┤
-    ///     │【相机】 相机:[cmbCamera▾] 状态:[lblCamState]  [picTestShot 预览]│
-    ///     │   [btnTrigger 仅触发T1] [btnTriggerRead 触发+判定T2(取图存图)] │
-    ///     │   结果:[lblCamResult]（OK=绿 / NG=红 / 失败=灰）              │
-    ///     │   [btnReadProgramNo 读当前程序号][lblCurrentProgram]          │
-    ///     │   [btnSwProg1 切换程序→P001] [btnSwProg2 切换程序→P002]       │
-    ///     │   右侧:[lblTestImagePath 最近存图路径]（T2 后自动取图闪图存图）│
+    /// │【账号管理】[dgvAccounts 表格]：账号 | 角色 | 启用 | 密码(掩码)    │
+    /// │   选中账号:[lblAccAccount] 新密码:[txtNewPwd] 确认:[txtNewPwd2]  │
+    /// │   [btnChangePwd 修改密码]（重置该账号密码并写盘；防管理员忘密码  │
+    /// │   锁死——开发者可进本页帮现场用户重设新密码，详见"账号管理"说明） │
+    /// ├────────────────────────────────────────────────────────────────┤
+    /// │【相机】 相机:[cmbCamera▾] 状态:[lblCamState]  [picTestShot 预览]│
+    /// │   [btnTrigger 仅触发T1] [btnTriggerRead 触发+判定T2(取图存图)] │
+    /// │   结果:[lblCamResult]（OK=绿 / NG=红 / 失败=灰）              │
+    /// │   [btnReadProgramNo 读当前程序号][lblCurrentProgram]          │
+    /// │   [btnSwProg1 切换程序→P001] [btnSwProg2 切换程序→P002]       │
+    /// │   右侧:[lblTestImagePath 最近存图路径]（T2 后自动取图闪图存图）│
     /// ├────────────────────────────────────────────────────────────────┤
     /// │【扫码枪】扫码枪:[cmbScanner▾] 状态:[lblScannerState]            │
     /// │   [btnScannerTrigger 发送触发指令][btnShowScannerFail 显示异常弹窗]│
@@ -63,10 +70,19 @@ namespace CommandCenter.Views
     /// 完成后用 SafeInvoke 回到 UI 线程更新控件，绝不在 UI 线程同步读写。
     /// 扫码枪事件本身在工作线程触发，响应也统一用 SafeInvoke 回 UI。
     ///
-    /// 【安全】本窗体只能由开发者账号登录进入（MainForm.OpenSettings 按角色分流），
-    /// 进入后不提供任何配置修改能力，避免联调时误改现场配置。
+    /// 【安全】本窗体只能由开发者账号登录进入（MainForm.OpenSettings 按角色分流）。
+    ///   本窗体除【账号管理】区外【不产生任何配置改动】（只做通讯验证，联调误操作不
+    ///   污染现场配置）；【账号管理】是唯一例外——开发者可用它重置管理员/开发者密码
+    ///   （改的是 SecurityConfig 的密码哈希 + ConfigStore.Save 写盘），防"管理员现场
+    ///   改了密码后忘记、把自己锁在外面"的兜底通道。
+    /// 【账号管理（V2.15.10 防错机制）】现场管理员在登录框"修改密码"面板改过密码后
+    ///   忘记新密码时：开发者用 dev 账号登录本页 → 选中对应账号 → 输入新密码两次 →
+    ///   点【修改密码】即重置该账号密码并写盘，用户下次登录用新密码即可。
+    ///   安全约定（与全局一致）：表格只显示密码掩码（●●●●●●），绝不放明文；
+    ///   新密码至少 6 位、两次输入一致；改完清掉该角色的"记住密码"记录（防旧记录回填
+    ///   导致登录失败）；密码只存 SHA-256 哈希。账号数据源 = MainForm 传入的 _config.Security。
     /// </summary>
-    public partial class DevTestForm : Form
+    public partial class DeveloperModeForm : Form
     {
         private readonly PlcService _plc;                    // 主窗体传入的 PLC 服务（复用其连接）
         private readonly List<KeyenceIV4Camera> _cameras;    // 主窗体传入的相机服务列表（复用其连接）
@@ -75,6 +91,7 @@ namespace CommandCenter.Views
         private readonly ImageStore _imageStore;             // 主窗体传入的图像存储服务（V1.12.24 取图存图测试复用，不新建）
         private readonly List<CameraConfig> _cameraConfigs;  // 相机配置列表（取每台 FTP 取图目录用，与 _cameras 下标对应）
         private readonly string _serialSnapshot;             // 打开测试窗体时的当前产品序列号快照（存图 {SN} 目录用）
+        private readonly AppConfig _config;                  // 整个配置引用（V2.15.10 账号管理：改密码改 SecurityConfig 哈希并 ConfigStore.Save 写盘）
         private volatile bool _busy;                         // 防止连点/并发触发（跨线程读）
 
         // T2 触发后等待相机 FTP 推图的最长等待时间（V1.12.27）：
@@ -83,12 +100,13 @@ namespace CommandCenter.Views
         // 改为"触发后轮询扫描取图目录"，最多等这么久还见不到新图才报失败，防止"触发成功却没图"。
         private const int FtpWaitAfterTriggerMs = 5000;
 
-        /// <summary>本窗体对话框标题（V2.15.0 双语，MessageBox 统一用）。</summary>
-        private string Title => I18n.T("功能测试", "Function Test");
+        /// <summary>本窗体对话框标题（V2.15.0 双语，MessageBox 统一用；V2.15.10 更名"开发者模式"）。</summary>
+        private string Title => I18n.T("开发者模式", "Developer Mode");
 
-        public DevTestForm(PlcService plc, List<KeyenceIV4Camera> cameras,
+        public DeveloperModeForm(PlcService plc, List<KeyenceIV4Camera> cameras,
             List<IScanner> scanners, List<ScanConfig> scannerConfigs,
-            ImageStore imageStore, List<CameraConfig> cameraConfigs, string serialSnapshot)
+            ImageStore imageStore, List<CameraConfig> cameraConfigs, string serialSnapshot,
+            AppConfig config)
         {
             _plc = plc;
             _cameras = cameras ?? new List<KeyenceIV4Camera>();
@@ -97,6 +115,7 @@ namespace CommandCenter.Views
             _imageStore = imageStore;
             _cameraConfigs = cameraConfigs ?? new List<CameraConfig>();
             _serialSnapshot = serialSnapshot ?? "";
+            _config = config;
             InitializeComponent();
 
             // 填充相机下拉框：每台一行"相机N IP:端口"（V1.12.22 起带名称：上相机/下相机；
@@ -125,7 +144,8 @@ namespace CommandCenter.Views
 
             RefreshStates(); // 初始刷新 PLC/相机/扫码枪连接状态
             WireEvents();    // 订阅连接状态变化事件 + 扫码枪收码事件，实时刷新
-            AppendLog("功能测试窗体已打开，复用主窗体已有连接。");
+            LoadAccounts();  // V2.15.10 账号管理：把 SecurityConfig 里的账号填入表格（含掩码密码）
+            AppendLog("开发者模式窗体已打开，复用主窗体已有连接。");
             AppendLog($"PLC={_plc?.IpLabel ?? "null"}，相机数={_cameras.Count}，扫码枪数={_scanners.Count}");
             ApplyLanguage(); // V2.15.0 国际化：按当前语言初始化全部界面文本
         }
@@ -177,6 +197,135 @@ namespace CommandCenter.Views
             btnScannerTrigger.Click += BtnScannerTrigger_Click;
             // V2.15.4 测试入口：弹"扫码枪异常提醒"对话框看样式/交互（纯 UI，不碰通讯）
             btnShowScannerFail.Click += BtnShowScannerFail_Click;
+            // V2.15.10 账号管理：选中表格行 → 底部"选中账号"标签实时跟随显示
+            dgvAccounts.SelectionChanged += (s, e) => UpdateSelectedAccountLabel();
+        }
+
+        // ────────────── 账号管理（V2.15.10 防错机制）──────────────
+
+        /// <summary>
+        /// 把 SecurityConfig 里的全部账号（管理员 admin + 开发者 dev）填入账号管理表格。
+        /// 密码列只显示掩码"●●●●●●"（空哈希显示"未设置"），【绝不放明文/哈希】——
+        /// 项目红线"配置不存明文、界面不显示明文"，改密码走下方输入框 + HashPassword。
+        /// 行 Tag 存角色键（"admin"/"dev"），改密码时据此定位到 SecurityConfig 对应哈希字段。
+        /// </summary>
+        private void LoadAccounts()
+        {
+            dgvAccounts.Rows.Clear();
+            var sec = _config?.Security;
+            if (sec == null)
+            {
+                lblAccAccount.Text = I18n.T("（未提供配置）", "(no config)");
+                return;
+            }
+            AddAccountRow(sec.AdminUser, I18n.T("管理员", "Admin"), sec.AdminEnabled, sec.AdminPasswordHash, "admin");
+            AddAccountRow(sec.DevUser, I18n.T("开发者", "Developer"), sec.DevEnabled, sec.DevPasswordHash, "dev");
+        }
+
+        /// <summary>往账号表格加一行（空用户名兜底显示"?"防手改配置 null 崩溃）。</summary>
+        private void AddAccountRow(string user, string role, bool enabled, string pwdHash, string tag)
+        {
+            int idx = dgvAccounts.Rows.Add(
+                string.IsNullOrWhiteSpace(user) ? "?" : user,
+                role,
+                I18n.T(enabled ? "启用" : "停用", enabled ? "Enabled" : "Disabled"),
+                string.IsNullOrEmpty(pwdHash) ? I18n.T("未设置", "Not set") : "●●●●●●");
+            dgvAccounts.Rows[idx].Tag = tag;
+        }
+
+        /// <summary>表格选中行变化时，把"选中账号"标签刷新成当前选中账号（无选中显示占位）。</summary>
+        private void UpdateSelectedAccountLabel()
+        {
+            if (dgvAccounts.SelectedRows.Count > 0
+                && dgvAccounts.SelectedRows[0].Cells["colAccUser"].Value != null)
+                lblAccAccount.Text = dgvAccounts.SelectedRows[0].Cells["colAccUser"].Value.ToString();
+            else
+                lblAccAccount.Text = I18n.T("（未选中）", "(not selected)");
+        }
+
+        /// <summary>
+        /// 修改选中账号的密码（V2.15.10 防错机制）：开发者在此重置管理员/开发者密码。
+        /// 场景：现场管理员在登录框"修改密码"面板改过密码后忘记新密码、把自己锁在外面，
+        /// 开发者用 dev 账号进本页帮他重设——校验"新密码≥6位 + 两次一致"后把对应账号的
+        /// SHA-256 哈希写进 SecurityConfig 并 ConfigStore.Save 落盘，用户下次登录用新密码。
+        /// 与全局安全约定一致：只存哈希、不清明文；改完清掉该角色"记住密码"记录（旧记录
+        /// 里是旧密码，留着会导致下次自动回填失败），并保持双账号记住记录互斥。
+        /// </summary>
+        private void BtnChangePwd_Click(object sender, EventArgs e)
+        {
+            var sec = _config?.Security;
+            if (sec == null)
+            {
+                MessageBox.Show(I18n.T("未提供配置对象，无法修改密码。", "No config available; cannot change password."),
+                    Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (dgvAccounts.SelectedRows.Count == 0)
+            {
+                MessageBox.Show(I18n.T("请先在表格中选中要修改密码的账号。", "Select an account in the table first."),
+                    Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            string tag = dgvAccounts.SelectedRows[0].Tag as string;
+            string user = dgvAccounts.SelectedRows[0].Cells["colAccUser"].Value?.ToString() ?? "";
+            if (tag != "admin" && tag != "dev")
+            {
+                MessageBox.Show(I18n.T("该账号不支持在此修改密码。", "This account cannot be changed here."),
+                    Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string newPwd = txtNewPwd.Text;
+            if (newPwd.Length < 6)
+            {
+                MessageBox.Show(I18n.T("新密码至少 6 位，请重新输入。", "New password must be at least 6 characters."),
+                    Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtNewPwd.Clear();
+                txtNewPwd.Focus();
+                return;
+            }
+            if (newPwd != txtNewPwd2.Text)
+            {
+                MessageBox.Show(I18n.T("两次输入的新密码不一致，请重新输入。", "The two new passwords do not match."),
+                    Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtNewPwd2.Clear();
+                txtNewPwd2.Focus();
+                return;
+            }
+
+            // 只落 SHA-256 哈希（与 LoginForm 改密码同一规则），不存明文
+            if (tag == "admin")
+                sec.AdminPasswordHash = SecurityUtil.HashPassword(newPwd);
+            else
+                sec.DevPasswordHash = SecurityUtil.HashPassword(newPwd);
+
+            // 改完密码清掉双角色"记住密码"记录：本角色旧记录里是旧密码（回填会登录失败），
+            // 对方角色也要清（保持"一次只记最近登录角色"的互斥约定，见 SecurityUtil 注释）
+            SecurityUtil.ClearRememberedLogin(false);
+            SecurityUtil.ClearRememberedLogin(true);
+
+            try
+            {
+                ConfigStore.Save(_config);
+                LogHelper.Info($"开发者模式：账号「{user}」密码已修改并写盘");
+                MessageBox.Show(I18n.T($"账号「{user}」密码修改成功，下次登录请使用新密码。",
+                    $"Password for \"{user}\" changed. Use the new password next login."),
+                    Title, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                txtNewPwd.Clear();
+                txtNewPwd2.Clear();
+                LoadAccounts();                    // 刷新表格（掩码/启用文本按最新配置）
+                lblAccAccount.Text = user;         // 刷新后恢复选中账号显示
+                foreach (DataGridViewRow r in dgvAccounts.Rows)
+                    if ((r.Tag as string) == tag) { r.Selected = true; break; } // 保持选中刚改的行
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Error("保存账号密码失败：" + ex.Message);
+                MessageBox.Show(I18n.T(
+                    "密码已修改但写盘失败（" + ex.Message + "），本次运行生效，重启后可能恢复旧密码。",
+                    "Password changed but saving failed (" + ex.Message + "). Effective for this run; it may revert after restart."),
+                    Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         /// <summary>扫码枪收到条码（工作线程触发）：把内容显示到界面大字区与日志。</summary>
@@ -896,7 +1045,18 @@ namespace CommandCenter.Views
         /// </summary>
         private void ApplyLanguage()
         {
-            this.Text = I18n.T("功能测试（开发者）", "Function Test (Developer)");
+            this.Text = I18n.T("开发者模式", "Developer Mode");
+            // ───── 账号管理区（V2.15.10）─────
+            grpAccount.Text = I18n.T("账号管理", "Account Management");
+            lblAccTip.Text = I18n.T("选中账号:", "Selected account:");
+            lblAccAccount.Text = I18n.T("（未选中）", "(not selected)");
+            lblNewPwd.Text = I18n.T("新密码:", "New password:");
+            lblNewPwd2.Text = I18n.T("确认密码:", "Confirm:");
+            btnChangePwd.Text = I18n.T("修改密码", "Change Password");
+            colAccUser.HeaderText = I18n.T("账号", "Account");
+            colAccRole.HeaderText = I18n.T("角色", "Role");
+            colAccEnabled.HeaderText = I18n.T("启用", "Enabled");
+            colAccPwd.HeaderText = I18n.T("密码", "Password");
             grpCamera.Text = I18n.T("相机测试", "Camera Test");
             btnTrigger.Text = I18n.T("仅触发拍照 T1", "Trigger T1");
             btnTriggerRead.Text = I18n.T("触发+判定T2（取图存图）", "Trigger+Result T2");

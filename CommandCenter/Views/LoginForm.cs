@@ -9,7 +9,7 @@ namespace CommandCenter.Views
     /// 登录角色（V1.12.0）：LoginForm 校验通过后置入 Role 属性，
     /// MainForm.OpenSettings 据此决定打开哪个界面：
     ///   Admin → 系统设置窗体 SettingsForm（改配置，权限最高）；
-    ///   Developer → 功能测试窗体 DevTestForm（相机/PLC 通讯验证，不碰业务配置）。
+    ///   Developer → 开发者模式窗体 DeveloperModeForm（原名 DevTestForm，相机/PLC 通讯验证 + 账号管理）。
     /// </summary>
     public enum LoginRole
     {
@@ -30,7 +30,7 @@ namespace CommandCenter.Views
     /// 【V1.12.0 双账号】新增开发者账号（SecurityConfig.DevUser，默认 dev/dev123）：
     ///   登录后通过 Role 属性告知调用方角色，MainForm 据此分流：
     ///   - 管理员 → 打开系统设置窗体（原有行为）；
-    ///   - 开发者 → 打开功能测试窗体 DevTestForm（PLC/相机通讯验证，不碰业务配置）。
+    ///   - 开发者 → 打开开发者模式窗体 DeveloperModeForm（原名 DevTestForm，PLC/相机通讯验证 + 账号管理）。
     ///   登录框标题/横幅跟随当前面板语义，不再写死"管理员"三个字。
     ///
     /// 【界面布局】

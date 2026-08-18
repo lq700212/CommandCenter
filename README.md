@@ -47,7 +47,7 @@
 │   WindowPointForm   窗口↔点位 + 点位→相机程序 可视化配置           │
 │   DirTreeEditForm   存图目录结构可视化配置                       │
 │   LoginForm         账号登录 + 改密码                            │
-│   DevTestForm       功能测试（开发者，纯通讯验证不动配置）          │
+│   DeveloperModeForm 开发者模式（原名 DevTestForm：通讯验证 + 账号管理） │
 │   CameraDisplayControl   单窗口控件：显示图 + OK/NG 徽标           │
 ├───────────────────────────────────────────────────────────────┤
 │ 业务编排  Services/                                             │
@@ -102,7 +102,7 @@ PLC 写 40001=1（扫码请求）
 
 ```
 CommandCenter/
-├── Views/          界面窗体（MainForm / SettingsForm / LoginForm / DevTestForm /
+├── Views/          界面窗体（MainForm / SettingsForm / LoginForm / DeveloperModeForm /
 │                   WindowPointForm / DirTreeEditForm / SerialInputForm…）
 │                   ※ 静态布局在 *.Designer.cs 里可视化维护；动态部分（窗口矩阵、状态灯）
 │                      在业务文件里运行时生成
@@ -357,7 +357,7 @@ E:\Images\                        ← saveRootDir（存图根目录）
 | --- | --- | --- |
 | `adminEnabled` | true | 点"系统设置"是否要登录（生产建议开，防误改配置） |
 | `adminUser` / `adminPasswordHash` | admin / admin123 的哈希 | 管理员，密码**只存 SHA-256 哈希、不存明文** |
-| `devEnabled` / `devUser` / `devPasswordHash` | true / dev / dev123 的哈希 | 开发者，登录进**功能测试窗体**（只做通讯验证、不碰配置） |
+| `devEnabled` / `devUser` / `devPasswordHash` | true / dev / dev123 的哈希 | 开发者，登录进**开发者模式窗体**（原名功能测试：通讯验证 + 账号管理） |
 | 记住密码 | — | 勾选后用 Windows DPAPI 加密存 `%LOCALAPPDATA%\CommandCenter\`（绑定本机用户，拷走无效）；管理员/开发者记录**互斥**，登录任一方会清掉另一方 |
 
 管理员密码在**登录对话框**里改（验证原密码 → 新密码两次一致且 ≥6 位 → 保存）；开发者密码不提供在线

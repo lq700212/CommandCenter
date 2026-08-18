@@ -97,12 +97,13 @@
     <Compile Include="Views\WindowPointForm.Designer.cs">
       <DependentUpon>WindowPointForm.cs</DependentUpon>
     </Compile>
-    <!-- DevTestForm：功能测试窗体（V1.12.0，开发者账号 dev 登录进入，PLC/相机通讯手动验证） -->
-    <Compile Include="Views\DevTestForm.cs">
+    <!-- DeveloperModeForm：开发者模式窗体（原名 DevTestForm；V1.12.0 起开发者账号 dev 登录进入，
+         PLC/相机通讯手动验证 + V2.15.10 账号管理） -->
+    <Compile Include="Views\DeveloperModeForm.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="Views\DevTestForm.Designer.cs">
-      <DependentUpon>DevTestForm.cs</DependentUpon>
+    <Compile Include="Views\DeveloperModeForm.Designer.cs">
+      <DependentUpon>DeveloperModeForm.cs</DependentUpon>
     </Compile>
     <!-- SerialInputForm：手动输入序列号对话框（V2.14.6 恢复；V2.14.7 改 Designer 分部文件，可用设计器微调 UI） -->
     <Compile Include="Views\SerialInputForm.cs">
@@ -151,8 +152,8 @@
     <None Include="App.config" />
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="Views\DevTestForm.resx">
-      <DependentUpon>DevTestForm.cs</DependentUpon>
+    <EmbeddedResource Include="Views\DeveloperModeForm.resx">
+      <DependentUpon>DeveloperModeForm.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Views\MainForm.resx">
       <DependentUpon>MainForm.cs</DependentUpon>

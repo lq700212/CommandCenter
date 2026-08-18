@@ -242,7 +242,7 @@ namespace CommandCenter.Services
         ///   才算候选对，最后返回"组内最新写时间"最大的一组。目录里只有孤 jpeg（iv4p 还没推到 /
         ///   被删了一半）时回退返回最新孤 jpeg（iv4p 置 null，宁可少存 iv4p 也不硬凑错配）。
         ///   调用时机在协调器收尾归档前（ProductionCoordinator.FinishAll）与功能测试窗体
-        ///   取图（DevTestForm），事件路径仅作为目录扫描失败时的兜底。
+        ///   取图（开发者模式窗体 DeveloperModeForm），事件路径仅作为目录扫描失败时的兜底。
         /// </summary>
         /// <param name="dir">该相机的 FTP 取图目录（相机配置 FtpUploadDir，空缺用全局 FtpRootDir）</param>
         /// <returns>最新一对结果：JpegPath / IvpPath（找不到对应文件则为 null；目录不存在返回空结果）</returns>

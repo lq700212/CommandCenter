@@ -4,17 +4,18 @@ using System.Windows.Forms;
 namespace CommandCenter.Views
 {
     /// <summary>
-    /// DevTestForm 的 Visual Studio 窗体设计器分部文件（自动生成风格，可手动维护）。
-    /// 布局说明：四个 GroupBox 纵向排布——
-    ///   grpCamera（相机测试区）/ grpScanner（扫码枪测试区）/ grpPlc（PLC 测试区）/ grpLog（日志区）。
-    /// 详细 ASCII 布局图见 DevTestForm.cs 类注释，本文件负责控件外观与坐标。
+    /// DeveloperModeForm 的 Visual Studio 窗体设计器分部文件（自动生成风格，可手动维护）。
+    /// 布局说明：五个 GroupBox 纵向排布——
+    ///   grpAccount（账号管理，V2.15.10 新增，最顶部）/ grpCamera（相机测试区）/
+    ///   grpScanner（扫码枪测试区）/ grpPlc（PLC 测试区）/ grpLog（日志区）。
+    /// 详细 ASCII 布局图见 DeveloperModeForm.cs 类注释，本文件负责控件外观与坐标。
     /// 控件命名遵循匈牙利前缀：cmb=ComboBox / lbl=Label / btn=Button / txt=TextBox。
     ///
     /// 【垂直居中对齐约定】PLC 区每行由按钮（高34）、文本框（高25）、标签（高19）混排，
     /// 均按"行中心线"对齐：btn 直接定位在行顶，txt 顶=行顶+4，lbl 顶=行顶+7（差值
     /// (34-25)/2≈4、(34-19)/2≈7），保证一行内各控件上下视觉居中。
     /// </summary>
-    partial class DevTestForm
+    partial class DeveloperModeForm
     {
         private System.ComponentModel.IContainer components = null;
 
@@ -34,6 +35,19 @@ namespace CommandCenter.Views
         /// <summary>设计器支持所需的方法 - 不要修改此方法的内容，使用代码编辑器修改此方法的内容。</summary>
         private void InitializeComponent()
         {
+            this.grpAccount = new System.Windows.Forms.GroupBox();
+            this.lblAccAccount = new System.Windows.Forms.Label();
+            this.lblAccTip = new System.Windows.Forms.Label();
+            this.btnChangePwd = new System.Windows.Forms.Button();
+            this.txtNewPwd2 = new System.Windows.Forms.TextBox();
+            this.txtNewPwd = new System.Windows.Forms.TextBox();
+            this.lblNewPwd2 = new System.Windows.Forms.Label();
+            this.lblNewPwd = new System.Windows.Forms.Label();
+            this.dgvAccounts = new System.Windows.Forms.DataGridView();
+            this.colAccUser = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colAccRole = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colAccEnabled = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colAccPwd = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.grpCamera = new System.Windows.Forms.GroupBox();
             this.lblCamResult = new System.Windows.Forms.Label();
             this.btnTriggerRead = new System.Windows.Forms.Button();
@@ -80,12 +94,159 @@ namespace CommandCenter.Views
             this.lblPlcState = new System.Windows.Forms.Label();
             this.grpLog = new System.Windows.Forms.GroupBox();
             this.txtLog = new System.Windows.Forms.TextBox();
+            this.grpAccount.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.dgvAccounts)).BeginInit();
             this.grpCamera.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.picTestShot)).BeginInit();
             this.grpScanner.SuspendLayout();
             this.grpPlc.SuspendLayout();
             this.grpLog.SuspendLayout();
             this.SuspendLayout();
+            // 
+            // grpAccount
+            // 
+            this.grpAccount.Controls.Add(this.lblAccAccount);
+            this.grpAccount.Controls.Add(this.lblAccTip);
+            this.grpAccount.Controls.Add(this.btnChangePwd);
+            this.grpAccount.Controls.Add(this.txtNewPwd2);
+            this.grpAccount.Controls.Add(this.txtNewPwd);
+            this.grpAccount.Controls.Add(this.lblNewPwd2);
+            this.grpAccount.Controls.Add(this.lblNewPwd);
+            this.grpAccount.Controls.Add(this.dgvAccounts);
+            this.grpAccount.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
+            this.grpAccount.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
+            this.grpAccount.Location = new System.Drawing.Point(16, 12);
+            this.grpAccount.Name = "grpAccount";
+            this.grpAccount.Size = new System.Drawing.Size(768, 156);
+            this.grpAccount.TabIndex = 10;
+            this.grpAccount.TabStop = false;
+            this.grpAccount.Text = "账号管理";
+            // 
+            // lblAccAccount
+            // 
+            this.lblAccAccount.AutoSize = true;
+            this.lblAccAccount.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
+            this.lblAccAccount.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(39)))), ((int)(((byte)(174)))), ((int)(((byte)(96)))));
+            this.lblAccAccount.Location = new System.Drawing.Point(110, 124);
+            this.lblAccAccount.Name = "lblAccAccount";
+            this.lblAccAccount.Size = new System.Drawing.Size(79, 19);
+            this.lblAccAccount.TabIndex = 2;
+            this.lblAccAccount.Text = "（未选中）";
+            // 
+            // lblAccTip
+            // 
+            this.lblAccTip.AutoSize = true;
+            this.lblAccTip.Font = new System.Drawing.Font("微软雅黑", 10F);
+            this.lblAccTip.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
+            this.lblAccTip.Location = new System.Drawing.Point(24, 124);
+            this.lblAccTip.Name = "lblAccTip";
+            this.lblAccTip.Size = new System.Drawing.Size(68, 20);
+            this.lblAccTip.TabIndex = 1;
+            this.lblAccTip.Text = "选中账号:";
+            // 
+            // btnChangePwd
+            // 
+            this.btnChangePwd.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
+            this.btnChangePwd.FlatAppearance.BorderSize = 0;
+            this.btnChangePwd.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnChangePwd.Font = new System.Drawing.Font("微软雅黑", 10F);
+            this.btnChangePwd.ForeColor = System.Drawing.Color.White;
+            this.btnChangePwd.Location = new System.Drawing.Point(634, 118);
+            this.btnChangePwd.Name = "btnChangePwd";
+            this.btnChangePwd.Size = new System.Drawing.Size(118, 32);
+            this.btnChangePwd.TabIndex = 7;
+            this.btnChangePwd.Text = "修改密码";
+            this.btnChangePwd.UseVisualStyleBackColor = false;
+            this.btnChangePwd.Click += new System.EventHandler(this.BtnChangePwd_Click);
+            // 
+            // txtNewPwd2
+            // 
+            this.txtNewPwd2.Font = new System.Drawing.Font("微软雅黑", 10F);
+            this.txtNewPwd2.Location = new System.Drawing.Point(520, 121);
+            this.txtNewPwd2.Name = "txtNewPwd2";
+            this.txtNewPwd2.PasswordChar = '●';
+            this.txtNewPwd2.Size = new System.Drawing.Size(100, 25);
+            this.txtNewPwd2.TabIndex = 6;
+            // 
+            // txtNewPwd
+            // 
+            this.txtNewPwd.Font = new System.Drawing.Font("微软雅黑", 10F);
+            this.txtNewPwd.Location = new System.Drawing.Point(315, 121);
+            this.txtNewPwd.Name = "txtNewPwd";
+            this.txtNewPwd.PasswordChar = '●';
+            this.txtNewPwd.Size = new System.Drawing.Size(110, 25);
+            this.txtNewPwd.TabIndex = 4;
+            // 
+            // lblNewPwd2
+            // 
+            this.lblNewPwd2.AutoSize = true;
+            this.lblNewPwd2.Font = new System.Drawing.Font("微软雅黑", 10F);
+            this.lblNewPwd2.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
+            this.lblNewPwd2.Location = new System.Drawing.Point(440, 124);
+            this.lblNewPwd2.Name = "lblNewPwd2";
+            this.lblNewPwd2.Size = new System.Drawing.Size(68, 20);
+            this.lblNewPwd2.TabIndex = 5;
+            this.lblNewPwd2.Text = "确认密码:";
+            // 
+            // lblNewPwd
+            // 
+            this.lblNewPwd.AutoSize = true;
+            this.lblNewPwd.Font = new System.Drawing.Font("微软雅黑", 10F);
+            this.lblNewPwd.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
+            this.lblNewPwd.Location = new System.Drawing.Point(235, 124);
+            this.lblNewPwd.Name = "lblNewPwd";
+            this.lblNewPwd.Size = new System.Drawing.Size(54, 20);
+            this.lblNewPwd.TabIndex = 3;
+            this.lblNewPwd.Text = "新密码:";
+            // 
+            // dgvAccounts
+            // 
+            this.dgvAccounts.AllowUserToAddRows = false;
+            this.dgvAccounts.AllowUserToDeleteRows = false;
+            this.dgvAccounts.AllowUserToResizeRows = false;
+            this.dgvAccounts.BackgroundColor = System.Drawing.Color.White;
+            this.dgvAccounts.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            this.dgvAccounts.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
+            this.colAccUser,
+            this.colAccRole,
+            this.colAccEnabled,
+            this.colAccPwd});
+            this.dgvAccounts.Location = new System.Drawing.Point(16, 34);
+            this.dgvAccounts.MultiSelect = false;
+            this.dgvAccounts.Name = "dgvAccounts";
+            this.dgvAccounts.ReadOnly = true;
+            this.dgvAccounts.RowHeadersVisible = false;
+            this.dgvAccounts.RowTemplate.Height = 23;
+            this.dgvAccounts.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
+            this.dgvAccounts.Size = new System.Drawing.Size(736, 78);
+            this.dgvAccounts.TabIndex = 0;
+            // 
+            // colAccUser
+            // 
+            this.colAccUser.HeaderText = "账号";
+            this.colAccUser.Name = "colAccUser";
+            this.colAccUser.ReadOnly = true;
+            this.colAccUser.Width = 180;
+            // 
+            // colAccRole
+            // 
+            this.colAccRole.HeaderText = "角色";
+            this.colAccRole.Name = "colAccRole";
+            this.colAccRole.ReadOnly = true;
+            this.colAccRole.Width = 160;
+            // 
+            // colAccEnabled
+            // 
+            this.colAccEnabled.HeaderText = "启用";
+            this.colAccEnabled.Name = "colAccEnabled";
+            this.colAccEnabled.ReadOnly = true;
+            // 
+            // colAccPwd
+            // 
+            this.colAccPwd.HeaderText = "密码";
+            this.colAccPwd.Name = "colAccPwd";
+            this.colAccPwd.ReadOnly = true;
+            this.colAccPwd.Width = 280;
             // 
             // grpCamera
             // 
@@ -102,7 +263,7 @@ namespace CommandCenter.Views
             this.grpCamera.Controls.Add(this.lblTestImagePath);
             this.grpCamera.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
             this.grpCamera.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
-            this.grpCamera.Location = new System.Drawing.Point(16, 12);
+            this.grpCamera.Location = new System.Drawing.Point(16, 170);
             this.grpCamera.Name = "grpCamera";
             this.grpCamera.Size = new System.Drawing.Size(768, 212);
             this.grpCamera.TabIndex = 0;
@@ -155,7 +316,7 @@ namespace CommandCenter.Views
             this.lblCamState.AutoSize = true;
             this.lblCamState.Font = new System.Drawing.Font("微软雅黑", 10F);
             this.lblCamState.ForeColor = System.Drawing.Color.Red;
-            this.lblCamState.Location = new System.Drawing.Point(340, 33);
+            this.lblCamState.Location = new System.Drawing.Point(270, 33);
             this.lblCamState.Name = "lblCamState";
             this.lblCamState.Size = new System.Drawing.Size(49, 20);
             this.lblCamState.TabIndex = 1;
@@ -166,7 +327,7 @@ namespace CommandCenter.Views
             this.cmbCamera.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbCamera.Font = new System.Drawing.Font("微软雅黑", 10F);
             this.cmbCamera.FormattingEnabled = true;
-            this.cmbCamera.Location = new System.Drawing.Point(90, 29);
+            this.cmbCamera.Location = new System.Drawing.Point(24, 30);
             this.cmbCamera.Name = "cmbCamera";
             this.cmbCamera.Size = new System.Drawing.Size(220, 27);
             this.cmbCamera.TabIndex = 0;
@@ -258,7 +419,7 @@ namespace CommandCenter.Views
             this.grpScanner.Controls.Add(this.cmbScanner);
             this.grpScanner.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
             this.grpScanner.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
-            this.grpScanner.Location = new System.Drawing.Point(16, 232);
+            this.grpScanner.Location = new System.Drawing.Point(16, 383);
             this.grpScanner.Name = "grpScanner";
             this.grpScanner.Size = new System.Drawing.Size(768, 128);
             this.grpScanner.TabIndex = 2;
@@ -357,9 +518,9 @@ namespace CommandCenter.Views
             this.grpPlc.Controls.Add(this.lblPlcState);
             this.grpPlc.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
             this.grpPlc.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
-            this.grpPlc.Location = new System.Drawing.Point(16, 368);
+            this.grpPlc.Location = new System.Drawing.Point(16, 512);
             this.grpPlc.Name = "grpPlc";
-            this.grpPlc.Size = new System.Drawing.Size(768, 380);
+            this.grpPlc.Size = new System.Drawing.Size(768, 320);
             this.grpPlc.TabIndex = 1;
             this.grpPlc.TabStop = false;
             this.grpPlc.Text = "PLC 测试";
@@ -499,7 +660,7 @@ namespace CommandCenter.Views
             this.btnResCamReset.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnResCamReset.Font = new System.Drawing.Font("微软雅黑", 10F);
             this.btnResCamReset.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
-            this.btnResCamReset.Location = new System.Drawing.Point(274, 332);
+            this.btnResCamReset.Location = new System.Drawing.Point(393, 274);
             this.btnResCamReset.Name = "btnResCamReset";
             this.btnResCamReset.Size = new System.Drawing.Size(115, 34);
             this.btnResCamReset.TabIndex = 22;
@@ -514,7 +675,7 @@ namespace CommandCenter.Views
             this.btnResCamDown.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnResCamDown.Font = new System.Drawing.Font("微软雅黑", 10F);
             this.btnResCamDown.ForeColor = System.Drawing.Color.White;
-            this.btnResCamDown.Location = new System.Drawing.Point(149, 332);
+            this.btnResCamDown.Location = new System.Drawing.Point(279, 274);
             this.btnResCamDown.Name = "btnResCamDown";
             this.btnResCamDown.Size = new System.Drawing.Size(115, 34);
             this.btnResCamDown.TabIndex = 21;
@@ -529,7 +690,7 @@ namespace CommandCenter.Views
             this.btnResCamUp.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnResCamUp.Font = new System.Drawing.Font("微软雅黑", 10F);
             this.btnResCamUp.ForeColor = System.Drawing.Color.White;
-            this.btnResCamUp.Location = new System.Drawing.Point(24, 332);
+            this.btnResCamUp.Location = new System.Drawing.Point(156, 274);
             this.btnResCamUp.Name = "btnResCamUp";
             this.btnResCamUp.Size = new System.Drawing.Size(115, 34);
             this.btnResCamUp.TabIndex = 20;
@@ -544,7 +705,7 @@ namespace CommandCenter.Views
             this.btnResScan2.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnResScan2.Font = new System.Drawing.Font("微软雅黑", 10F);
             this.btnResScan2.ForeColor = System.Drawing.Color.White;
-            this.btnResScan2.Location = new System.Drawing.Point(264, 278);
+            this.btnResScan2.Location = new System.Drawing.Point(279, 234);
             this.btnResScan2.Name = "btnResScan2";
             this.btnResScan2.Size = new System.Drawing.Size(110, 34);
             this.btnResScan2.TabIndex = 19;
@@ -559,7 +720,7 @@ namespace CommandCenter.Views
             this.btnResScan1.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnResScan1.Font = new System.Drawing.Font("微软雅黑", 10F);
             this.btnResScan1.ForeColor = System.Drawing.Color.White;
-            this.btnResScan1.Location = new System.Drawing.Point(144, 278);
+            this.btnResScan1.Location = new System.Drawing.Point(156, 234);
             this.btnResScan1.Name = "btnResScan1";
             this.btnResScan1.Size = new System.Drawing.Size(110, 34);
             this.btnResScan1.TabIndex = 18;
@@ -573,7 +734,7 @@ namespace CommandCenter.Views
             this.btnResScan0.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnResScan0.Font = new System.Drawing.Font("微软雅黑", 10F);
             this.btnResScan0.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
-            this.btnResScan0.Location = new System.Drawing.Point(24, 278);
+            this.btnResScan0.Location = new System.Drawing.Point(398, 234);
             this.btnResScan0.Name = "btnResScan0";
             this.btnResScan0.Size = new System.Drawing.Size(110, 34);
             this.btnResScan0.TabIndex = 17;
@@ -584,7 +745,7 @@ namespace CommandCenter.Views
             // txtModel
             // 
             this.txtModel.Font = new System.Drawing.Font("微软雅黑", 10F);
-            this.txtModel.Location = new System.Drawing.Point(156, 238);
+            this.txtModel.Location = new System.Drawing.Point(156, 199);
             this.txtModel.MaxLength = 10;
             this.txtModel.Name = "txtModel";
             this.txtModel.Size = new System.Drawing.Size(170, 25);
@@ -598,7 +759,7 @@ namespace CommandCenter.Views
             this.btnWriteModel.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnWriteModel.Font = new System.Drawing.Font("微软雅黑", 10F);
             this.btnWriteModel.ForeColor = System.Drawing.Color.White;
-            this.btnWriteModel.Location = new System.Drawing.Point(24, 232);
+            this.btnWriteModel.Location = new System.Drawing.Point(24, 194);
             this.btnWriteModel.Name = "btnWriteModel";
             this.btnWriteModel.Size = new System.Drawing.Size(120, 34);
             this.btnWriteModel.TabIndex = 15;
@@ -611,7 +772,7 @@ namespace CommandCenter.Views
             this.lblMoveVal.AutoSize = true;
             this.lblMoveVal.Font = new System.Drawing.Font("微软雅黑", 10F);
             this.lblMoveVal.ForeColor = System.Drawing.Color.Gray;
-            this.lblMoveVal.Location = new System.Drawing.Point(290, 201);
+            this.lblMoveVal.Location = new System.Drawing.Point(516, 282);
             this.lblMoveVal.Name = "lblMoveVal";
             this.lblMoveVal.Size = new System.Drawing.Size(51, 20);
             this.lblMoveVal.TabIndex = 14;
@@ -623,7 +784,7 @@ namespace CommandCenter.Views
             this.btnReadCamReq.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnReadCamReq.Font = new System.Drawing.Font("微软雅黑", 10F);
             this.btnReadCamReq.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
-            this.btnReadCamReq.Location = new System.Drawing.Point(154, 194);
+            this.btnReadCamReq.Location = new System.Drawing.Point(24, 274);
             this.btnReadCamReq.Name = "btnReadCamReq";
             this.btnReadCamReq.Size = new System.Drawing.Size(120, 34);
             this.btnReadCamReq.TabIndex = 13;
@@ -638,7 +799,7 @@ namespace CommandCenter.Views
             this.btnReadScanReq.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnReadScanReq.Font = new System.Drawing.Font("微软雅黑", 10F);
             this.btnReadScanReq.ForeColor = System.Drawing.Color.White;
-            this.btnReadScanReq.Location = new System.Drawing.Point(24, 194);
+            this.btnReadScanReq.Location = new System.Drawing.Point(24, 234);
             this.btnReadScanReq.Name = "btnReadScanReq";
             this.btnReadScanReq.Size = new System.Drawing.Size(120, 34);
             this.btnReadScanReq.TabIndex = 12;
@@ -662,7 +823,7 @@ namespace CommandCenter.Views
             this.grpLog.Controls.Add(this.txtLog);
             this.grpLog.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
             this.grpLog.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
-            this.grpLog.Location = new System.Drawing.Point(16, 756);
+            this.grpLog.Location = new System.Drawing.Point(16, 832);
             this.grpLog.Name = "grpLog";
             this.grpLog.Size = new System.Drawing.Size(768, 160);
             this.grpLog.TabIndex = 2;
@@ -681,11 +842,12 @@ namespace CommandCenter.Views
             this.txtLog.Size = new System.Drawing.Size(736, 116);
             this.txtLog.TabIndex = 0;
             // 
-            // DevTestForm
+            // DeveloperModeForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 19F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(800, 932);
+            this.ClientSize = new System.Drawing.Size(800, 990);
+            this.Controls.Add(this.grpAccount);
             this.Controls.Add(this.grpLog);
             this.Controls.Add(this.grpPlc);
             this.Controls.Add(this.grpScanner);
@@ -694,9 +856,12 @@ namespace CommandCenter.Views
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
-            this.Name = "DevTestForm";
+            this.Name = "DeveloperModeForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
-            this.Text = "功能测试（开发者）";
+            this.Text = "开发者模式";
+            this.grpAccount.ResumeLayout(false);
+            this.grpAccount.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.dgvAccounts)).EndInit();
             this.grpCamera.ResumeLayout(false);
             this.grpCamera.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.picTestShot)).EndInit();
@@ -713,6 +878,19 @@ namespace CommandCenter.Views
         #endregion
 
         // 设计器声明的字段（命名遵循匈牙利前缀规范：cmb/lbl/btn/txt）
+        private GroupBox grpAccount;
+        private DataGridView dgvAccounts;
+        private DataGridViewTextBoxColumn colAccUser;
+        private DataGridViewTextBoxColumn colAccRole;
+        private DataGridViewTextBoxColumn colAccEnabled;
+        private DataGridViewTextBoxColumn colAccPwd;
+        private Label lblAccTip;
+        private Label lblAccAccount;
+        private Label lblNewPwd;
+        private TextBox txtNewPwd;
+        private Label lblNewPwd2;
+        private TextBox txtNewPwd2;
+        private Button btnChangePwd;
         private GroupBox grpCamera;
         private ComboBox cmbCamera;
         private Label lblCamState;
