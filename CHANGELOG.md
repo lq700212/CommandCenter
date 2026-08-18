@@ -1,5 +1,36 @@
 # 版本改动记录
 
+## V2.15.7（2026-08-18）图片目录配置窗体布局适配英文标题：仅英文界面动态调整、中文保持原版式
+
+> 需求：DirTreeEditForm 切英文后，`Current Level Name/Rule:` / `File Name Rule:` 等英文标签
+> 比中文长（实测最长 173px），原输入框左缘离标签太近（标签区不足），标题显示不完整/重叠；
+> `Timestamp Suffix` 勾选框原右缘对齐文件名模板框（600px），英文下贴近窗体右侧显局促。
+> **中文界面完全不动**（Designer 原版式），仅英文界面动态调整。
+
+### 改动内容
+
+- **`Views/DirTreeEditForm.Designer.cs`（保持中文原版式）**：`txtLevelName`(160/440)、
+  `cmbPlaceholder`(160)、`btnInsertPh`(290)、`txtFileNameTpl`(130/470)、`lblKeepDays`(130)、
+  `nudKeepDays`(254)、`chkTimestampSuffix`(487，右缘对齐文件名框) 全部恢复原始坐标/宽度，
+  中文界面与改版前零差异。
+- **`Views/DirTreeEditForm.cs`（新增 `ApplyLayoutForLanguage`，在 `ApplyLanguage` 末尾调用）**：
+  仅当 `I18n.Language == "en-US"` 时动态调整（右缘统一保持 600）：
+  - `txtLevelName` 左缘 160→**210**、宽 440→**390**：标签区 20~210 完整容纳 `Current Level
+    Name/Rule:`（右缘 ≈199，留 11px 间距）；
+  - `cmbPlaceholder` 160→**210**（与 `txtLevelName` 左缘对齐）、`btnInsertPh` 290→**340**
+    跟随右移（相对间距 10px 不变）；
+  - `txtFileNameTpl` 左缘 130→**150**、宽 470→**450**：标签区 20~150 完整容纳粗体
+    `File Name Rule:`（右缘 ≈138，留 12px 间距）；
+  - `lblKeepDays` 130→**150**（与文件名框左缘对齐）、`nudKeepDays` 254→**250**（紧贴英文
+    标签右缘 ≈233）；
+  - **`chkTimestampSuffix`（V2.15.7 定稿：英文右缘对齐文件名框）**：英文界面在
+    `ApplyLayoutForLanguage` 里显式 `Left = txtFileNameTpl.Right - chkTimestampSuffix.Width`
+    —— 英文下文件名框右缘 600，勾选框右缘与它对齐（与中文 LoadFromConfig 的右缘对齐
+    同一视觉基准）；中文界面保持原"右缘对齐"版式不动。
+  - 中文界面直接 `return`，不做任何坐标改动（LoadFromConfig 里的右缘对齐逻辑恢复原样）。
+- 验证：Debug 构建通过 + 冒烟存活。改动仅布局坐标、无行为变化。
+- 文档同步：docs 第八部分新增 V2.15.7。
+
 ## V2.15.6（2026-08-18）登录窗体改密码面板适配英文标题：密码输入框左缘右移、宽度收窄
 
 > 需求：LoginForm 改密码面板（`pnlChangePwd`，经 `ShowChangePwdPanel` 显示）切英文后，

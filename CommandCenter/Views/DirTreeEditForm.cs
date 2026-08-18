@@ -95,8 +95,9 @@ namespace CommandCenter.Views
             chkTimestampSuffix.Checked = _cfg.FileTimestampSuffix;
             nudKeepDays.Value = _cfg.KeepDays;
 
-            // 时间戳后缀勾选框是 AutoSize（宽度由字体渲染决定），右缘要与文件名模板框右缘对齐——
+                        // 时间戳后缀勾选框是 AutoSize（宽度由字体渲染决定），右缘要与文件名模板框右缘对齐——
             // AutoSize 宽度只有运行时才知道，故在载入时按 txtFileNameTpl 右缘反向校正 Left。
+            // （仅中文界面；英文界面的勾选框位置由 ApplyLayoutForLanguage 另行设置，见 ApplyLanguage）
             chkTimestampSuffix.Left = txtFileNameTpl.Right - chkTimestampSuffix.Width;
         }
 
@@ -440,6 +441,47 @@ namespace CommandCenter.Views
             tip.SetToolTip(tvPreview, I18n.T(
                 "实时预览：按当前规则用示例数据（今天日期 / SN-0001 / 点位1）\r\n渲染出将来落盘的完整目录树，OK 和 NG 各展示一棵。",
                 "Live preview: renders the future directory tree with sample data (today / SN-0001 / point 1),\r\nshowing an OK tree and an NG tree."));
+
+            ApplyLayoutForLanguage();   // V2.15.7：布局按语言区分布局（仅英文界面调整坐标）
+        }
+
+        /// <summary>
+        /// V2.15.7 布局按语言区分：Designer 静态坐标是【中文原版式】（标签短，无需让位），
+        /// 英文界面各标签变长（实测 `Current Level Name/Rule:` 173px、`File Name Rule:` 112px），
+        /// 原输入框左缘离标签太近导致标题不完整/重叠，且 `Timestamp Suffix` 勾选框贴窗体右缘显局促。
+        /// 故仅当 `I18n.Language == "en-US"` 时动态右移/收窄各控件（右缘统一保持 600）；
+        /// 中文界面【完全不动】，保持设计器原版式（防止现场中文布局被误改）。
+        /// 该方法在 ApplyLanguage 末尾调用（模态对话框打开瞬间按当前语言初始化一次）。
+        /// </summary>
+        private void ApplyLayoutForLanguage()
+        {
+            if (I18n.Language != "en-US")
+            {
+                // 中文界面：保持设计器原版式，不做任何调整（含勾选框左缘，LoadFromConfig 已对齐右缘）
+                return;
+            }
+
+            // 层级名输入框：标签区 20~210 完整容纳英文标签（右缘 ≈199），右缘 600 不变
+            txtLevelName.Left = 210;
+            txtLevelName.Width = 390;
+
+            // 占位符下拉与"插入"按钮：跟随层级名输入框左缘对齐（210），按钮保持相对间距 10px
+            cmbPlaceholder.Left = 210;
+            btnInsertPh.Left = 340;
+
+            // 文件名规则输入框：标签区 20~150 完整容纳英文粗体标签（右缘 ≈138），右缘 600 不变
+            txtFileNameTpl.Left = 150;
+            txtFileNameTpl.Width = 450;
+
+            // 保留天数一行：标签左缘与文件名框左缘对齐（150），数字框紧贴英文标签右缘（≈233）
+            lblKeepDays.Left = 150;
+            nudKeepDays.Left = 250;
+
+            // chkTimestampSuffix（V2.15.7 定稿）：英文界面右缘与 txtFileNameTpl 右缘对齐（600），
+            // 与中文 LoadFromConfig 的右缘对齐逻辑同一视觉基准。此处显式重设——
+            // txtFileNameTpl 刚被上文改成左缘 150、宽 450，Right 仍是 600，
+            // 用 Right - AutoSize 宽度 反向校正 Left，保证两者右侧对齐、不重叠。
+            chkTimestampSuffix.Left = txtFileNameTpl.Right - chkTimestampSuffix.Width;
         }
     }
 }

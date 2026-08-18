@@ -1609,6 +1609,19 @@ SubDirs 为空时用模型默认含 `{相机}` 的四层 `{年月日}/{SN}/{相�
 
 > 本部分保留原 `通讯接入.md` 的版本演进记录，最新在前。
 
+- V2.15.7（2026-08-18，图片目录配置窗体布局适配英文标题，仅英文界面动态调整）：`DirTreeEditForm`
+  各英文标签比中文长（实测最长 `Current Level Name/Rule:` 173px），原输入框左缘离标签太近标题
+  显示不完整。**Designer 保持中文原版式不动**，新增 `ApplyLayoutForLanguage`（`ApplyLanguage` 末尾
+  调用）：仅 `I18n.Language == "en-US"` 时动态调整（右缘统一保持 600）——`txtLevelName` 左缘
+  160→**210**、宽 440→**390**；`cmbPlaceholder` 160→**210**（与层级名框左缘对齐）、`btnInsertPh`
+  290→**340** 跟随右移；`txtFileNameTpl` 左缘 130→**150**、宽 470→**450**（容纳粗体
+  `File Name Rule:`）；`lblKeepDays` 130→**150**（与文件名框左缘对齐）、`nudKeepDays` 254→**250**
+  （紧贴标签）；`chkTimestampSuffix` **英文右缘对齐文件名框（V2.15.7 定稿）**：英文界面在
+  `ApplyLayoutForLanguage` 里显式 `Left = txtFileNameTpl.Right - chkTimestampSuffix.Width`（右缘 600
+  与文件名框对齐，与中文 `LoadFromConfig` 的右缘对齐同一视觉基准）；中文界面保持原"右缘对齐"
+  版式不动、直接 `return` 零改动。
+  仅布局坐标改动、无行为变化。同步 CHANGELOG（V2.15.7）。
+
 - V2.15.6（2026-08-18，登录窗体改密码面板适配英文标题）：`LoginForm` 改密码面板（`pnlChangePwd`）
   三个密码输入框（`txtOldPwd`/`txtNewPwd`/`txtNewPwd2`）**按语言区分布局**：Designer 静态值保持
   中文原版式（左缘 112、宽 240），`ApplyLanguage` 末尾按 `I18n.Language` 动态切换——中文界面用

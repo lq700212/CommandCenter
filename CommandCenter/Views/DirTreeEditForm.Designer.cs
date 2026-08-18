@@ -113,6 +113,9 @@ namespace CommandCenter.Views
             this.lblLevelName.Text = "当前层级名字/规则:";
             //
             // txtLevelName
+            // Designer 静态值 = 中文原版式（左缘 160、宽 440）。
+            // 英文界面下按"最长标签"动态右移/收窄（左缘 210、宽 390，右缘 600 不变），
+            // 见 DirTreeEditForm.cs 的 ApplyLanguage → ApplyLayoutForLanguage()。
             //
             this.txtLevelName.Location = new System.Drawing.Point(160, 255);
             this.txtLevelName.Name = "txtLevelName";
@@ -129,6 +132,8 @@ namespace CommandCenter.Views
             this.lblPh.Text = "插入占位符:";
             //
             // cmbPlaceholder
+            // Designer 静态值 = 中文原版式（左缘 160，与 txtLevelName 对齐）。
+            // 英文界面下跟随 txtLevelName 右移到 210（左缘对齐），见 ApplyLayoutForLanguage()。
             //
             this.cmbPlaceholder.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbPlaceholder.Items.AddRange(new object[] {
@@ -141,6 +146,7 @@ namespace CommandCenter.Views
             this.cmbPlaceholder.Text = "{年月日}";
             //
             // btnInsertPh
+            // Designer 静态值 = 中文原版式（左缘 290）；英文界面下跟随 cmbPlaceholder 右移到 340。
             //
             this.btnInsertPh.Location = new System.Drawing.Point(290, 292);
             this.btnInsertPh.Name = "btnInsertPh";
@@ -215,6 +221,9 @@ namespace CommandCenter.Views
             this.lblFileRule.Text = "文件名规则:";
             //
             // txtFileNameTpl
+            // Designer 静态值 = 中文原版式（左缘 130、宽 470）。
+            // 英文界面下按"最长标签"动态右移/收窄（左缘 150、宽 450，右缘 600 不变），
+            // 见 DirTreeEditForm.cs 的 ApplyLanguage → ApplyLayoutForLanguage()。
             //
             this.txtFileNameTpl.Location = new System.Drawing.Point(130, 385);
             this.txtFileNameTpl.Name = "txtFileNameTpl";
@@ -225,6 +234,8 @@ namespace CommandCenter.Views
             // lblKeepDays
             // 存图保留天数：只保留最近 N 天的存图目录，更早的由后台定期清理删除（0 = 不自动清理）。
             // 与"时间戳后缀"同一行，左对齐 txtFileNameTpl 起点；说明进悬停 ToolTip。
+            // Designer 静态值 = 中文原版式（左缘 130）；英文界面下右移到 150（与文件名框左缘对齐），
+            // 见 ApplyLayoutForLanguage()。
             //
             this.lblKeepDays.AutoSize = true;
             this.lblKeepDays.Location = new System.Drawing.Point(130, 417);
@@ -234,6 +245,8 @@ namespace CommandCenter.Views
             this.lblKeepDays.Text = "存图保留天数:";
             //
             // nudKeepDays
+            // Designer 静态值 = 中文原版式（左缘 254）；英文界面下左移到 250（紧贴英文标签右缘），
+            // 见 ApplyLayoutForLanguage()。
             //
             this.nudKeepDays.Location = new System.Drawing.Point(254, 414);
             this.nudKeepDays.Maximum = new decimal(new int[] { 3650, 0, 0, 0 });
@@ -244,7 +257,9 @@ namespace CommandCenter.Views
             //
             // chkTimestampSuffix
             // 存图文件名是否追加时间戳后缀：勾选 = 开启（默认开，防止同点位重复拍照覆盖旧图）。
-            // 右边缘与 txtFileNameTpl 右边缘对齐（同列右侧），与"存图保留天数"并排。
+            // Designer 静态值 = 中文原版式（右缘对齐 txtFileNameTpl 右缘，同列右侧）；
+            // 英文界面下改贴 nudKeepDays 右侧（Left = nudKeepDays.Right + 15）整体左移、
+            // 窗体右侧留白充足，见 LoadFromConfig 与 ApplyLayoutForLanguage()。
             //
             this.chkTimestampSuffix.AutoSize = true;
             this.chkTimestampSuffix.Checked = true;
