@@ -117,6 +117,8 @@ E:\Images (image root directory)
 
 ## 8. What to Do When a Connection Light Is Red (On-Site Quick Reference)
 
+> **Reading the colors (since V2.15.11)**: Connection lights have only two states — **green = normal, red = problem** (the PLC additionally has **yellow = waiting for the master station**). **There is no gray**: lights show the real state right from startup; if no scanner is enabled, the **scanner light disappears** (that means there is no scanner, not that it is broken).
+
 | Symptom | What it means | What the operator should do |
 | --- | --- | --- |
 | **PLC light red** | PLC communication is down | Don't start work; call an engineer |

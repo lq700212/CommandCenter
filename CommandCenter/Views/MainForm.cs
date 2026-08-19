@@ -397,11 +397,14 @@ namespace CommandCenter.Views
                         Width = 96,
                         TextAlign = ContentAlignment.MiddleRight,
                         Text = $"● {CamDisplayName(i)}",
-                        ForeColor = Color.FromArgb(150, 150, 150),
                         Font = new Font("Microsoft YaHei", 10F, FontStyle.Bold)
                     };
                     pnlTitleBar.Controls.Add(lbl);
                     _lblCamStatuses[i] = lbl;
+                    // 创建后立即按当前真实连接状态上色（绿=已连、红=未连），没有灰色占位：
+                    // _cameras 已由 BuildServices 建好，可直接读 IsConnected 出第一手颜色，
+                    // 后续 ConnectionChanged 事件继续刷新，行为不变。
+                    UpdateDeviceStatus(lbl, _cameras[i].IsConnected);
                 }
             }
             else
@@ -417,7 +420,6 @@ namespace CommandCenter.Views
                     AutoSize = true,
                     TextAlign = ContentAlignment.MiddleRight,
                     Text = "● 相机", // V1.10.0：不显示台数，纯状态圆点+相机字样（V2.15.0 国际化）
-                    ForeColor = Color.FromArgb(150, 150, 150),
                     Font = camFont
                 };
                 _cmbCamOverview = new ComboBox
@@ -1373,8 +1375,8 @@ namespace CommandCenter.Views
         ///   ConnectionChanged(false)，对齐 PLC/相机"连不上就红"，此前扫码枪一直连不上时灯不变化）。
         /// 【多台聚合规则】对齐相机 ≥3 台的聚合语义：**只要有一台"启用"的扫码枪未连接就变红**，
         /// 全部启用扫码枪都已连接才变绿；禁用（Enabled=false）不参与判定；
-        /// **没有任何启用的扫码枪时显示灰色**（同 PLC/相机灯"无设备/未判定"的初始灰），
-        /// 不表示故障也不表示断开。
+        /// **没有任何启用的扫码枪时隐藏本灯（V2.15.11 去灰）**——没有枪就没有状态可表示，
+        /// 灯直接不显示（Visible=false 不占 Dock 空间），绝不拿灰色冒充"无设备"。
         /// 【数据源】_scanners[i] 与 _config.Scanners[i] 下标一一对应（BuildServices 按配置
         /// 顺序创建实例，绝不跳过），"启用与否"以配置为准——因为 Enabled=false 的实例 Open()
         /// 直接返回 false 不建连，IsOpen 恒 false，若不加过滤会误报红灯。
@@ -1401,10 +1403,11 @@ namespace CommandCenter.Views
             }
             if (!anyEnabled)
             {
-                // 没有启用的扫码枪：灰色（同 PLC/相机灯初始灰，表示"无设备/未判定"而非故障）
-                lblScannerStatus.ForeColor = Color.FromArgb(150, 150, 150);
+                // 没有启用的扫码枪：隐藏灯（无设备不显示，勿用灰色/其它颜色冒充状态）
+                lblScannerStatus.Visible = false;
                 return;
             }
+            lblScannerStatus.Visible = true;
 
             lblScannerStatus.ForeColor = connected ? Color.FromArgb(46, 158, 107) // 绿=已连接
                                                     : Color.FromArgb(229, 72, 77);  // 红=未连接

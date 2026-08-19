@@ -111,10 +111,10 @@ namespace CommandCenter.Views
             this.pnlTitleBar.TabIndex = 0;
             // 
             // lblPlcStatus
-            // 
+            // PLC 连接状态灯（V1.12.11 起三态）：绿=主站已连入、黄=监听就绪等待主站、红=监听失败，
+            // 颜色由 MainForm.UpdatePlcStatus 在构造时立即上色（设计器不设灰色，避免任何"灰占位"）。
             this.lblPlcStatus.Dock = System.Windows.Forms.DockStyle.Right;
             this.lblPlcStatus.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
-            this.lblPlcStatus.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(150)))), ((int)(((byte)(150)))), ((int)(((byte)(150)))));
             this.lblPlcStatus.Location = new System.Drawing.Point(1292, 0);
             this.lblPlcStatus.Name = "lblPlcStatus";
             this.lblPlcStatus.Size = new System.Drawing.Size(96, 48);
@@ -127,12 +127,10 @@ namespace CommandCenter.Views
             // 扫码枪连接状态灯（V1.12.6）：样式与 PLC/相机灯完全一致——"● 扫码枪"圆点灯，
             // 位于标题栏右上 PLC 灯右侧。Dock.Right 布局"先 Add 的靠左"：本控件在 Controls.Add
             // 顺序里紧跟 lblPlcStatus（第 2 位），运行时相机灯最后 Add 排最右，故顺序为
-            // ●PLC | ●扫码枪 | ●相机N。初始灰色（150,150,150，同 PLC/相机灯设计器默认），
-            // 已连接变绿/未连接变红由 MainForm.RefreshScannerStatus 根据每台扫码枪
-            // ConnectionChanged 事件聚合刷新（全部启用都已连接才绿色，任一未连接即红）。
+            // ●PLC | ●扫码枪 | ●相机N。颜色由 MainForm.RefreshScannerStatus 聚合刷新（绿=全部
+            // 启用已连接、红=任一未连接；V2.15.11 起无任何启用扫码枪时隐藏本灯，设计器不设灰色）。
             this.lblScannerStatus.Dock = System.Windows.Forms.DockStyle.Right;
             this.lblScannerStatus.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
-            this.lblScannerStatus.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(150)))), ((int)(((byte)(150)))), ((int)(((byte)(150)))));
             this.lblScannerStatus.Location = new System.Drawing.Point(1292, 0);
             this.lblScannerStatus.Name = "lblScannerStatus";
             this.lblScannerStatus.Size = new System.Drawing.Size(96, 48);
@@ -141,12 +139,11 @@ namespace CommandCenter.Views
             this.lblScannerStatus.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
             // lblCamPlaceholder
-            // 相机连接状态灯的"设计器占位"：样式与动态相机灯一致（Dock=Right、96px、灰色）；
-            // 仅用于在 VS 设计器里提示这块区域，运行时被隐藏，不参与实际布局。
+            // 相机连接状态灯的"设计器占位"（Dock=Right、96px）：仅用于在 VS 设计器里提示这块区域，
+            // 运行时被隐藏，不参与实际布局。
             //
             this.lblCamPlaceholder.Dock = System.Windows.Forms.DockStyle.Right;
             this.lblCamPlaceholder.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
-            this.lblCamPlaceholder.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(150)))), ((int)(((byte)(150)))), ((int)(((byte)(150)))));
             this.lblCamPlaceholder.Location = new System.Drawing.Point(1392, 0);
             this.lblCamPlaceholder.Name = "lblCamPlaceholder";
             this.lblCamPlaceholder.Size = new System.Drawing.Size(96, 48);
