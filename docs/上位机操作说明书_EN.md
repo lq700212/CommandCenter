@@ -21,7 +21,7 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ Model:[U171 ▾]  Serial No.:[SN12345][Manual Entry] Total:0 OK:0 NG:0 [System Settings]  ●PLC ●Scanner ●Cam1 ●Cam2│
+│ Model:[U171 ▾]  Serial No.:[SN12345][Manual Entry] Total:0 OK:0 NG:0 [System Settings][中文] ●PLC ●Scanner ●Cam1 ●Cam2│
 ├──────────────────────────────────────────────────────────────────┤
 │  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐                    │
 │  │  W1  │ │  W2  │ │  W3  │ │  W4  │ │  W5  │   ← Inspection window matrix │
@@ -41,6 +41,7 @@ Explanations:
 | Button | **【Manual Entry】** | Used to manually enter or modify a barcode when the scanner fails to read it |
 | Title bar | **Total / OK / NG** | Inspection point count for **the current single workpiece**: OK = green, NG = red. It resets automatically to zero each time a new workpiece arrives |
 | Top-right | **● Dot lights** | Four lights: PLC, scanner, camera 1, camera 2. **Green = normal, red = problem** (PLC yellow = waiting for the master station, which is normal) |
+| Top-right | **Language switch** | The **中文/English** button at the far right of the title bar (the Chinese UI shows English, the English UI shows 中文). Click it to switch between Chinese and English instantly; it saves automatically and persists after restart |
 | Center | **Window matrix** | Each cell is the camera image of one inspection point. The latest image refreshes automatically after each shot; **a green border in the bottom-right of a cell = this point is OK, red border = NG** |
 | Bottom | **Status bar** | Shows what the system is doing right now: waiting for a scan, taking a photo, switching model, etc. |
 
@@ -123,6 +124,7 @@ E:\Images (image root directory)
 | **Scanner light red** | Scanner not connected | Check the scanner's cable/power; hold it up with 【Manual Entry】 per Section 5 |
 | **Camera light red** | Camera communication is down | Call an engineer (check the camera network cable / image-push configuration) |
 | **Window never shows an image** | The camera took the shot but the image didn't arrive | Call an engineer to look at it; don't keep triggering repeatedly |
+| **A single cell never takes a photo** | That cell is an "empty window" (no inspection point assigned) | Normal; nothing to do |
 
 ---
 
