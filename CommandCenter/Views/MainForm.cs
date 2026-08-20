@@ -18,7 +18,9 @@ namespace CommandCenter.Views
     /// ┌───────────────────────────────────────────────────────────────────┐
     /// │ 产品型号:[cmbModel▾] 序列号:[框][人工补录] | 总数:0 | [OK] | [NG] | [系统设置] │
     /// │                                        ●PLC ●扫码枪 ●上相机 ●下相机 │
-    /// │（相机灯/下拉显示配置名称：有名称显名称，无名称回退"相机N"即序号）       │
+    /// │（相机灯/下拉显示配置名称：有名称显名称，无名称回退"相机N"即序号；      │
+    /// │  ≤2台相机名限长10字符超出"…"截断、灯宽自适应，悬停看完整名/IP/状态；  │
+    /// │  ≥3台聚拢成"总标签+下拉"）                                           │
     /// ├───────────────────────────────────────────────────────────────────┤
     /// │  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐                  │
     /// │  │ W1   │ │ W2   │ │ W3   │ │ W4   │ │ W5   │                   │
@@ -342,10 +344,13 @@ namespace CommandCenter.Views
         /// <summary>
         /// 重建标题栏相机连接状态区（构造与热更都会调用）。按相机台数分两种模式（V1.10.0）：
         ///
-        /// 【≤2 台】保持既有逻辑：每台相机一个独立指示灯"● 相机N"，直接显示在标题栏，
-        /// 绿=已连接、红=断连。先移除旧的（热更后相机台数可能变化，必须整套重建），
-        /// 再按当前台数正序 Add：Dock.Right 布局是"先 Add 的靠左、后 Add 的靠右"，
+        /// 【≤2 台】每台相机一个独立指示灯"● 相机名"，直接显示在标题栏，与 PLC/扫码枪灯一起
+        /// 从右往左排成一排（绿=已连接、红=断连）。先移除旧的（热更后相机台数可能变化，
+        /// 必须整套重建），再按当前台数正序 Add：Dock.Right 布局是"先 Add 的靠左、后 Add 的靠右"，
         /// 正序循环得到 相机1..相机N 依次排在 PLC 灯右侧。
+        /// 【V2.15.15 自适应 + 限长】灯宽不再固定 96px，按"● + 名字"整段文本实测宽度自适应
+        /// （名字短灯窄、名字长灯宽）；相机名（只有它能自定义，PLC/扫码枪名固定）限长 10 字符、
+        /// 超出截断加 "..."（TruncateIndicatorText），悬停 ToolTip 补全完整名字+IP+连/断状态。
         ///
         /// 【≥3 台】聚拢成两个控件（现场相机多时 96px/台 的灯阵会占满标题栏）：
         ///   - _lblCamAggregate（总状态标签）：只有所有相机都连接才绿色，任一断连就红色；
@@ -387,17 +392,25 @@ namespace CommandCenter.Views
 
             if (_cameras.Count <= 2)
             {
-                // 小台数模式：每台一个独立指示灯（与历史行为一致）
+                // 小台数模式：每台一个独立指示灯（与历史行为一致）。
+                // V2.15.15：宽度自适应 + 相机名限长——只有相机名能自定义（PLC/扫码枪名固定），
+                // 现场自定义名（尤其英文）可能很长，固定 96px 的灯阵会占满标题栏。现在按
+                // "● + 截断后名字"整段文本实测宽度自适应（TextRenderer.MeasureText），
+                // 相机名超过 10 字符截断加 "..."（TruncateIndicatorText，名字本身 ≤10）；
+                // 悬停 ToolTip 补全完整名字 + IP + 连/断状态，弥补截断丢失的信息。
                 _lblCamStatuses = new Label[_cameras.Count];
+                var camFont = new Font("Microsoft YaHei", 10F, FontStyle.Bold);
                 for (int i = 0; i < _cameras.Count; i++)
                 {
+                    string name = TruncateIndicatorText(CamDisplayName(i), 10); // 相机名限长 10（只限名字，圆点前缀不算）
+                    string text = $"● {name}";
                     var lbl = new Label
                     {
                         Dock = DockStyle.Right,
-                        Width = 96,
+                        Width = TextRenderer.MeasureText(text, camFont).Width + 8, // 按文本实测宽 + 左右各 4px 留白
                         TextAlign = ContentAlignment.MiddleRight,
-                        Text = $"● {CamDisplayName(i)}",
-                        Font = new Font("Microsoft YaHei", 10F, FontStyle.Bold)
+                        Text = text,
+                        Font = camFont
                     };
                     pnlTitleBar.Controls.Add(lbl);
                     _lblCamStatuses[i] = lbl;
@@ -405,6 +418,9 @@ namespace CommandCenter.Views
                     // _cameras 已由 BuildServices 建好，可直接读 IsConnected 出第一手颜色，
                     // 后续 ConnectionChanged 事件继续刷新，行为不变。
                     UpdateDeviceStatus(lbl, _cameras[i].IsConnected);
+                    // 悬停补全：文本截断后名字可能不全，ToolTip 显示完整名+IP+连/断
+                    if (_camTip == null) _camTip = new ToolTip();
+                    _camTip.SetToolTip(lbl, CamLightTipText(i));
                 }
             }
             else
@@ -467,6 +483,19 @@ namespace CommandCenter.Views
         }
 
         /// <summary>
+        /// 指示灯文本限长截断（V2.15.15）：文本总长超过 maxLen 时，保留前 maxLen-3 个字符 + "..."，
+        /// 保证最终长度 ≤ maxLen。用于相机名限长（只有相机名能自定义，PLC/扫码枪名固定不截断），
+        /// 默认 10 字符、不超过 10；空/空串原样返回（防御配置被手改成 null 名字时崩溃）。
+        /// </summary>
+        private static string TruncateIndicatorText(string text, int maxLen = 10)
+        {
+            if (string.IsNullOrEmpty(text)) return text ?? "";
+            if (text.Length <= maxLen) return text;
+            if (maxLen <= 3) return text.Substring(0, maxLen);
+            return text.Substring(0, maxLen - 3) + "...";
+        }
+
+        /// <summary>
         /// 第 i 台相机的显示名（V1.12.23）：有配置名称（上相机/下相机/…）用名称，
         /// 无名称回退"相机N"（V2.13.4 起优先 CameraConfig.CameraId 真编号，其次行序 i+1）。
         /// 所有主界面展示相机的文案（相机灯/悬停/下拉）都应走这里，保证"编号"唯一对应。
@@ -486,13 +515,27 @@ namespace CommandCenter.Views
         }
 
         /// <summary>
+        /// 第 i 台相机灯/下拉项的悬停明细文案（V2.15.15 抽出共用）：完整名 + IP + 连/断状态。
+        /// 文本截断限长只作用于"灯/下拉项显示的文本"，悬停明细保留完整名（辅助信息不截断）；
+        /// 含 I18n 状态文案，切语言后由 ApplyLanguage 重新调用刷新。构建/热更/语言刷新三处共用。
+        /// </summary>
+        private string CamLightTipText(int i)
+        {
+            if (i < 0 || i >= _cameras.Count) return "";
+            return $"{CamDisplayName(i)} {_cameras[i].IpAddressOnly}：" +
+                   (_cameras[i].IsConnected ? I18n.T("已连接", "Connected") : I18n.T("断连", "Disconnected"));
+        }
+
+        /// <summary>
         /// 生成下拉列表第 i 台相机的显示文案："上相机  19.87.6.213"（V1.12.22 起带名称）。
-        /// 名称来自 CameraConfig.Name（配置缺省为空则退回 "相机N  IP"），状态用圆点表
+        /// 名称来自 CameraConfig.Name（配置缺省为空则退回 "相机N  IP"），状态用圆点表。
+        /// 【V2.15.15 名字限长】与 ≤2 台独立灯一致：相机名超 10 字符截断加 "..."（IP 保留，
+        /// 悬停/明细里仍显示完整名）——长英文名不把下拉框撑得太宽。
         /// </summary>
         private string CamOverviewLabel(int i)
         {
             if (i < 0 || i >= _cameras.Count) return "";
-            return $"{CamDisplayName(i)}  {_cameras[i].IpAddressOnly}";
+            return $"{TruncateIndicatorText(CamDisplayName(i), 10)}  {_cameras[i].IpAddressOnly}";
         }
 
         /// <summary>
@@ -1599,7 +1642,13 @@ namespace CommandCenter.Views
             if (_lblCamStatuses != null)
                 for (int i = 0; i < _lblCamStatuses.Length; i++)
                     if (_lblCamStatuses[i] != null)
-                        _lblCamStatuses[i].Text = $"● {CamDisplayName(i)}";
+                    {
+                        // V2.15.15：重设文本同样要限长（此前语言切换/热更用未截断的 CamDisplayName
+                        // 覆盖，把创建时的截断名顶回完整名，"截短没生效"的根因）；ToolTip 同语言刷新。
+                        _lblCamStatuses[i].Text = $"● {TruncateIndicatorText(CamDisplayName(i), 10)}";
+                        _camTip = _camTip ?? new ToolTip();
+                        _camTip.SetToolTip(_lblCamStatuses[i], CamLightTipText(i));
+                    }
             if (_lblCamAggregate != null) _lblCamAggregate.Text = I18n.T("● 相机", "● Camera");
             if (_camTip != null && _lblCamAggregate != null)
                 _camTip.SetToolTip(_lblCamAggregate, I18n.T("相机连接状态明细", "Camera connection detail"));
