@@ -341,7 +341,7 @@ namespace CommandCenter.Views
             this.tip.SetToolTip(this.txtLevelName,
                 "当前选中层级的名字/规则，直接改文字就同步到左侧列表。\r\n支持占位符：{年月日}整个日期目录、{SN}序列号、{OKNG}→OK/NG 两个分支目录、{点位}点位号。");
             this.tip.SetToolTip(this.cmbPlaceholder,
-                "选中的占位符会插入到当前正在编辑的框里（目录层级名或文件名）。\r\n{年月日}→如 2026年08月11日  {SN}→序列号  {OKNG}→OK 或 NG 目录  {点位}→存图点位号  {时间}→毫秒时间戳");
+                "选中的占位符会插入到当前正在编辑的框里（目录层级名或文件名）。\r\n{年月日}→如 2026.08.20  {SN}→序列号  {OKNG}→OK 或 NG 目录  {点位}→存图点位号  {时间}→毫秒时间戳");
             this.tip.SetToolTip(this.btnInsertPh,
                 "把下拉框选中的占位符插到当前编辑框的光标位置，\r\n插入后光标自动移到其后。");
             this.tip.SetToolTip(this.btnAddLevel,

@@ -183,7 +183,7 @@ ProductModelIndexAddress/ProductModelAddress/ProductModelLen/ModelIndexes`）+ �
    在 DirTreeEditForm"存图保留天数"处可调）控制存图目录保留天数，`MainForm.BuildServices` 建完
    ImageStore 即调 `StartPeriodicCleanup()` 起后台定时器（启动 30 秒后首次、每天一次，线程池线程不卡 UI）；
    `RunCleanupOnce` 只扫 `SaveRootDir` 顶层目录：**快速路径**第一层目录名是标准日期
-   （`{年月日}` 渲染的"2026年08月11日"或"20260811"）按目录名直接判定过期即整棵删；
+   （`{年月日}` 渲染的"2026.08.20"（V2.15.12 起点分隔）或"20260811"）按目录名直接判定过期即整棵删；
    **通用路径**目录名非日期时递归查整棵子树**所有文件**都早于阈值才删、还有新图保留（防误删）；
    单目录失败记日志跳过；**存图根目录是盘符根（如 `E:\`）直接放弃清理并告警，绝不删盘根子目录**。
    清理只动保存根目录过期目录、绝不动相机 FTP 取图目录；`Dispose` 停定时器（热更/关窗自动停）。

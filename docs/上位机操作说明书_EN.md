@@ -102,7 +102,7 @@ The scanner failed to read a code this time (dirty barcode / too far away / loos
 
 ```
 E:\Images (image root directory)
- └─ 2026年08月17日 (date)
+ └─ 2026.08.20 (date, dot-separated)
      └─ SN12345 (barcode number)
          └─ Upper camera (which camera took it)
              ├─ OK (this point passed inspection)

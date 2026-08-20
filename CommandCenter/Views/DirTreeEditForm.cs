@@ -79,17 +79,23 @@ namespace CommandCenter.Views
         ApplyLanguage();                // V2.15.0 国际化：按当前语言初始化文本
     }
 
-        /// <summary>把配置填进界面：根目录、目录层级列表、文件名规则、时间戳后缀、保留天数。</summary>
+        /// <summary>
+        /// 占位符"显示层本地化"（V2.15.12）：统一走 PlaceholderLocalizer（Utils/PlaceholderLocalizer.cs）。
+        /// 核心契约：配置存储与 ImageStore.RenderTemplate 渲染【始终用中文占位符】（{年月日}/{点位}…），
+        /// 英文界面只是"给人看"时翻译成 {Date}/{Station}…，绝不把英文占位符写进配置文件——
+        /// 否则 RenderTemplate 不识别、归档路径会变成字面 "{Date}" 目录（脏配置）。SettingsForm 文件名框同用此类。
+        /// </summary>
         private void LoadFromConfig()
         {
             txtSaveRootDir.Text = _cfg.SaveRootDir;
 
-            // 层级列表：直接用 SubDirs（模型默认已带三层，首次打开即所见即所得）
+            // 层级列表：直接用 SubDirs（模型默认已带三层，首次打开即所见即所得）；
+            // 英文界面下显示时把中文占位符翻成英文（保存时还原，见 OnOk）
             var levels = _cfg.SubDirs ?? new List<string>();
             foreach (var lvl in levels)
-                lstLevels.Items.Add(lvl);
+                lstLevels.Items.Add(PlaceholderLocalizer.ToDisplay(lvl));
 
-            txtFileNameTpl.Text = _cfg.FileNameTemplate;
+            txtFileNameTpl.Text = PlaceholderLocalizer.ToDisplay(_cfg.FileNameTemplate);
 
             // V2.14.12：时间戳后缀开关与存图保留天数（KeepDays，0 = 不自动清理）
             chkTimestampSuffix.Checked = _cfg.FileTimestampSuffix;
@@ -177,8 +183,9 @@ namespace CommandCenter.Views
         /// <summary>追加一级目录（默认给 {SN}，现场按需改）。若列表空则给 {年月日} 起头。</summary>
         private void AddLevel(string defaultValue)
         {
+            // 默认值先经 ToDisplay：英文界面下 {年月日} 以 {Date} 形式入列表，与人眼看到的一致
             string dflt = string.IsNullOrEmpty(defaultValue)
-                ? (lstLevels.Items.Count == 0 ? "{年月日}" : "{SN}")
+                ? PlaceholderLocalizer.ToDisplay(lstLevels.Items.Count == 0 ? "{年月日}" : "{SN}")
                 : defaultValue;
             int idx = lstLevels.Items.Add(dflt);
             lstLevels.SelectedIndex = idx;
@@ -197,9 +204,9 @@ namespace CommandCenter.Views
             int insertAt = idx < 0
                 ? (above ? 0 : lstLevels.Items.Count)
                 : (above ? idx : idx + 1);
-            lstLevels.Items.Insert(insertAt, "{SN}");
+            lstLevels.Items.Insert(insertAt, PlaceholderLocalizer.ToDisplay("{SN}"));
             lstLevels.SelectedIndex = insertAt;
-            txtLevelName.Text = "{SN}";
+            txtLevelName.Text = PlaceholderLocalizer.ToDisplay("{SN}");
         }
 
         /// <summary>删除选中的层级；删空则补一级默认（避免保存出空结构）。</summary>
@@ -247,8 +254,11 @@ namespace CommandCenter.Views
         /// </summary>
         private void RefreshPreview()
         {
-            var levels = lstLevels.Items.Cast<string>().ToList();
-            string fileRule = txtFileNameTpl.Text.Trim();
+            // 预览渲染走 ImageStore.RenderTemplate，它【只认中文占位符】；
+            // 而界面列表/文件名框显示的是英文占位符（英文界面），必须先还原成中文再渲染，否则预览会
+            // 把 {Date} 当字面目录名、树里出现 "{Date}" 而非实际日期目录。
+            var levels = lstLevels.Items.Cast<string>().Select(PlaceholderLocalizer.ToStorage).ToList();
+            string fileRule = PlaceholderLocalizer.ToStorage(txtFileNameTpl.Text.Trim());
             string root = txtSaveRootDir.Text.Trim();
             string sn = "SN-0001";          // 示例序列号
             int station = 1;                // 示例点位号
@@ -264,7 +274,9 @@ namespace CommandCenter.Views
                 rootNode.Expand();
 
                 // 递归构建：每级目录一个节点，{OKNG} 产生两个并列分支
-                BuildPreviewBranch(rootNode, levels, 0, fileRule, now, sn, station);
+                // 示例相机名随语言：英文界面预览树里 {相机} 渲染成 "Upper Camera"，不出现中文
+                string camName = I18n.Language == "en-US" ? "Upper Camera" : "上相机";
+                BuildPreviewBranch(rootNode, levels, 0, fileRule, now, sn, station, camName);
 
                 tvPreview.ExpandAll();      // 全部展开，让结构一目了然
             }
@@ -280,12 +292,12 @@ namespace CommandCenter.Views
         /// 遇到包含 {OKNG} 的层会生成 OK/NG 两个并列目录，各自带完整子树。
         /// </summary>
         private void BuildPreviewBranch(TreeNode parent, List<string> levels, int levelIndex,
-                                        string fileRule, DateTime now, string sn, int station)
+                                        string fileRule, DateTime now, string sn, int station, string camName)
         {
             if (levelIndex >= levels.Count)
             {
                 // 目录层级已到底：追加图片文件叶子（按文件名规则渲染，默认 {点位}.png）
-                string fname = ImageStore.RenderTemplate(fileRule, now, sn, true, station, "上相机");
+                string fname = ImageStore.RenderTemplate(fileRule, now, sn, true, station, camName);
                 if (string.IsNullOrWhiteSpace(fname))
                     fname = "IMG_" + now.ToString("yyyyMMdd_HHmmss_fff") + "_1";
                 // V2.14.12：勾选"时间戳后缀"时预览也追加 _时间戳，与真实归档命名一致
@@ -298,22 +310,22 @@ namespace CommandCenter.Views
 
             // 渲染本层目录名：OK/NG 各渲染一次。若结果相同（本层不含 {OKNG}）则只建一个节点；
             // 不同（含 {OKNG}）则建两个并列节点，各自递归展开完整子树。
-            string okName = ImageStore.RenderTemplate(levels[levelIndex], now, sn, true, station, "上相机");
-            string ngName = ImageStore.RenderTemplate(levels[levelIndex], now, sn, false, station, "上相机");
+            string okName = ImageStore.RenderTemplate(levels[levelIndex], now, sn, true, station, camName);
+            string ngName = ImageStore.RenderTemplate(levels[levelIndex], now, sn, false, station, camName);
 
             if (okName == ngName)
             {
                 // 普通层：单分支继续
                 TreeNode child = parent.Nodes.Add(string.IsNullOrWhiteSpace(okName) ? "(空)" : okName);
-                BuildPreviewBranch(child, levels, levelIndex + 1, fileRule, now, sn, station);
+                BuildPreviewBranch(child, levels, levelIndex + 1, fileRule, now, sn, station, camName);
             }
             else
             {
                 // 分支层（{OKNG}）：OK、NG 并列两个目录，各自带完整子树
                 TreeNode okNode = parent.Nodes.Add(okName);
-                BuildPreviewBranch(okNode, levels, levelIndex + 1, fileRule, now, sn, station);
+                BuildPreviewBranch(okNode, levels, levelIndex + 1, fileRule, now, sn, station, camName);
                 TreeNode ngNode = parent.Nodes.Add(ngName);
-                BuildPreviewBranch(ngNode, levels, levelIndex + 1, fileRule, now, sn, station);
+                BuildPreviewBranch(ngNode, levels, levelIndex + 1, fileRule, now, sn, station, camName);
             }
         }
 
@@ -344,16 +356,17 @@ namespace CommandCenter.Views
                 }
             }
 
-            // 收集层级：清掉空白项，避免存出空目录层级；删空则保留默认 {年月日} 兜底
+            // 收集层级：清掉空白项，避免存出空目录层级；删空则保留默认 {年月日} 兜底。
+            // 存进配置前必须把英文界面显示的英文占位符还原成中文（RenderTemplate 只认中文）。
             var levels = lstLevels.Items.Cast<string>()
                 .Where(s => !string.IsNullOrWhiteSpace(s))
-                .Select(s => s.Trim())
+                .Select(s => PlaceholderLocalizer.ToStorage(s.Trim()))
                 .ToList();
             if (levels.Count == 0) levels.Add("{年月日}");
 
             _cfg.SaveRootDir = txtSaveRootDir.Text.Trim();
             _cfg.SubDirs = levels;
-            _cfg.FileNameTemplate = txtFileNameTpl.Text.Trim();
+            _cfg.FileNameTemplate = PlaceholderLocalizer.ToStorage(txtFileNameTpl.Text.Trim());
 
             // V2.14.12：时间戳后缀开关 + 存图保留天数（后台定期清理用，0 = 不自动清理）
             _cfg.FileTimestampSuffix = chkTimestampSuffix.Checked;
@@ -365,7 +378,8 @@ namespace CommandCenter.Views
         /// <summary>
         /// V2.15.0 国际化：按当前语言刷新本窗体全部界面文字（标签/按钮/悬停气泡/标题）。
         /// 在构造函数末尾调用（模态对话框打开瞬间按当前语言初始化；模态期间语言不会变化）。
-        /// 占位符下拉/预览树内容是配置数据（含 {年月日} 等占位符），不随语言翻译。
+        /// 占位符下拉/层级列表/文件名框的占位符内容 V2.15.12 起【随语言显示】（英文界面翻成
+        /// {Date}/{Station}…，保存时还原中文，见 PlaceholderLocalizer）；预览树渲染结果仍是真实归档目录名。
         /// </summary>
         private void ApplyLanguage()
         {
@@ -396,16 +410,16 @@ namespace CommandCenter.Views
             tip.SetToolTip(btnBrowse, I18n.T("选择图片保存根目录的文件夹。", "Pick the root folder for saved images."));
             tip.SetToolTip(lblLevels, I18n.T(
                 "存图目录从根目录起按此列表逐级创建。\r\n每级可以写固定名字（如 OK），也可以是生成规则（如 {年月日}）。\r\n顺序即建目录顺序：从上到下。",
-                "Save sub-directories are created top-to-bottom from the root.\r\nEach level can be a fixed name (e.g. OK) or a rule (e.g. {年月日})."));
+                "Save sub-directories are created top-to-bottom from the root.\r\nEach level can be a fixed name (e.g. OK) or a rule (e.g. {Date})."));
             tip.SetToolTip(lstLevels, I18n.T(
                 "目录层级列表（从上到下逐级建目录）。\r\n双击一项可直接进入编辑；\r\n支持占位符：{年月日}整个日期目录、{SN}序列号、{OKNG}→OK/NG 两个分支目录、{点位}点位号。",
-                "Directory level list (created top to bottom).\r\nDouble-click an item to edit it.\r\nPlaceholders: {年月日} date dir, {SN} serial, {OKNG}→OK/NG branches, {点位} point number."));
+                "Directory level list (created top to bottom).\r\nDouble-click an item to edit it.\r\nPlaceholders: {Date} date dir, {SN} serial, {OKNG}→OK/NG branches, {Station} point number."));
             tip.SetToolTip(txtLevelName, I18n.T(
                 "当前选中层级的名字/规则，直接改文字就同步到左侧列表。\r\n支持占位符：{年月日}整个日期目录、{SN}序列号、{OKNG}→OK/NG 两个分支目录、{点位}点位号。",
-                "Name/rule of the selected level; editing it updates the list at once.\r\nPlaceholders: {年月日} date dir, {SN} serial, {OKNG}→OK/NG branches, {点位} point number."));
+                "Name/rule of the selected level; editing it updates the list at once.\r\nPlaceholders: {Date} date dir, {SN} serial, {OKNG}→OK/NG branches, {Station} point number."));
             tip.SetToolTip(cmbPlaceholder, I18n.T(
-                "选中的占位符会插入到当前正在编辑的框里（目录层级名或文件名）。\r\n{年月日}→如 2026年08月11日  {SN}→序列号  {OKNG}→OK 或 NG 目录  {点位}→存图点位号  {时间}→毫秒时间戳",
-                "The selected placeholder is inserted into the box being edited (level name or file name).\r\n{年月日}→e.g. 2026-08-11  {SN}→serial  {OKNG}→OK or NG dir  {点位}→point number  {时间}→ms timestamp"));
+                "选中的占位符会插入到当前正在编辑的框里（目录层级名或文件名）。\r\n{年月日}→如 2026.08.20  {SN}→序列号  {OKNG}→OK 或 NG 目录  {点位}→存图点位号  {时间}→毫秒时间戳",
+                "The selected placeholder is inserted into the box being edited (level name or file name).\r\n{Date}→e.g. 2026.08.20  {SN}→serial  {OKNG}→OK or NG dir  {Station}→point number  {Time}→ms timestamp"));
             tip.SetToolTip(btnInsertPh, I18n.T(
                 "把下拉框选中的占位符插到当前编辑框的光标位置，\r\n插入后光标自动移到其后。",
                 "Insert the selected placeholder at the cursor position of the current edit box."));
@@ -425,7 +439,7 @@ namespace CommandCenter.Views
             tip.SetToolTip(btnDown, I18n.T("下移选中的层级，调整目录顺序（顺序即建目录顺序）。", "Move the selected level down (order = creation order)."));
             tip.SetToolTip(txtFileNameTpl, I18n.T(
                 "图片文件名规则（默认 {点位}，如 1.png）。\r\n占位符：{点位}点位号、{SN}序列号、{OKNG}→OK 或 NG、{年}/{月}/{日}日期、{时间}毫秒时间戳；\r\n其余文字原样保留。",
-                "Image file name rule (default {点位}, e.g. 1.png).\r\nPlaceholders: {点位} point, {SN} serial, {OKNG} OK/NG, {年}/{月}/{日} date, {时间} ms timestamp; other text kept as-is."));
+                "Image file name rule (default {Station}, e.g. 1.png).\r\nPlaceholders: {Station} point, {SN} serial, {OKNG} OK/NG, {Year}/{Month}/{Day} date, {Time} ms timestamp; other text kept as-is."));
             tip.SetToolTip(lblKeepDays, I18n.T(
                 "存图目录只保留最近 N 天，更早的由后台定期清理删除（默认 30 天）。\r\n0 = 不自动清理。\r\n清理只动\"保存根目录\"下的过期日期目录，不影响相机 FTP 取图目录。",
                 "Keep saved images for the last N days; older ones are cleaned up by a background task (default 30).\r\n0 = no auto cleanup.\r\nOnly the save root's expired date dirs are cleaned, never the camera FTP dirs."));
@@ -441,6 +455,16 @@ namespace CommandCenter.Views
             tip.SetToolTip(tvPreview, I18n.T(
                 "实时预览：按当前规则用示例数据（今天日期 / SN-0001 / 点位1）\r\n渲染出将来落盘的完整目录树，OK 和 NG 各展示一棵。",
                 "Live preview: renders the future directory tree with sample data (today / SN-0001 / point 1),\r\nshowing an OK tree and an NG tree."));
+
+            // 占位符下拉项按语言重建（V2.15.12）：英文界面显示英文占位符 {Date}/{Station}…，
+            // 插入到文本框的也是英文显示值（保存时由 OnOk/PlaceholderLocalizer.ToStorage 统一还原成中文，
+            // 绝不让英文占位符进配置/渲染链路）；中文界面维持设计器原文。下拉不挂选择事件，重建无副作用。
+            cmbPlaceholder.Items.Clear();
+            if (I18n.Language == "en-US")
+                cmbPlaceholder.Items.AddRange(new object[] { "{Date}", "{Year}", "{Month}", "{Day}", "{SN}", "{OKNG}", "{Station}", "{Camera}", "{Time}" });
+            else
+                cmbPlaceholder.Items.AddRange(new object[] { "{年月日}", "{年}", "{月}", "{日}", "{SN}", "{OKNG}", "{点位}", "{相机}", "{时间}" });
+            cmbPlaceholder.SelectedIndex = 0;
 
             ApplyLayoutForLanguage();   // V2.15.7：布局按语言区分布局（仅英文界面调整坐标）
         }

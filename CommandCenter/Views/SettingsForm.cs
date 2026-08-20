@@ -124,7 +124,8 @@ namespace CommandCenter.Views
             // 图片保存根目录、目录结构与文件名模板（目录结构用只读预览，实际编辑进可视化对话框）
             txtSaveDir.Text = _cfg.Image.SaveRootDir;
             RefreshDirPreview();
-            txtFileNameTpl.Text = _cfg.Image.FileNameTemplate;
+            // V2.15.12：文件名模板框英文界面显示英文占位符（如 {Station}），保存时还原中文（见 OnSave）
+            txtFileNameTpl.Text = PlaceholderLocalizer.ToDisplay(_cfg.Image.FileNameTemplate);
             // 相机表格：先建列，再逐行填数据
             SetupCameraGridColumns();
             LoadCameraRows();
@@ -217,7 +218,8 @@ namespace CommandCenter.Views
         private void RefreshDirPreview()
         {
             var dirs = _cfg.Image.SubDirs ?? new List<string>();
-            string cur = dirs.Count > 0 ? string.Join("/", dirs) : I18n.T("（未配置）", "(not configured)");
+            // V2.15.12：英文界面目录结构预览同步显示英文占位符（与 DirTreeEditForm 同一 PlaceholderLocalizer）
+            string cur = dirs.Count > 0 ? string.Join("/", dirs.Select(PlaceholderLocalizer.ToDisplay)) : I18n.T("（未配置）", "(not configured)");
             // V2.15.0 国际化：前缀文案双语，动态"当前结构"拼接在后（与语言无关的部分保持原文）
             tip.SetToolTip(btnEditDirs, I18n.T(
                 "可视化编辑存图目录结构（目录层级列表 + 文件名规则），并实时预览 OK/NG 落盘路径。\r\n当前结构：" + cur,
@@ -776,7 +778,7 @@ namespace CommandCenter.Views
                 "Root directory for saved images (absolute path).\r\nSub-structure is created per the levels in Configure Dirs..."));
             tip.SetToolTip(txtFileNameTpl, I18n.T(
                 "图片文件名规则，占位符会自动替换：\r\n{点位}→窗口点位号（如 1.png）  {SN}→序列号  {OKNG}→OK 或 NG\r\n{年}/{月}/{日}→日期  {时间}→毫秒时间戳；其余文字原样保留。\r\n目录结构里的层级同样支持这些占位符。",
-                "Image file name rule; placeholders are replaced automatically:\r\n{点位}=window point (e.g. 1.png)  {SN}=serial  {OKNG}=OK or NG\r\n{年}/{月}/{日}=date  {时间}=ms timestamp; other text is kept as-is.\r\nDirectory levels support the same placeholders."));
+                "Image file name rule; placeholders are replaced automatically:\r\n{Station}=window point (e.g. 1.png)  {SN}=serial  {OKNG}=OK or NG\r\n{Year}/{Month}/{Day}=date  {Time}=ms timestamp; other text is kept as-is.\r\nDirectory levels support the same placeholders."));
             tip.SetToolTip(btnAddCam, I18n.T(
                 "在列表末尾添加一台相机（默认值可直接改 IP / 端口 / FTP 上传目录）。",
                 "Add a camera at the end of the list (edit IP / port / FTP dir as needed)."));
@@ -893,7 +895,8 @@ namespace CommandCenter.Views
             // 这里按当前全局语言兜底写盘，保证任何保存动作都落一次语言配置）
             _cfg.Language = I18n.Language;
             _cfg.Image.SaveRootDir = txtSaveDir.Text.Trim();
-            _cfg.Image.FileNameTemplate = txtFileNameTpl.Text.Trim();
+            // V2.15.12：文件名模板框英文界面显示英文占位符，保存前还原成中文（RenderTemplate 只认中文）
+            _cfg.Image.FileNameTemplate = PlaceholderLocalizer.ToStorage(txtFileNameTpl.Text.Trim());
             // 目录结构由 DirTreeEditForm 直接写入 _cfg.Image.SubDirs，这里不用回写；
             // 未打开过对话框则保持 SubDirs 原值（首次为模型默认的三层）。
 

@@ -34,8 +34,9 @@ namespace CommandCenter.Services
     ///   存图目录只保留最近 KeepDays 天的内容（默认 30 天，0 = 不自动清理）。
     ///   上位机启动后由 MainForm 调 StartPeriodicCleanup() 启动后台定时器（启动后 30 秒跑第一次，
     ///   之后每 24 小时一次），在【线程池线程】上扫描 SaveRootDir 的【顶层子目录】：
-    ///     - 快速路径：目录名是标准日期（{年月日} 渲染的 "2026年08月11日" 或 "20260811"），
-    ///       日期早于保留阈值 → 整棵目录连同子目录一起删除（默认结构第一层就是日期目录）；
+///   - 快速路径：目录名是标准日期（{年月日} 渲染的日期目录名——V2.15.12 起 "2026.08.20"
+    ///     点分隔，历史兼容 "2026年08月11日" 与紧凑 "20260811"），
+    ///     日期早于保留阈值 → 整棵目录连同子目录一起删除（默认结构第一层就是日期目录）；
     ///     - 通用路径：目录名不是日期（现场自定义了层级结构）→ 递归扫描整棵子树，
     ///       只要子树里【所有文件】的修改时间都早于阈值才删除，否则保留（防误删仍有新图）。
     ///   删除全程后台执行、不占 UI 线程；且只动 SaveRootDir 下顶层目录，绝不动相机 FTP 取图目录。
@@ -402,8 +403,9 @@ namespace CommandCenter.Services
 
         /// <summary>
         /// 判断一个目录是否"整棵子树都已过期"（即可以整体删除）。
-        /// 【快速路径】目录名是标准日期（默认结构第一层就是 {年月日} 渲染的 "2026年08月11日"
-        ///   或紧凑 "20260811"）：日期目录里的图都是当天拍的，目录名即最后写入日期，
+        /// 【快速路径】目录名是标准日期（默认结构第一层就是 {年月日} 渲染的日期目录名：
+        ///   V2.15.12 起 "2026.08.20" 点分隔，历史兼容 "2026年08月11日" 与紧凑 "20260811"）：
+        ///   日期目录里的图都是当天拍的，目录名即最后写入日期，
         ///   日期早于保留阈值直接判定过期——O(1) 判定，不用遍历几千个文件。
         /// 【通用路径】目录名不是日期（现场自定义了层级，如顶层是 {SN} 或 {相机}）：
         ///   递归扫描整棵子树找【所有文件】的最新修改时间，最新文件都早于阈值才算过期。
@@ -421,20 +423,27 @@ namespace CommandCenter.Services
         }
 
         /// <summary>
-        /// 解析标准日期目录名："{年月日}" 渲染的 "2026年08月11日"，或紧凑 "20260811"。
-        /// 解析失败返回 false（目录名不是日期，交由通用路径判定）。
+        /// 解析标准日期目录名："{年月日}" 渲染的 "2026.08.20"（V2.15.12 新格式）、
+        /// 历史 "2026年08月11日"、或紧凑 "20260811"。解析失败返回 false（目录名不是日期，
+        /// 交由通用路径判定）。
         /// </summary>
         private static bool TryParseDirDate(string name, out DateTime date)
         {
             date = default;
             if (string.IsNullOrWhiteSpace(name)) return false;
-            // 格式1：2026年08月11日（ImageStore.RenderTemplate 的 {年月日} 默认渲染）
-            var m = System.Text.RegularExpressions.Regex.Match(
-                name, @"^(\d{4})年(\d{2})月(\d{2})日$");
-            if (m.Success)
+            // 格式1：2026.08.20（ImageStore.RenderTemplate 的 {年月日} V2.15.12 起渲染，点分隔）
+            var m1 = System.Text.RegularExpressions.Regex.Match(
+                name, @"^(\d{4})\.(\d{2})\.(\d{2})$");
+            if (m1.Success)
                 return DateTime.TryParse(string.Format("{0}-{1}-{2}",
-                    m.Groups[1].Value, m.Groups[2].Value, m.Groups[3].Value), out date);
-            // 格式2：20260811（紧凑日期）
+                    m1.Groups[1].Value, m1.Groups[2].Value, m1.Groups[3].Value), out date);
+            // 格式2：2026年08月11日（{年月日} 旧版渲染，现场已有存量目录，清理仍须兼容）
+            var m2 = System.Text.RegularExpressions.Regex.Match(
+                name, @"^(\d{4})年(\d{2})月(\d{2})日$");
+            if (m2.Success)
+                return DateTime.TryParse(string.Format("{0}-{1}-{2}",
+                    m2.Groups[1].Value, m2.Groups[2].Value, m2.Groups[3].Value), out date);
+            // 格式3：20260811（紧凑日期）
             if (name.Length == 8 && int.TryParse(name, out int v) && v > 19000000)
                 return DateTime.TryParseExact(name, "yyyyMMdd",
                     System.Globalization.CultureInfo.InvariantCulture,
@@ -610,7 +619,8 @@ namespace CommandCenter.Services
 
         /// <summary>
         /// 渲染模板：替换全部占位符。未识别的 {xxx} 原样保留（由现场自己控制，写错也只是变成路径字符）。
-        /// {年月日} 是一个整体目录名（如"2026年08月11日"），不是年/月/日三级目录。
+        /// {年月日} 是一个整体目录名（V2.15.12 起为 "yyyy.MM.dd" 点分隔，如"2026.08.20"），
+        /// 不是年/月/日三级目录。
         /// {相机} 渲染成相机名（cameraName）；空/未传 → "未知相机"（防目录层为空、也防两级合并）。
         /// 设为 internal：目录结构配置对话框（DirTreeEditForm）也要用同样的渲染规则做实时预览。
         /// </summary>
@@ -619,7 +629,7 @@ namespace CommandCenter.Services
         {
             if (string.IsNullOrWhiteSpace(template)) return "";
             return template
-                .Replace("{年月日}", now.ToString("yyyy年MM月dd日"))
+                .Replace("{年月日}", now.ToString("yyyy.MM.dd"))   // V2.15.12：日期目录改点分隔 2026.08.20
                 .Replace("{年}", now.ToString("yyyy"))
                 .Replace("{月}", now.ToString("MM"))
                 .Replace("{日}", now.ToString("dd"))
