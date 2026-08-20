@@ -38,7 +38,7 @@ namespace CommandCenter.Views
     /// │ ┌──────────────────────────────┐                                   │
     /// │ │ 窗口↔点位矩阵（格子：上=窗口编号 下=相机·点位，随型号联动）          │
     /// │ │ ┌──────┬──────┬──────┬──────┐                                    │
-    /// │ │ │窗口1 │窗口2 │窗口3 │窗口4 │   ← 与主界面矩阵布局一致             │
+    /// │ │ │窗口1 │窗口2 │窗口3 │窗口4 │   ← 与主界面矩阵布局一致（编号随语言中/英）│
     /// │ │ │上·点1 │上·点2 │上·点3 │下·点1 │（点位=相机点位表的点位号）       │
     /// │ │ └──────┴──────┴──────┴──────┘                                    │
     /// │ └──────────────────────────────┘                                   │
@@ -868,7 +868,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         private string HintDefaultText()
         {
             return I18n.T(
-            "每个格子 = 主界面一个显示窗口。上方是【窗口编号】；下方是【归属相机·相机点位号】。\r\n" +
+            "每个格子 = 主界面一个显示窗口。上方是【窗口编号】（随界面语言显示\"窗口N\"或\"Windows N\"）；下方是【归属相机·相机点位号】。\r\n" +
             "默认按\"前上相机后下相机、各相机点位表顺序\"铺排（随下方\"型号\"下拉联动）。\r\n" +
             "【空窗口（无点位）】= 非自适下点位不够、行列乘积多出的占位格：可用【交换位置】把点位\r\n" +
             "搬进去（点空窗口 + 有点位的窗口互换）；空窗口不支持【编辑点位】【禁用/启用】（选中时按钮自动置灰）。\r\n" +
@@ -876,7 +876,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             "【交换位置】（点两个窗口互换，可跨相机、可含空窗口）、【恢复默认】（重置该型号出厂铺排并全部启用）；\r\n" +
             "【右键格子】或选中后点\"禁用/启用\"停用某窗口。\r\n" +
             "下方\"相机程序映射\"区照常可配：先选相机，型号下拉跟随该相机可选型号 → 点位 → 相机程序号。",
-            "Each cell = one display window (Top: window # / Bottom: camera·point).\r\n" +
+            "Each cell = one display window (Top: window # shown in UI language \"窗口N\" or \"Windows N\" / Bottom: camera·point).\r\n" +
             "Select a cell: Edit Point / Swap Position / Reset Default; right-click a cell to Disable/Enable.\r\n" +
             "Empty (no point): use Swap Position to move a point in. Below: camera → model → point → program.");
         }
@@ -1187,6 +1187,8 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         /// <summary>
         /// 刷新所有格子的显示：窗口编号 + "相机名·点位号"（V2.12.1 起自适应/非自适应统一用
         /// 相机点位表标注——点位由相机表唯一决定，上下相机同号点位靠相机名区分开）。
+        /// 【窗口编号语言（V2.15.14）】顶部编号标识随 I18n.Language 切换：中文界面显示
+        /// "窗口 N"、英文界面显示 "Windows N"（后缀 已禁用/空窗口（无点位）/相机·点位 同样按语言）。
         /// 高亮优先级（V2.14.21）：交换完成闪烁（_swapFlash 绿）> 交换起点选中（_swapA 天蓝）>
         /// 普通选中（_selectedIdx 浅黄）> 无高亮——三种高亮颜色互相区分，见 HighlightFor。
         /// 【禁用的格子（V1.12.28）灰底 + "已禁用"】；高亮时底色保持灰、改用同色粗边框提示
@@ -1206,7 +1208,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 if (disabled)
                 {
                     // 禁用：灰底 + 灰字，醒目区分于普通格子；处于高亮状态时用同色粗边框提示
-                    b.Text = I18n.T($"窗口 {i + 1}\r\n已禁用", $"Window {i + 1}\r\nDisabled");
+                    b.Text = I18n.T($"窗口 {i + 1}\r\n已禁用", $"Windows {i + 1}\r\nDisabled");
                     b.BackColor = Color.FromArgb(222, 222, 222);
                     b.ForeColor = Color.FromArgb(150, 150, 150);
                     b.UseVisualStyleBackColor = true;
@@ -1217,13 +1219,13 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 {
                     // 空窗口（V2.14.18）：主界面占位格子、未配置点位（默认=非自适行列乘积多出的格），
                     // 浅灰底 + 灰字提示，可用【交换位置】把点位搬进来；高亮时直接换高亮底色
-                    b.Text = I18n.T($"窗口 {i + 1}\r\n空窗口（无点位）", $"Window {i + 1}\r\nEmpty (no point)");
+                    b.Text = I18n.T($"窗口 {i + 1}\r\n空窗口（无点位）", $"Windows {i + 1}\r\nEmpty (no point)");
                     b.ForeColor = Color.FromArgb(140, 140, 140);
                     ApplyCellHighlight(b, hl, Color.FromArgb(245, 245, 245));
                 }
                 else
                 {
-                    b.Text = $"窗口 {i + 1}\r\n{ResolveWindowSource(i + 1)}";
+                    b.Text = I18n.T($"窗口 {i + 1}", $"Windows {i + 1}") + "\r\n" + ResolveWindowSource(i + 1);
                     b.ForeColor = Color.Black;
                     ApplyCellHighlight(b, hl, SystemColors.Control);
                 }
@@ -1317,7 +1319,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                         : cam.Name;
                     return $"{camName}·{I18n.T($"点位{it.StationNo}", $"Point {it.StationNo}")}";
                 }
-                return I18n.T($"窗口{w}", $"Window {w}");
+                return I18n.T($"窗口{w}", $"Windows {w}");
             }
             // 兜底（编辑副本缺失）：退回按相机点位表区间定位（旧逻辑）
             var starts = DisplayConfig.AutoFitCameraStarts(_cameras, _matrixModel);
@@ -1335,7 +1337,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                     return $"{camName}·{I18n.T($"点位{(it == null ? w : it.StationNo)}", $"Point {(it == null ? w : it.StationNo)}")}";
                 }
             }
-            return I18n.T($"窗口{w}", $"Window {w}");
+            return I18n.T($"窗口{w}", $"Windows {w}");
         }
 
         /// <summary>按相机ID在配置列表里找相机；找不到返回 null。兜底规则与 ProductionCoordinator

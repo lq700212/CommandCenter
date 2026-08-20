@@ -58,7 +58,7 @@ namespace CommandCenter.Views
             this.lblHint.Name = "lblHint";
             this.lblHint.Size = new System.Drawing.Size(720, 42);
             this.lblHint.TabIndex = 0;
-            this.lblHint.Text = "每个格子 = 主界面一个显示窗口。上方是【窗口编号】；下方是【归属相机·相机点位号】。\r\n默认按\"前上相机后下相机\"铺排；可选中窗口后点【编辑点位】【交换位置】【恢复默认】，右键或选中后点\"禁用/启用\"停用窗口。";
+            this.lblHint.Text = "每个格子 = 主界面一个显示窗口。上方是【窗口编号】（随界面语言显示\"窗口N\"或\"Windows N\"）；下方是【归属相机·相机点位号】。\r\n默认按\"前上相机后下相机\"铺排；可选中窗口后点【编辑点位】【交换位置】【恢复默认】，右键或选中后点\"禁用/启用\"停用窗口。";
             // 
             // pnlMatrix
             // 
