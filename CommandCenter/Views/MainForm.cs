@@ -69,9 +69,9 @@ namespace CommandCenter.Views
         private List<IScanner> _scanners = new List<IScanner>();   // 扫码枪列表（多台各一个实例，V1.8.1 起支持多台；串口/基恩士 TCP 无协议按各自 Mode 二选一）
         private Label[] _lblCamStatuses;            // 每台相机一个连接指示灯（≤2台模式，按相机下标对齐）
         private ComboBox _cmbCamOverview;           // 相机下拉列表（≥3台模式）：下拉查看每台名字+状态圆点
-        private Label _lblCamAggregate;             // 相机总连接状态标签（≥3台模式）：全部连接才绿色，否则红色
-        private Panel _pnlCamOverview;              // ≥3台模式的容器：把总标签+下拉框装一起，统一垂直居中
-        private ToolTip _camTip;                    // 总状态标签的悬停明细提示（列出每台相机连/断）
+        private int[] _camOverviewOrder;            // ≥3台模式下拉项排序映射：下拉项下标 i → 相机下标（掉线相机排最前，V2.15.16）
+        private Panel _pnlCamOverview;              // ≥3台模式的容器：装下拉框统一垂直居中（V2.15.16 起只剩下拉框，无总标签）
+        private ToolTip _camTip;                    // 相机下拉框的悬停明细提示（列出每台相机连/断）
         private ToolTip _langTip;                   // 语言切换按钮的悬停提示（V2.15.1，惰性创建）
         private ToolTip _plcTip;                    // PLC 灯悬停提示（说明三态灯当前含义，V1.12.11）
         private bool _modelComboInit;     // 型号下拉程序内初始化/刷新时防误触 SelectedIndexChanged
@@ -352,13 +352,15 @@ namespace CommandCenter.Views
         /// （名字短灯窄、名字长灯宽）；相机名（只有它能自定义，PLC/扫码枪名固定）限长 10 字符、
         /// 超出截断加 "..."（TruncateIndicatorText），悬停 ToolTip 补全完整名字+IP+连/断状态。
         ///
-        /// 【≥3 台】聚拢成两个控件（现场相机多时 96px/台 的灯阵会占满标题栏）：
-        ///   - _lblCamAggregate（总状态标签）：只有所有相机都连接才绿色，任一断连就红色；
-        ///   - _cmbCamOverview（下拉列表）：默认收起只显示一个入口，点开看每台相机
-        ///     名字+连接状态（OwnerDraw 自绘圆点，绿=OK、红=断连）。
-        /// 两者装进 _pnlCamOverview（Dock.Right）统一垂直居中（ComboBox 直接 Dock.Right
-        /// 会被拉满 48px 高、文字偏上，与左侧"● PLC"标签不对齐）；总标签字体与 PLC 标签
-        /// 一致（微软雅黑 10F Bold）。RelayoutTitleBar 统计右侧 Dock 区时把容器按整体宽度计入。
+        /// 【≥3 台】聚拢成单个控件（现场相机多时 96px/台 的灯阵会占满标题栏）：
+        ///   - _cmbCamOverview（下拉列表）：每项自绘"状态圆点 + 相机名 + IP"（绿=连接、红=断连），
+        ///     默认收起只显示一个入口（SelectedIndex=0），点开看每台相机状态。
+        ///   - 排序约定（V2.15.16）：有掉线相机时掉线的排在【最前】（连接中的按默认顺序跟后），
+        ///     全部连接时按默认顺序排列——这样收起时下拉框显示的即是第一台（有掉线即显示掉线那台）。
+        ///   - V2.15.16 起删掉原"● 相机"总状态标签（_lblCamAggregate），只留下拉框一个控件。
+        /// 下拉框装进 _pnlCamOverview（Dock.Right）统一垂直居中（ComboBox 直接 Dock.Right
+        /// 会被拉满 48px 高、文字偏上，与左侧"● PLC"标签不对齐）；字体与 PLC 标签一致
+        /// （微软雅黑 10F Bold）。RelayoutTitleBar 统计右侧 Dock 区时把容器按整体宽度计入。
         /// lblCamPlaceholder 是设计器视觉提示，隐藏后 Dock 空间让给运行时生成的控件。
         /// </summary>
         private void BuildCameraStatusLights()
@@ -373,20 +375,15 @@ namespace CommandCenter.Views
                 _cmbCamOverview.Dispose();
                 _cmbCamOverview = null;
             }
-            if (_lblCamAggregate != null)
-            {
-                pnlTitleBar.Controls.Remove(_lblCamAggregate);
-                _lblCamAggregate.Dispose();
-                _lblCamAggregate = null;
-            }
             if (_pnlCamOverview != null)
             {
-                // 容器里的子控件（总标签+下拉框）先移除再释放，避免残留
+                // 容器里的子控件先移除再释放，避免残留
                 _pnlCamOverview.Controls.Clear();
                 pnlTitleBar.Controls.Remove(_pnlCamOverview);
                 _pnlCamOverview.Dispose();
                 _pnlCamOverview = null;
             }
+            _camOverviewOrder = null;
 
             lblCamPlaceholder.Visible = false;
 
@@ -425,19 +422,10 @@ namespace CommandCenter.Views
             }
             else
             {
-                // 大台数模式：总状态标签 + 相机下拉列表。
-                // 两个控件都装进 _pnlCamOverview（Dock.Right）统一垂直居中：
-                // ComboBox 如果直接 Dock.Right 会被容器拉伸到 48px 高、显示文字偏上，
-                // 与左侧"● PLC"标签（MiddleRight 垂直居中）不对齐；放容器里手动定位可精确居中。
-                // 字体统一用与 PLC 标签一致的"微软雅黑 10F Bold"（见 Designer 的 lblPlcStatus.Font）。
+                // 大台数模式：只保留相机下拉列表（V2.15.16 起不再有"● 相机"总状态标签）。
+                // 下拉项顺序不在此处固定，由 RefreshCameraAggregateStatus 按当前连接状态排序
+                // （掉线相机排最前、连接相机按默认顺序在后），这里只建空下拉框+容器。
                 var camFont = new Font("微软雅黑", 10F, FontStyle.Bold);
-                _lblCamAggregate = new Label
-                {
-                    AutoSize = true,
-                    TextAlign = ContentAlignment.MiddleRight,
-                    Text = "● 相机", // V1.10.0：不显示台数，纯状态圆点+相机字样（V2.15.0 国际化）
-                    Font = camFont
-                };
                 _cmbCamOverview = new ComboBox
                 {
                     DropDownStyle = ComboBoxStyle.DropDownList, // 只能选不能输，防止误改
@@ -446,39 +434,27 @@ namespace CommandCenter.Views
                     ItemHeight = 24
                 };
                 _cmbCamOverview.DrawItem += CmbCamOverview_DrawItem;
-                for (int i = 0; i < _cameras.Count; i++)
-                    _cmbCamOverview.Items.Add(CamOverviewLabel(i)); // 显示文案，画圆点时按下标找状态
-                if (_cmbCamOverview.Items.Count > 0) _cmbCamOverview.SelectedIndex = 0;
 
-                // 容器：Dock.Right，宽度=标签+间距+下拉框，其余由 pnlTitleBar 高度决定
+                // 容器：Dock.Right，宽度=下拉框宽度，其余由 pnlTitleBar 高度决定
                 _pnlCamOverview = new Panel
                 {
                     Dock = DockStyle.Right,
                     BackColor = pnlTitleBar.BackColor // 与标题栏同色，视觉上"隐形"
                 };
-                // 先算出下拉框的布局宽度（文本取最长项，_cameras 可能为空则用默认宽）
-                int cmbW = 160;
-                if (_cmbCamOverview.Items.Count > 0)
-                    cmbW = TextRenderer.MeasureText((string)_cmbCamOverview.Items[_cmbCamOverview.Items.Count - 1], camFont).Width + 40;
-                int lblW = _lblCamAggregate.PreferredWidth;
-                _cmbCamOverview.Width = cmbW;
-                _pnlCamOverview.Width = lblW + 8 + cmbW;
 
                 // 垂直居中：标题栏高 48，控件 y = (48 - 控件高)/2
                 int barH = pnlTitleBar.ClientSize.Height;
-                int lblY = (barH - _lblCamAggregate.PreferredHeight) / 2;
                 int cmbY = (barH - _cmbCamOverview.Height) / 2;
-                _lblCamAggregate.Location = new Point(0, lblY);
-                _cmbCamOverview.Location = new Point(lblW + 8, cmbY);
-                _pnlCamOverview.Controls.Add(_lblCamAggregate);
+                _cmbCamOverview.Location = new Point(4, cmbY);
+                _cmbCamOverview.Width = 160; // 临时宽，RefreshCameraAggregateStatus 填充后按最长项重算
+                _pnlCamOverview.Width = _cmbCamOverview.Width + 8;
                 _pnlCamOverview.Controls.Add(_cmbCamOverview);
 
                 _camTip = _camTip ?? new ToolTip();
-                _camTip.SetToolTip(_lblCamAggregate, I18n.T("相机连接状态明细", "Camera connection detail"));
 
                 pnlTitleBar.Controls.Add(_pnlCamOverview);
 
-                RefreshCameraAggregateStatus(); // 初始按当前连接状态上色
+                RefreshCameraAggregateStatus(); // 初始填充（按连接状态排序）+ 悬停明细 + 宽度自适应
             }
         }
 
@@ -542,11 +518,14 @@ namespace CommandCenter.Views
         /// 相机下拉列表的项绘制（OwnerDraw）：
         /// 每项左边画一个"状态圆点"（绿=已连接、红=断连），圆点右侧画相机名+IP。
         /// 高亮行用系统选中色背景，圆点颜色保持语义不变。
+        /// 下标经 _camOverviewOrder 排序映射换算成相机下标（V2.15.16 起列表可能被排序，
+        /// 项下标 ≠ 相机下标，必须查映射表，否则圆点/文案会张冠李戴）。
         /// </summary>
         private void CmbCamOverview_DrawItem(object sender, DrawItemEventArgs e)
         {
-            if (e.Index < 0 || e.Index >= _cameras.Count) return;
-            bool connected = _cameras[e.Index].IsConnected;
+            if (_camOverviewOrder == null || e.Index < 0 || e.Index >= _camOverviewOrder.Length) return;
+            int camIdx = _camOverviewOrder[e.Index];
+            bool connected = _cameras[camIdx].IsConnected;
             Color dotColor = connected ? Color.FromArgb(46, 158, 107)  // 绿=OK
                                        : Color.FromArgb(229, 72, 77);   // 红=断连
             e.DrawBackground();
@@ -559,16 +538,19 @@ namespace CommandCenter.Views
                 e.Graphics.FillEllipse(b, dotX, dotY, dotSize, dotSize);
 
             // 相机名+IP 文本，用系统前景色（选中行高亮时可读）
-            TextRenderer.DrawText(e.Graphics, CamOverviewLabel(e.Index), e.Font,
+            TextRenderer.DrawText(e.Graphics, CamOverviewLabel(camIdx), e.Font,
                 new Point(dotX + dotSize + 8, e.Bounds.Top + (e.Bounds.Height - e.Font.Height) / 2),
                 e.ForeColor);
             e.DrawFocusRectangle();
         }
 
         /// <summary>
-        /// 刷新相机总连接状态标签（≥3台模式，后台线程事件触发，BeginInvoke 切回 UI 线程）。
-        /// 规则：所有相机都 IsConnected → 绿色；只要有一台断连 → 红色。
-        /// 同时更新悬停明细文本（每台相机名 + 连/断），并让下拉框重绘当前状态圆点。
+        /// 刷新相机下拉列表（≥3台模式，后台线程事件触发，BeginInvoke 切回 UI 线程）：
+        /// ① 按当前连接状态重排下拉项顺序——掉线相机排最前（掉线内部按默认顺序）、
+        ///    连接相机按默认顺序跟后，收起时 SelectedIndex=0 即显示第一台（有掉线则显示掉线那台）；
+        /// ② 重建下拉项文本 + 按最长项重算下拉框/容器宽度；
+        /// ③ 更新悬停明细（每台相机名 + 连/断），并让下拉框重绘状态圆点。
+        /// ≤2台模式时 _cmbCamOverview 为 null，内部直接返回（不影响独立灯模式）。
         /// </summary>
         private void RefreshCameraAggregateStatus()
         {
@@ -578,18 +560,32 @@ namespace CommandCenter.Views
                 BeginInvoke(new Action(RefreshCameraAggregateStatus));
                 return;
             }
-            if (_lblCamAggregate == null) return;
+            if (_cmbCamOverview == null || _pnlCamOverview == null) return;
 
-            bool allOk = _cameras.Count > 0 && _cameras.All(c => c.IsConnected);
-            _lblCamAggregate.ForeColor = allOk ? Color.FromArgb(46, 158, 107)   // 全部连接 → 绿
-                                               : Color.FromArgb(229, 72, 77);    // 任一断连 → 红
-            _lblCamAggregate.Text = I18n.T("● 相机", "● Camera");
+            // ① 重排：掉线相机优先（OrderBy IsConnected=false 排前、true 排后），
+            //    同状态按默认顺序（ThenBy 相机下标）——稳定排序，天然满足需求。
+            _camOverviewOrder = Enumerable.Range(0, _cameras.Count)
+                .OrderBy(i => _cameras[i].IsConnected)
+                .ThenBy(i => i)
+                .ToArray();
 
-            // 悬停明细：列出每台"名字+状态"，方便现场快速定位是哪台断了（只显示 IP，不带端口）
+            // ② 重建下拉项（文本=名字+IP，圆点颜色在 DrawItem 里按排序映射查状态）
+            _cmbCamOverview.Items.Clear();
+            for (int i = 0; i < _cameras.Count; i++)
+                _cmbCamOverview.Items.Add(CamOverviewLabel(_camOverviewOrder[i]));
+            if (_cmbCamOverview.Items.Count > 0) _cmbCamOverview.SelectedIndex = 0;
+
+            // ③ 宽度自适应：按下拉框所有项中最长文本定宽（语言/名字变化后同样重算）。
+            //    旧实现只取"最后一项"宽度，排序后最后一项未必最长，统一遍历取最大。
+            int maxW = 160;
+            foreach (var it in _cmbCamOverview.Items)
+                maxW = Math.Max(maxW, TextRenderer.MeasureText((string)it, _cmbCamOverview.Font).Width + 40);
+            _cmbCamOverview.Width = maxW;
+            _pnlCamOverview.Width = maxW + 8;
+
+            // ④ 悬停明细：列出每台"名字+状态"，方便现场快速定位是哪台断了（只显示 IP，不带端口）
             var lines = _cameras.Select((c, i) => $"{CamDisplayName(i)} {c.IpAddressOnly}：" + (c.IsConnected ? I18n.T("已连接", "Connected") : I18n.T("断连", "Disconnected")));
-            if (_camTip != null) _camTip.SetToolTip(_lblCamAggregate, string.Join("\n", lines));
-
-            if (_cmbCamOverview != null) _cmbCamOverview.Invalidate(); // 重绘各下拉项的状态圆点
+            if (_camTip != null) _camTip.SetToolTip(_cmbCamOverview, string.Join("\n", lines));
         }
 
         /// <summary>
@@ -1638,7 +1634,7 @@ namespace CommandCenter.Views
             if (_serialTip != null)
                 _serialTip.SetToolTip(btnManualSerial, I18n.T("手动输入/修改当前序列号", "Enter / modify current serial number"));
 
-            // ② 相机灯文本（≤2 台独立灯 / ≥3 台聚合标签 + 悬停明细）
+            // ② 相机灯文本（≤2 台独立灯 / ≥3 台下拉列表）
             if (_lblCamStatuses != null)
                 for (int i = 0; i < _lblCamStatuses.Length; i++)
                     if (_lblCamStatuses[i] != null)
@@ -1649,13 +1645,10 @@ namespace CommandCenter.Views
                         _camTip = _camTip ?? new ToolTip();
                         _camTip.SetToolTip(_lblCamStatuses[i], CamLightTipText(i));
                     }
-            if (_lblCamAggregate != null) _lblCamAggregate.Text = I18n.T("● 相机", "● Camera");
-            if (_camTip != null && _lblCamAggregate != null)
-                _camTip.SetToolTip(_lblCamAggregate, I18n.T("相机连接状态明细", "Camera connection detail"));
 
             // ③ 计数与状态栏（运行时文本）
             RefreshTitle();
-            RefreshCameraAggregateStatus();
+            RefreshCameraAggregateStatus(); // ≥3台下拉：重建项文本（含语言）+ 排序 + 悬停明细 + 宽度
             if (_coordinator != null)
             {
                 string st = _coordinator.CurrentStateUiText;
