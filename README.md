@@ -125,6 +125,16 @@ CommandCenter/
 
 产物：`CommandCenter\bin\Debug\CommandCenter.exe`，启动后等几秒进程存活即冒烟通过。
 
+### 自动化验证（V2.15.18，改动后必跑）
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\scripts\run-all.ps1"
+```
+
+一条命令跑完三层验证：**构建 → 137 条回归用例（离线可跑，覆盖 SN/型号寄存器打包、PLC 从站读写、
+配置兼容、扫码过滤、窗口布局、程序映射、密码安全、I18n）→ 两轮进程冒烟**；任一失败非零退出。
+新增可测功能/修 bug 后，对应用例必须同步沉淀进该 skill（见 `.opencode/skills/commandcenter-test/SKILL.md`）。
+
 ## 发布（代码混淆，V2.14.31）
 
 现场部署用**混淆版**，防止反编译拿到类名/方法名/设备 IP/寄存器号/相机指令等业务细节：
@@ -237,13 +247,17 @@ modelStationPrograms:
 | 40006 | 上位机→PLC | 下相机结果 | 同上 |
 | 40007 | 上位机→PLC | 型号序号 | 查 `plc.modelIndexes`，默认 Z121=1、U171=2 |
 | 40008~40012 | 上位机→PLC | 型号 ASCII 字符串 | 每寄存器 2 字符、高字节在前、最多 10 字符 |
+| 40013~40024 | 上位机→PLC | 扫码 SN 序列号（V2.15.17） | ASCII 编码同型号字符串（24 字符）；扫码 OK/人工补录=本件 SN，失败/超时/上电=全 0；PLC 在读到 40004=1 后读取 |
 
 关键字段：`ipAddress`（监听 IP，`0.0.0.0`=所有网卡）、`port`（502）、`unitId`（1，需与 PLC 主站一致）、
 `scanRequestAddress`/`scanResultAddress`（默认 1/4）、`productModelIndexAddress`（7）/
-`productModelAddress`（8）`productModelLen`（5）、`modelIndexes`（型号→序号映射）。
+`productModelAddress`（8）`productModelLen`（5）、`modelIndexes`（型号→序号映射）、
+`scanSerialNumberAddress`（13，SN 区起始=协议 40013）/`scanSerialNumberLen`（12 寄存器=24 字符）。
 
 几个重要的行为约定：
-- **上电初始化复位**：从站一建站成功，先把 40004~40006 结果寄存器全写 0，防断电重启残留旧值被当新结果。
+- **上电初始化复位**：从站一建站成功，先把 40004~40006 结果寄存器全写 0（V2.15.17 起 SN 区一并清 0），防断电重启残留旧值被当新结果。
+- **SN 随扫码结果走（V2.15.17）**：与产品型号同一套设定——扫码 OK / 人工补录覆盖成 1 时写本件 SN
+  （先写 SN 再写结果），失败/超时清 0；无独立握手信号，PLC 读到 40004=1 后读 40013 起即得本件序列号。
 - **相机结果"判定即写"**：相机 OK/NG 一判出来马上写 40005/40006，**不等** FTP 取图归档（图传输会让
   PLC 白等几百毫秒~2 秒）；图缺失只影响显示和存图，判定不回退。
 - **通道释放闸门**：相机通道要等"PLC 已复位请求 **且** 拍照任务完全结束"才释放，防止下一拍请求并发

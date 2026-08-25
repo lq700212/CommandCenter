@@ -29,8 +29,10 @@ namespace CommandCenter.Services
     ///   CameraConfig.PlcRequestAddress/PlcResultAddress，V2.13.4 起全量显式、不再按列表序号自动，
     ///   见 5.2）；
     ///   PLC 只读（上位机写）：40004 扫码结果；相机结果：上相机 40005、下相机 40006；
-    ///                         40007~40011 产品型号(10 字符 ASCII，每寄存器 2 字符，高字节在前)。
-    ///   一次完整握手：PLC 写请求≠0 → 上位机处理完写结果≠0 → PLC 读结果(相机还读型号)并复位请求=0
+    ///                         40007 型号序号 + 40008~40012 产品型号(10 字符 ASCII，每寄存器 2 字符，高字节在前)；
+    ///                         40013 起 扫码 SN 序列号(ASCII，编码规则同型号字符串，V2.15.17，
+    ///                         默认 12 寄存器=24 字符，见 PlcConfig.ScanSerialNumberAddress/Len)。
+    ///   一次完整握手：PLC 写请求≠0 → 上位机处理完写结果≠0 → PLC 读结果(扫码还读型号/SN)并复位请求=0
     ///   → 上位机看到请求回 0 再复位结果=0，进入下一请求。扫码通道与各相机通道互斥串行处理。
     ///   【替代的旧协议（V1.12.11~V1.12.16，已全部删除）】D99 扫码到位/D100 相机到位/D101 开始/
     ///   D102 完成/D103~D108 配方/D110~112 计数——均不再使用；计数改为纯本地功能，
@@ -48,7 +50,7 @@ namespace CommandCenter.Services
     ///   业务层(ProductionCoordinator)仍用 PositionTimer 每 200ms 轮询请求寄存器，等价于原主动读 PLC。
     ///
     /// 【对外接口】ReadScanRequest/ReadCameraRequest（读 PLC 请求）、
-    ///   WriteScanResult/WriteCameraResult/WriteProductModel（写结果/型号）、
+    ///   WriteScanResult/WriteCameraResult/WriteProductModel/WriteSerialNumber（写结果/型号/SN）、
     ///   ReadRegister/WriteRegister（功能测试通用读写）。语义：IsConnected/EnsureConnected 表示
     ///   "从站监听是否已就绪"，HasMasterConnected 表示"汇川主站是否已 TCP 连入"。
     /// </summary>
@@ -64,6 +66,13 @@ namespace CommandCenter.Services
         //   ② MainForm 主界面切型号（SwitchModel）时更新本字段并立即写一次（见 MainForm.SwitchModel）。
         // 型号为空（配置缺/未设置）时建站即写跳过，避免覆盖 PLC 侧既有型号区。
         private string _currentModel = "";
+
+        // V2.15.17：最近一次写入 SN 区的序列号缓存（"建站即写"用，与 _currentModel 同一套设定）。
+        // 背景：从站断线重建后 DataStore 是全新全 0 的，若 PLC 主站还没来得及读走上一件的 SN，
+        // 重建瞬间 SN 区会被清空。这里记住最后一次写入的 SN（含"失败清零"的空串），建站成功后
+        // 自动回写一次——PLC 重连后读到的仍是最近一拍的 SN 状态。热更整体重建 PlcService 时本缓存
+        // 归空（新实例不回写、SN 区保持全 0）：旧 SN 是否已被消费未知，写空比回填旧值安全。
+        private string _currentSerial = "";
 
         /// <summary>已释放标记：Dispose 后后台监听/轮询立即放弃</summary>
         private volatile bool _disposed;
@@ -197,6 +206,11 @@ namespace CommandCenter.Services
                     // 型号为空时跳过（WriteProductModel("") 会写 0,没必要覆盖）。
                     if (_currentModel.Length > 0)
                         WriteProductModel(_currentModel);
+                    // V2.15.17：建站即写 SN（与型号同一套设定）——断线重建后 DataStore 全 0，
+                    // 把最近一次写入的 SN 回写进 SN 区，PLC 重连后读到的仍是最近一拍的 SN 状态；
+                    // 缓存为空串（上电/失败清零/热更重建）时跳过，不无谓覆盖。
+                    if (_currentSerial.Length > 0)
+                        WriteSerialNumber(_currentSerial);
                     LogHelper.Info($"PLC 从站监听已启动 {ip}:{_cfg.Port}（UnitId={_cfg.UnitId}），等待汇川主站连入");
                     return true;
                 }
@@ -371,8 +385,7 @@ namespace CommandCenter.Services
         ///   ① 型号序号 → `ProductModelIndexAddress`（默认索引 7 = 协议 40007）：按型号名查
         ///      `_cfg.ModelIndexes` 映射表得序号（默认 Z121=1、U171=2），型号没配序号写 0；
         ///   ② 型号 ASCII 字符串 → `ProductModelAddress` 起（默认索引 8 = 协议 40008，连续
-        ///      ProductModelLen 个寄存器），每寄存器存 2 个 ASCII 字符（高字节=前字符、低字节=后字符），
-        ///      最多写 ProductModelLen×2 个字符、不足的尾部补 0x00（PLC 以 0x00 作字符串结束符）。
+        ///      ProductModelLen 个寄存器），编码规则见 `PackAsciiToRegisters`（V2.15.17 抽公共）。
         /// 型号为空时序号与型号区都写 0（PLC 读到空型号），不崩。
         /// </summary>
         /// <param name="model">产品型号（如 "Z121"），超长自动截断</param>
@@ -388,22 +401,66 @@ namespace CommandCenter.Services
                 if (_cfg.ProductModelIndexAddress > 0)
                     WriteLocal(_cfg.ProductModelIndexAddress, (ushort)modelIndex);
 
-                // ② 型号 ASCII（协议 40008 起）
-                int len = Math.Max(1, Math.Min(20, _cfg.ProductModelLen)); // 寄存器数 1~20，防异常配置
-                ushort[] regs = new ushort[len];
-                byte[] bytes = Encoding.ASCII.GetBytes(model ?? "");       // 空型号→全 0
-                int charCount = Math.Min(bytes.Length, len * 2);
-                for (int i = 0; i < charCount; i++)
-                {
-                    ushort v = bytes[i]; // 单字节 ASCII，直接放进高字节；低字节留 0x00
-                    if (i % 2 == 0)
-                        regs[i / 2] = (ushort)(v << 8); // 高字节=前一字符
-                    else
-                        regs[i / 2] |= v;                // 低字节=后一字符
-                }
-                WriteLocalMulti(_cfg.ProductModelAddress, regs);
+                // ② 型号 ASCII（协议 40008 起）：寄存器数钳位 1~20 防异常配置，打包走公共方法
+                int len = Math.Max(1, Math.Min(20, _cfg.ProductModelLen));
+                WriteLocalMulti(_cfg.ProductModelAddress, PackAsciiToRegisters(model, len));
                 return true;
             }
+        }
+
+        /// <summary>
+        /// 写扫码 SN 序列号（V2.15.17 协议扩展）：ASCII 写入 `ScanSerialNumberAddress` 起
+        /// （默认索引 13 = 协议 40013，紧跟型号区 40008~40012 之后）连续 ScanSerialNumberLen 个
+        /// 寄存器，编码规则与产品型号字符串**完全一致**（每寄存器 2 字符、高字节在前、不足补 0x00、
+        /// PLC 以 0x00 作结束符）。无独立握手信号——PLC 在扫码结果 40004 读到 1 时读本区即得本件 SN，
+        /// 与"产品名称"的传递方式同一套设定。serial 为空串时整区清 0（表示本件无有效 SN）。
+        /// 【调用时机】① 扫码 OK / 人工补录覆盖时写实际 SN；② 扫码失败/超时清空；③ 从站建站成功
+        /// 回写缓存（EnsureConnected，与 SetCurrentModel 同设定）。每次成功写入都刷新 `_currentSerial`
+        /// 缓存供断线重建后回写。
+        /// </summary>
+        /// <param name="serial">序列号 SN（如 "Z12120260820001"），超长自动截断并记 WARN</param>
+        /// <returns>从站就绪(true)/未就绪(false)</returns>
+        public bool WriteSerialNumber(string serial)
+        {
+            lock (_lock)
+            {
+                if (_dataStore?.HoldingRegisters == null) return false;
+
+                // 寄存器数钳位 1~50 防异常配置（50 寄存器=100 字符，远超常见条码长度）
+                int len = Math.Max(1, Math.Min(50, _cfg.ScanSerialNumberLen));
+                // 超容量截断要留痕：现场排查"PLC 读到的 SN 缺尾"先看这条日志
+                byte[] bytes = Encoding.ASCII.GetBytes(serial ?? "");
+                if (bytes.Length > len * 2)
+                    LogHelper.Warn($"SN 超 SN 区容量已截断：{bytes.Length} 字符 > {len * 2}（可调大 plc.scanSerialNumberLen），写入前 {len * 2} 字符");
+                WriteLocalMulti(_cfg.ScanSerialNumberAddress, PackAsciiToRegisters(serial, len));
+
+                _currentSerial = serial ?? "";   // 刷新缓存（含清零场景），建站即写用它回写最近状态
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// 把字符串按协议打包成寄存器数组（V2.15.17 自 WriteProductModel 抽出，型号/SN 共用，
+        /// 禁止两处各写一套）：每寄存器存 2 个 ASCII 字符——高字节=前一字符、低字节=后一字符；
+        /// 不足 regCount×2 个字符的尾部补 0x00（PLC 以 0x00 作字符串结束符）；超长的截断丢弃并返回。
+        /// 非 ASCII 字符会被 Encoding.ASCII 替成 '?'（0x3F），条码/型号正常全为 ASCII 不受影响。
+        /// </summary>
+        /// <param name="text">待写入的字符串（null 安全，按空串处理=全 0）</param>
+        /// <param name="regCount">目标寄存器个数（调用方已钳位）</param>
+        private static ushort[] PackAsciiToRegisters(string text, int regCount)
+        {
+            ushort[] regs = new ushort[regCount];
+            byte[] bytes = Encoding.ASCII.GetBytes(text ?? "");
+            int charCount = Math.Min(bytes.Length, regCount * 2);
+            for (int i = 0; i < charCount; i++)
+            {
+                ushort v = bytes[i]; // 单字节 ASCII，直接放进高字节；低字节留 0x00
+                if (i % 2 == 0)
+                    regs[i / 2] = (ushort)(v << 8); // 高字节=前一字符
+                else
+                    regs[i / 2] |= v;                // 低字节=后一字符
+            }
+            return regs;
         }
 
         /// <summary>
@@ -530,8 +587,17 @@ namespace CommandCenter.Services
                 WriteLocalSafe(_cfg.ScanResultAddress, 0);
             foreach (var addr in _cameraResultAddrs)
                 WriteLocalSafe(addr, 0);
+            // V2.15.17：上电初始化顺带把 SN 数据区整区清 0 + 作废缓存——防断电重启后 SN 区残留
+            // 上一件的旧 SN 被 PLC 当成新件误读（与结果寄存器复位同一防御思路；DataStore 新建本就
+            // 全 0，这里显式写 0 兜"监听重建/异常残留"场景）。缓存作废后建站即写不会回填旧 SN。
+            if (_cfg != null && _cfg.ScanSerialNumberAddress > 0 && _cfg.ScanSerialNumberLen > 0)
+            {
+                int len = Math.Max(1, Math.Min(50, _cfg.ScanSerialNumberLen));
+                WriteLocalMulti(_cfg.ScanSerialNumberAddress, new ushort[len]);
+                _currentSerial = "";
+            }
             LogHelper.Info("上电初始化：上位机结果寄存器已全部复位为 0（扫码结果 + " +
-                _cameraResultAddrs.Count + " 个相机通道）");
+                _cameraResultAddrs.Count + " 个相机通道 + SN 区）");
         }
 
         /// <summary>

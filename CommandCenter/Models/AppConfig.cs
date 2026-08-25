@@ -473,7 +473,8 @@ namespace CommandCenter.Models
     /// 【V2.7 协议（docs/CommandCenter.md §5.5）】请求-结果-复位三拍式握手：
     ///   PLC只写（上位机读）：40001 扫码请求(0/1)、40002 上相机拍照请求(1~255=点位)、40003 下相机拍照请求；
     ///   PLC只读（上位机写）：40004 扫码结果(0/1/2)、40005 上相机结果、40006 下相机结果、
-    ///                        40007~40011 产品型号(10 字符 ASCII，每寄存器 2 字符，高字节在前)。
+    ///                        40007 型号序号 + 40008~40012 产品型号(ASCII，每寄存器 2 字符，高字节在前)、
+    ///                        40013 起 扫码 SN 序列号(ASCII 编码规则同型号字符串，V2.15.17)。
     ///   流程：PLC 写请求=非0 → 上位机处理完写结果≠0 → PLC 读结果并复位请求=0 →
     ///         上位机看到请求=0 再复位结果=0，进入下一请求。
     ///   【地址说明（V2.12.3 定稿，替换 V2.12.2 的"减 40000 换算"）】配置里的地址字段统一存
@@ -517,6 +518,23 @@ namespace CommandCenter.Models
         /// <summary>产品型号寄存器数（V2.14.13，每个寄存器 2 字符，默认 5 个=10 字符；超 10 字符按文档
         /// 从索引 13（协议 40013）扩展地址后调整本值，40007 序号位不受影响）。</summary>
         public int ProductModelLen { get; set; } = 5;
+
+        /// <summary>
+        /// 上位机→PLC：扫码 SN 序列号起始地址（V2.15.17，协议 40013）。
+        /// 【为什么是 40013】产品型号字符串默认占 40008~40012（5 寄存器=10 字符），SN 区紧随其后
+        /// 从 40013 起连续排布，与既有"地址向后扩展"的布局原则一致；若手改过 ProductModelAddress/
+        /// ProductModelLen，请同步把本地址挪到型号区之后、避免两区重叠。
+        /// 编码方式与产品型号字符串完全一致：每寄存器存 2 个 ASCII 字符（高字节在前）、不足补 0x00、
+        /// PLC 以 0x00 作字符串结束符。无独立握手信号——PLC 在扫码结果 40004 读到 1 时读本区即得本件 SN。
+        /// </summary>
+        public ushort ScanSerialNumberAddress { get; set; } = 13;
+
+        /// <summary>
+        /// 扫码 SN 序列号寄存器数（V2.15.17，每个寄存器 2 字符，默认 12 个 = 最多 24 字符）。
+        /// SN 长度不固定且通常比型号长，故单独可配：现场条码超长时调大本值即可（SN 超出容量会
+        /// 截断并记 WARN 日志）；PLC 侧读取长度需与本值×2 字符对齐。
+        /// </summary>
+        public int ScanSerialNumberLen { get; set; } = 12;
 
         /// <summary>
         /// 产品型号 → PLC 型号序号 映射表（V2.14.13，JSON `modelIndexes`）：
@@ -1078,19 +1096,38 @@ namespace CommandCenter.Models
         /// 判断一条扫码文本是否命中"错误文本过滤名单"（V2.14.30）。
         /// 命中 = 这是扫码枪读码失败/状态输出、不是真实条码：收码层应丢弃该条并触发
         /// <see cref="ScanFailed"/>。空白文本同样视为无效（前面的行切分只抛非空行，双保险）。
+        /// 【V2.15.18 修复】前缀通配项自身可含逗号（如 "ER,*"）——名单按英文逗号拆分时会把
+        /// "ER,*" 拆成 "ER"+"*"，孤立的 "*" 项（空前缀）本就无意义、其唯一来源就是这种被拆开的
+        /// 通配项，故拆分后把孤立 "*" 并回前一项还原成完整通配项（此前该写法静默失效，
+        /// 现场照注释示例配置根本不生效）。等价简写：不带逗号的 "ER*" 也按前缀匹配。
         /// </summary>
         public bool IsIgnoredScanText(string code)
         {
             if (string.IsNullOrWhiteSpace(code)) return true;   // 空白不可能是有效条码
             string c = code.Trim();
-            var tags = (IgnoreScanTexts ?? "").Split(new[] { ',', '，', ';', '；', '、' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var raw in tags)
+            var rawTags = (IgnoreScanTexts ?? "").Split(new[] { ',', '，', ';', '；', '、' }, StringSplitOptions.RemoveEmptyEntries);
+            // 拆分后修复被逗号拆散的前缀通配项：孤立 "*"（Trim 后恰为 "*"）并回前项 → "X"+"*"="X,*"；
+            // 其余空/无效项跳过。旧配置（不含 ",*" 写法）不受任何影响。
+            var tags = new List<string>();
+            foreach (var raw in rawTags)
             {
-                string tag = raw.Trim();
-                if (tag.Length == 0) continue;
+                string t = raw.Trim();
+                if (t == "*")
+                {
+                    if (tags.Count > 0 && !tags[tags.Count - 1].EndsWith("*"))
+                        tags[tags.Count - 1] += "*";   // 并回前项，还原 "X,*"
+                    // 没有前项可并的孤立 "*" 无意义，丢弃
+                }
+                else if (t.Length > 0)
+                {
+                    tags.Add(t);
+                }
+            }
+            foreach (var tag in tags)
+            {
                 if (tag.EndsWith("*"))
                 {
-                    // 前缀匹配项（如 "ER,*" 命中 "ER,READ,00"）：取 * 前的部分做开头匹配。
+                    // 前缀匹配项（如 "ER,*"/"ER*" 命中 "ER,READ,00"）：取 * 前的部分做开头匹配。
                     string prefix = tag.Substring(0, tag.Length - 1).Trim();
                     if (prefix.Length > 0 && c.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                         return true;

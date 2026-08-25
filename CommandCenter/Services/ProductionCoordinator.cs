@@ -585,6 +585,10 @@ namespace CommandCenter.Services
                 if (_serialReceived)
                 {
                     _plc.WriteProductModel(_productModel);
+                    // V2.15.17：本件 SN 写进 PLC 的 SN 区（协议 40013 起），与型号同一套设定——
+                    // 无独立握手信号，PLC 在读到 40004=1 后读 SN 区即得本件序列号。
+                    // 顺序保证"SN 先于结果落地"，PLC 读到结果≠0 时 SN 区必已就绪。
+                    _plc.WriteSerialNumber(LatestSerialNumber);
                     _plc.WriteScanResult(1);      // 扫码 OK
                     _scanResultWriteUtc = DateTime.UtcNow;   // V2.14.43：记扫码结果写时刻（排查日志）
                     _scanResultWritten = 1;       // V2.14.33：记录本轮已写入的结果值（供补录覆盖判断）
@@ -593,7 +597,7 @@ namespace CommandCenter.Services
                                                  //  当成新一轮的 SN 误报 OK——见 BeginScanChannel 注释）
                     _chStep = 1;
                     SetState("扫码完成，等待 PLC 复位请求", "Scan complete, waiting for PLC reset");
-                    LogHelper.Info($"扫码 OK：SN={LatestSerialNumber}，已上报型号[{_productModel}]与结果(1)");
+                    LogHelper.Info($"扫码 OK：SN={LatestSerialNumber}，已上报型号[{_productModel}]、SN 与结果(1)");
                 }
                 else if (_serialErrorSeen)
                 {
@@ -602,6 +606,7 @@ namespace CommandCenter.Services
                     // 立刻把结果写 2 通知 PLC：PLC 拿到 2 会死等人工补录（V2.14.33 协议，见步骤1），
                     // 不会空等 30s。清标志防残留误判下一轮。
                     _plc.WriteProductModel(_productModel);
+                    _plc.WriteSerialNumber("");   // V2.15.17：本件无有效 SN，SN 区整区清 0（防旧件残留被 PLC 误读）
                     _plc.WriteScanResult(2);      // 扫码结果=2（通知 PLC：扫码失败，等待人工补录）
                     _scanResultWriteUtc = DateTime.UtcNow;   // V2.14.43：记扫码结果写时刻（排查日志）
                     _scanResultWritten = 2;       // V2.14.33：记录本轮已写入的结果值（供补录覆盖判断）
@@ -614,6 +619,7 @@ namespace CommandCenter.Services
                 else if ((DateTime.UtcNow - _scanArriveUtc).TotalMilliseconds >= ScanWaitMs)
                 {
                     _plc.WriteProductModel(_productModel);
+                    _plc.WriteSerialNumber("");   // V2.15.17：超时无码，SN 区整区清 0（防旧件残留被 PLC 误读）
                     _plc.WriteScanResult(2);      // 扫码结果=2（通知 PLC：超时无码，等待人工补录）
                     _scanResultWriteUtc = DateTime.UtcNow;   // V2.14.43：记扫码结果写时刻（排查日志）
                     _scanResultWritten = 2;       // V2.14.33：记录本轮已写入的结果值（供补录覆盖判断）
@@ -634,12 +640,15 @@ namespace CommandCenter.Services
             // （现场实测"补录完 PLC 收不到 1"）。覆盖只发生在 PLC 死等期间，语义安全。
             if (_scanResultWritten == 2 && _serialReceived)
             {
+                // V2.15.17：补录的 SN 先落 SN 区再覆盖结果——PLC 读到 1 后读 40013 起拿到的
+                // 必须是本件补录的序列号（与扫码 OK 分支同一顺序保证）。
+                _plc.WriteSerialNumber(LatestSerialNumber);
                 _plc.WriteScanResult(1);          // 覆盖：2(NG) → 1(OK)
                 _scanResultWriteUtc = DateTime.UtcNow;   // V2.14.43：记扫码结果写时刻（排查日志，补录覆盖也算一次写）
                 _scanResultWritten = 1;
                 _serialReceived = false;          // 补录的码已消费，防残留污染下一轮
                 SetState("扫码 OK（人工补录），等待 PLC 复位请求", "Scan OK (manual entry), waiting for PLC reset");
-                LogHelper.Info($"人工补录完成，扫码结果已由 2 覆盖为 1：SN={LatestSerialNumber}");
+                LogHelper.Info($"人工补录完成：SN={LatestSerialNumber} 已写入 PLC，扫码结果已由 2 覆盖为 1");
             }
             // 【V2.14.41 复位确认改"边沿记忆"】PLC 扫描加快后，"请求=0"可能只保持极短窗口、
             // 上位机 100ms 轮询可能错过（读到的是 PLC 已写入的下一拍请求=1）。"PLC 把请求写 0"
