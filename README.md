@@ -282,7 +282,7 @@ modelStationPrograms:
 ### 显示窗口（display{}）
 
 主界面中央是窗口矩阵，**默认"自适应"铺排**（勾选后行列输入框置灰）：
-
+<img width="1906" height="1033" alt="image" src="https://github.com/user-attachments/assets/370dfaea-169a-4ef3-9ccc-070333cdad42" />
 ```
 U171 默认铺排（4×7=28 格，点位 24 个 → 窗口 25~28 为空窗口）
 ┌────┬────┬────┬────┬────┬────┬────┐
