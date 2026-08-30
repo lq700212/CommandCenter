@@ -14,7 +14,7 @@ namespace CommandCenter.Services
     ///
     /// 【背景与定位】客户提出后续 SN 可能改为"上位机直接传 MES、不再写 PLC 寄存器区（40013 起）"，
     /// 但 MES 对接协议【尚未定稿】。本服务先把"SN→MES"这条通路搭起来：
-    ///   - 路由目标由配置 sn.target 控制（"Mes"/"Both" 时才上传，见 SerialNumberTargets）；
+    ///   - 路由目标由配置 sn.target 控制（默认 "Mes" 才上传，二选一见 SerialNumberTargets）；
     ///   - 接收地址/超时由配置 sn.mesUrl / sn.mesTimeoutMs 控制（SnRouteConfig）。
     /// ⚠️ 当前报文是【通用占位格式】（POST JSON：sn / model / time）。客户 MES 协议定稿后
     /// 只需要改 BuildPayload（报文字段/格式）与本类的发送方式（如加鉴权头、改 PUT），
@@ -72,7 +72,7 @@ namespace CommandCenter.Services
                 if (!_urlWarned)
                 {
                     _urlWarned = true;
-                    LogHelper.Warn("sn.mesUrl 未配置，SN 未上传 MES（请在系统设置里填 MES 地址）");
+                    LogHelper.Warn("sn.mesUrl 未配置，SN 未上传 MES（请在 appconfig.json 的 sn.mesUrl 里配 MES 接口地址）");
                 }
                 return;
             }

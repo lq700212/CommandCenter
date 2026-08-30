@@ -10,7 +10,7 @@
 //   ⑥ 点位→程序号映射（按相机+型号分表回退规则）
 //   ⑦ 密码 SHA-256 哈希 + DPAPI 记住密码往返
 //   ⑧ I18n 双语切换
-//   ⑨ SN 去向路由（V2.15.19：SerialNumberTargets 三值判定 / sn 配置段 / MES 报文格式）
+//   ⑨ SN 去向路由（V2.15.20 二选一：SerialNumberTargets 判定 / sn 配置段 / MES 报文格式）
 //
 // 【红线】禁止调用 ConfigStore.Load()/Save()——无参版本固定读写 bin\Debug\Config\
 //   appconfig.json，会覆盖开发机现有配置。配置测试只做内存序列化往返。
@@ -87,7 +87,7 @@ internal static class TestRunner
         TestWindowLayout();       // ⑤
         TestStationProgramMap();  // ⑥
         TestSecurity();           // ⑦
-        TestSnRoute();            // ⑨ V2.15.19：SN 去向路由（放在 I18n 前，I18n 改全局语言状态须最后跑）
+        TestSnRoute();            // ⑨ V2.15.20：SN 去向路由二选一（放在 I18n 前，I18n 改全局语言状态须最后跑）
         TestI18n();               // ⑧ 放最后（改全局语言状态）
     }
 
@@ -491,32 +491,31 @@ internal static class TestRunner
         => (string)typeof(SecurityConfig).GetProperty("AdminPasswordHash").GetValue(new SecurityConfig());
 
     // ───────────────────────── ⑧ I18n 双语切换（最后跑：改全局状态）─────────────────────────
-    // ───────────────────────── ⑨ SN 去向路由（V2.15.19）─────────────────────────
+    // ───────────────────────── ⑨ SN 去向路由（V2.15.20 二选一）─────────────────────────
     private static void TestSnRoute()
     {
-        Group("⑨ SN 去向路由 SerialNumberTargets / sn 配置段 / MES 报文（V2.15.19）");
+        Group("⑨ SN 去向路由 SerialNumberTargets / sn 配置段 / MES 报文（V2.15.20 二选一，默认 Mes）");
 
-        // Normalize：空/null/非法值一律回落规范 "Plc"（宁可少传 MES 也不让扫码主流程走偏）
-        Eq("Normalize(null)=Plc", "Plc", SerialNumberTargets.Normalize(null));
-        Eq("Normalize(空串)=Plc", "Plc", SerialNumberTargets.Normalize(""));
-        Eq("Normalize(垃圾值)=Plc", "Plc", SerialNumberTargets.Normalize("xxx"));
-        Eq("Normalize(plc 小写)=Plc", "Plc", SerialNumberTargets.Normalize("plc"));
+        // Normalize（V2.15.20 二选一）：null/空串/非法值/已废弃的 "Both" 一律回落规范 "Mes"（默认 SN 传 MES）
+        Eq("Normalize(null)=Mes", "Mes", SerialNumberTargets.Normalize(null));
+        Eq("Normalize(空串)=Mes", "Mes", SerialNumberTargets.Normalize(""));
+        Eq("Normalize(垃圾值)=Mes", "Mes", SerialNumberTargets.Normalize("xxx"));
+        Eq("Normalize(废弃值 BOTH)=Mes", "Mes", SerialNumberTargets.Normalize("BOTH"));
         Eq("Normalize(mes 小写)=Mes", "Mes", SerialNumberTargets.Normalize("mes"));
-        Eq("Normalize(BOTH 混大小写)=Both", "Both", SerialNumberTargets.Normalize("BOTH"));
+        Eq("Normalize(PLC 大写)=Plc", "Plc", SerialNumberTargets.Normalize("PLC"));
 
-        // 三值判定：Plc/Both 写 PLC；Mes/Both 传 MES（写 PLC 与传 MES 互不排斥）
+        // 二值判定（互斥）：Mes 传 MES 不写 PLC；Plc 写 PLC 不传 MES
+        Check("Mes → 传 MES", SerialNumberTargets.SendsMes("Mes"));
+        Check("Mes → 不写 PLC", !SerialNumberTargets.WritesPlc("Mes"));
         Check("Plc → 写 PLC", SerialNumberTargets.WritesPlc("Plc"));
         Check("Plc → 不传 MES", !SerialNumberTargets.SendsMes("Plc"));
-        Check("Mes → 不写 PLC", !SerialNumberTargets.WritesPlc("Mes"));
-        Check("Mes → 传 MES", SerialNumberTargets.SendsMes("Mes"));
-        Check("Both → 写 PLC 且传 MES", SerialNumberTargets.WritesPlc("Both") && SerialNumberTargets.SendsMes("Both"));
         // 脏值按 Normalize 语义判定（协调器内部就是 Normalize 后再判定，两条路径同一实现）
-        Check("脏值 → 按 Plc 判定（写 PLC、不传 MES）",
-            SerialNumberTargets.WritesPlc("junk") && !SerialNumberTargets.SendsMes("junk"));
+        Check("脏值 → 按 Mes 判定（传 MES、不写 PLC）",
+            SerialNumberTargets.SendsMes("junk") && !SerialNumberTargets.WritesPlc("junk"));
 
-        // 默认值：target 默认 Plc（既有现场流程）、MES 地址空、超时 3000
+        // 默认值：target 默认 Mes（V2.15.20 起默认传 MES）、MES 地址空、超时 3000
         var sn = new SnRouteConfig();
-        Eq("SnRouteConfig.Target 默认 Plc", "Plc", sn.Target);
+        Eq("SnRouteConfig.Target 默认 Mes", "Mes", sn.Target);
         Eq("SnRouteConfig.MesUrl 默认空", "", sn.MesUrl);
         Eq("SnRouteConfig.MesTimeoutMs 默认 3000", 3000, sn.MesTimeoutMs);
         var app = new AppConfig();
@@ -529,23 +528,24 @@ internal static class TestRunner
             NullValueHandling = NullValueHandling.Ignore,
             Formatting = Formatting.None
         };
-        app.Sn.Target = "Both"; app.Sn.MesUrl = "http://19.87.6.50:8080/api/sn"; app.Sn.MesTimeoutMs = 5000;
+        app.Sn.Target = "Plc"; app.Sn.MesUrl = "http://19.87.6.50:8080/api/sn"; app.Sn.MesTimeoutMs = 5000;
         string json = JsonConvert.SerializeObject(app, settings);
         Check("json 含 sn 段", json.Contains("\"sn\":"));
+        Check("json 含 sn.target 键", json.Contains("\"target\":"));
         Check("json 含 sn.mesUrl 键", json.Contains("\"mesUrl\":"));
         Check("json 含 sn.mesTimeoutMs 键", json.Contains("\"mesTimeoutMs\":"));
         // 往返一致
         var back = JsonConvert.DeserializeObject<AppConfig>(json, settings);
-        Eq("往返 sn.target=Both", "Both", back.Sn.Target);
+        Eq("往返 sn.target=Plc", "Plc", back.Sn.Target);
         Eq("往返 sn.mesUrl", "http://19.87.6.50:8080/api/sn", back.Sn.MesUrl);
         Eq("往返 sn.mesTimeoutMs=5000", 5000, back.Sn.MesTimeoutMs);
         // json 手写脏值：反序列化原样进来，由 ApplyDefaults 归一（与运行时 Load 路径一致）
         var dirty = new AppConfig(); dirty.Sn.Target = "bogus";
         InvokePrivateStatic(typeof(ConfigStore), "ApplyDefaults", dirty);
-        Eq("ApplyDefaults 归一脏 target→Plc", "Plc", dirty.Sn.Target);
+        Eq("ApplyDefaults 归一脏 target→Mes", "Mes", dirty.Sn.Target);
         var nulled = new AppConfig(); nulled.Sn = null;
         InvokePrivateStatic(typeof(ConfigStore), "ApplyDefaults", nulled);
-        Check("ApplyDefaults 补 sn=null 段", nulled.Sn != null && nulled.Sn.Target == "Plc");
+        Check("ApplyDefaults 补 sn=null 段", nulled.Sn != null && nulled.Sn.Target == "Mes");
 
         // MES 报文（通用占位格式，客户协议定稿后只改 BuildPayload）：小驼峰字段 + 时间格式
         string payload = MesService.BuildPayload("SN12345", "U171", new DateTime(2026, 8, 30, 12, 0, 0));

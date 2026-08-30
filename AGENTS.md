@@ -101,13 +101,15 @@
   设定）**，PLC 读到 40004=1 后读本区即得本件 SN；写入时机=扫码 OK 写实际 SN / 失败·超时整区清 0 /
   **人工补录覆盖成 1 前先写补录 SN**（`ProductionCoordinator.StepScanChannel` 四处 + 
   `PlcService.WriteSerialNumber`）/ 建站成功回写最近缓存（`_currentSerial`）/ 上电初始化整区清 0；
-  SN 超容量截断记 WARN（调大 `scanSerialNumberLen` 即可）。**SN 去向可配置（V2.15.19，客户 MES
-  对接预留）**：顶层配置段 `sn`（`SnRouteConfig`：`target`/`mesUrl`/`mesTimeoutMs`）三选路由——
-  `Plc`（默认，写 40013 起既有流程）/ `Mes`（SN 不写 PLC、SN 区保持全 0，改由
-  `Services/MesService.cs` 后台 HTTP POST JSON `{sn,model,time}` 给 `sn.mesUrl`，
+  SN 超容量截断记 WARN（调大 `scanSerialNumberLen` 即可）。**SN 去向二选一（V2.15.19 引入，
+  V2.15.20 收紧：默认传 MES、纯配置变量无界面）**：顶层配置段 `sn`（`SnRouteConfig`：
+  `target`/`mesUrl`/`mesTimeoutMs`）二选路由——`Mes`（**默认**，SN 不写 PLC、SN 区保持全 0，
+  改由 `Services/MesService.cs` 后台 HTTP POST JSON `{sn,model,time}` 给 `sn.mesUrl`，
   **Task.Run 异步绝不阻塞扫码通道/40004 写结果**，URL 空 WARN 一次、失败只记日志不重试、
-  在途超 10 丢弃；报文为通用占位格式，**客户 MES 协议定稿后只改 `MesService.BuildPayload`/发送方式**）/
-  `Both`（两头都发，MES 方案验证期对照用）。**分流唯一收口 = `ProductionCoordinator.DeliverSerialNumber`**
+  在途超 10 丢弃；报文为通用占位格式，**客户 MES 协议定稿后只改 `MesService.BuildPayload`/
+  发送方式，对接要点与代码修改位置见 `docs/MES对接说明.md`**）/ `Plc`（写 40013 起既有流程，
+  不传 MES）。**无设置页界面（V2.15.20 已删 cmbSnTarget/txtMesUrl 等 4 控件），只手改
+  appconfig.json 的 `sn` 段、重启生效**。**分流唯一收口 = `ProductionCoordinator.DeliverSerialNumber`**
   （`StepScanChannel` 四处 SN 写入点全部改走它，`target` 判定统一走 `SerialNumberTargets`
   Normalize/WritesPlc/SendsMes，禁止各处再写一套字符串比较）；**无论 target 是什么，40004 结果
   1/2 握手与补录覆盖流程完全不变**；`MesService` 归 MainForm 所有（BuildServices 创建、

@@ -1,5 +1,50 @@
 # 版本改动记录
 
+## V2.15.20（2026-08-30）SN 去向改二选一（默认传 MES）+ 删除设置页 SN 去向选项 + 新增 MES 对接文档
+
+> 需求：① 整理一份 MES 对接文档（对接要点 + 协议定稿后代码改哪里），后续对接用；
+> ② 删掉系统设置里 V2.15.19 加的 SN 去向 4 个控件（"SN 传往"下拉、"MES 地址"框），
+> SN 去向改回**纯配置变量控制**（appconfig.json 的 `sn` 段），且由三选简化为**二选一**
+> （Mes / Plc，去掉"都传"），**默认传 MES**。
+
+### 改动范围
+
+- **配置（Models/AppConfig.cs）**：`SerialNumberTargets` 删 `Both` 常量，二选一
+  （`Mes`/`Plc` 互斥）；**默认目标从 `Plc` 改为 `Mes`**——`SnRouteConfig.Target` 默认值、
+  `Normalize` 空/非法值回落方向同步改 Mes；`WritesPlc/SendsMes` 改为按二选一显式判定。
+  类注释写明配置方式（json 手改 `sn.target`，无界面入口，重启生效）与文档指引。
+- **设置页（Views/SettingsForm.cs + Designer）**：删除 V2.15.19 的 4 个控件
+  （`lblSnTarget/cmbSnTarget/lblMesUrl/txtMesUrl`）及全部相关逻辑（LoadFromConfig 加载、
+  OnSave 回写、`PopulateSnTargetItems()`、ApplyLanguage 双语、悬停提示）；两处 ASCII
+  布局图还原并注明"V2.15.20 起删除、SN 去向纯配置变量控制"。
+- **注释清理**：ProductionCoordinator（DeliverSerialNumber 三选→二选一叙述、3 处调用点
+  "target=Plc/Both"改"target=Plc"、字段注释）、MesService 头部注释与 WARN 文案
+  （"请在系统设置里填"→"请在 appconfig.json 的 sn.mesUrl 里配"——界面没这入口了）、
+  ConfigStore 兜底注释、MainForm 两处注释。
+- **MES 对接文档（docs/MES对接说明.md，新建）**：功能定位与二选一语义、appconfig.json
+  配置方法、当前占位报文格式（POST JSON `{sn,model,time}`）、运行行为（异步/尽力而为/
+  防堆积/URL 缺失 WARN）、**协议定稿后代码修改位置表**（必改：MesService.BuildPayload/
+  SendSerialAsync、SnRouteConfig 加字段；一般不动：DeliverSerialNumber/PLC 协议/设置页）、
+  混淆与异步红线、调试验证方法（日志关键字/本地 mock MES/PLC 侧对照）、相关文件索引。
+- **测试沉淀（TestRunner.cs 第⑨组）**：断言随语义更新——Normalize 脏值/废弃值
+  （"BOTH"）回落 Mes、默认 Target=Mes、二值互斥判定、脏值按 Mes 判定、ApplyDefaults
+  归一脏 target→Mes、往返用 target=Plc 验证、新增 `sn.target` JSON 键名断言。
+
+### 为什么这么设计（要点）
+
+- **默认 Mes**：按用户最新口径——客户后续 SN 交给 MES 是主方向，缺省即目标行为；
+  要回到 PLC 寄存器流程（现场联调/客户反悔）只需把 `sn.target` 配成 `"Plc"`。
+- **删界面选项**：MES 方案未定稿，设置页选项反而让现场操作员面对不该他们做的决策；
+  配置变量由开发/调试人员掌控，运维界面保持只有业务参数。
+- **去 Both**：两头对照是设计期的验证手段，真要对照可临时手改 json 分两次跑，不值得
+  为它保留一条常驻分支（删掉后 WritesPlc/SendsMes 互斥，语义更干净）。
+
+### 文档同步
+
+- 本文件 V2.15.20 小节；README 可配置项改二选一默认 Mes；docs/CommandCenter.md
+  §5.5 SN 去向规则、第一部分删设置页操作说明、第八部分版本；AGENTS.md SN 去向段更新；
+  新增 docs/MES对接说明.md。
+
 ## V2.15.19（2026-08-30）SN 去向可配置（PLC 寄存器 / MES 上传 / 都传）
 
 > 需求：客户提出后续 SN 可能改为"上位机直接传 MES、不再写 PLC 寄存器区（40013 起）"，

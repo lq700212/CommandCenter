@@ -66,7 +66,7 @@ namespace CommandCenter.Views
         private ImageStore _imageStore;
         private ProductionCoordinator _coordinator;
         private ConnectionMonitor _monitor;
-        private MesService _mes;                    // MES 上传服务（V2.15.19）：sn.target=Mes/Both 时扫码 SN 经它后台 HTTP 上传；归主窗体所有
+        private MesService _mes;                    // MES 上传服务（V2.15.19）：sn.target=Mes 时扫码 SN 经它后台 HTTP 上传；归主窗体所有
         private List<IScanner> _scanners = new List<IScanner>();   // 扫码枪列表（多台各一个实例，V1.8.1 起支持多台；串口/基恩士 TCP 无协议按各自 Mode 二选一）
         private Label[] _lblCamStatuses;            // 每台相机一个连接指示灯（≤2台模式，按相机下标对齐）
         private ComboBox _cmbCamOverview;           // 相机下拉列表（≥3台模式）：下拉查看每台名字+状态圆点
@@ -167,7 +167,7 @@ namespace CommandCenter.Views
             // 热更/关窗时旧 ImageStore Dispose 会自行停掉定时器，这里只对当前新实例启动。
             _imageStore.StartPeriodicCleanup();
             // V2.15.19：MES 上传服务（sn 段配置）——协调器扫码 OK/人工补录拿到 SN 后按
-            // sn.target 决定经它后台 HTTP 上传（Plc/Mes/Both 三选，见 DeliverSerialNumber）。
+            // sn.target（V2.15.20 二选一：Mes=默认传 MES / Plc=写寄存器）决定经它后台 HTTP 上传。
             // 与 PlcService 同级归主窗体所有：热更/关窗 Dispose（见 FormClosing/ApplyRuntimeConfig），
             // 切型号只重建协调器、本服务复用同一实例。
             _mes = new MesService(_config.Sn);

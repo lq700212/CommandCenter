@@ -66,11 +66,11 @@ namespace CommandCenter.Services
         private readonly ImageStore _imageStore;
         private readonly List<bool> _windowEnabled;         // 窗口→是否启用（V1.12.28）
         private readonly string _productModel;              // 固定产品型号（V2.7，每次扫码写入 PLC）
-        /// <summary>SN 去向配置（V2.15.19，sn 段）：Target 决定扫码 SN 写 PLC 寄存器区还是上传 MES
-        /// 还是都发（判定走 SerialNumberTargets，见 DeliverSerialNumber）；MesUrl/MesTimeoutMs 由
-        /// MesService 自己读取。可为 null（旧调用方未传时按 Target=Plc 走既有 PLC 流程）。</summary>
+        /// <summary>SN 去向配置（V2.15.19，V2.15.20 起二选一，sn 段）：Target 决定扫码 SN 上传 MES
+        /// （默认）还是写 PLC 寄存器区（判定走 SerialNumberTargets，见 DeliverSerialNumber）；
+        /// MesUrl/MesTimeoutMs 由 MesService 自己读取。可为 null（未传时按 Target=Mes 兜底）。</summary>
         private readonly SnRouteConfig _snRoute;
-        /// <summary>MES 上传服务（V2.15.19）：target 为 Mes/Both 时 SN 经它后台 HTTP 上传；
+        /// <summary>MES 上传服务（V2.15.19）：target 为 Mes 时 SN 经它后台 HTTP 上传；
         /// 归 MainForm 所有（BuildServices 创建/释放），协调器只调用不 Dispose。可为 null（未传时
         /// Mes 目标等于丢了上传通路，DeliverSerialNumber 已做空判防御，不影响 PLC 流程）。</summary>
         private readonly MesService _mes;
@@ -294,8 +294,8 @@ namespace CommandCenter.Services
             _imageStore = imageStore;
             _windowEnabled = windowEnabled;
             _productModel = productModel ?? "";
-            // V2.15.19：SN 去向（Plc/Mes/Both）与 MES 上传服务。两者都可空：snRoute 空按
-            // "Plc" 走既有 PLC 流程（DeliverSerialNumber 内 Normalize 兜底）；mes 空只丢
+            // V2.15.19：SN 去向（Mes=默认传 MES / Plc=写寄存器）与 MES 上传服务。两者都可空：
+            // snRoute 空按默认 "Mes" 兜底（DeliverSerialNumber 内 Normalize 归一）；mes 空只丢
             // MES 上传通路，不影响 PLC 流程（MainForm.BuildServices 正常都传）。
             _snRoute = snRoute;
             _mes = mes;
@@ -589,11 +589,11 @@ namespace CommandCenter.Services
         }
 
         /// <summary>
-        /// 扫码 SN 去向分流（V2.15.19）：本协调器内所有"把 SN 交给外部"的动作【唯一收口】，
-        /// 按 sn.target 三选路由——
-        ///   - "Plc"（默认）：写 PLC SN 寄存器区（协议 40013 起，既有流程，含传 "" 整区清 0）；
-        ///   - "Mes"：不再写 PLC SN 区（保持全 0），SN 经 MesService 后台 HTTP 上传；
-        ///   - "Both"：PLC 写入照旧 + MES 同时上传（客户 MES 方案验证期两头对照）。
+        /// 扫码 SN 去向分流（V2.15.19，V2.15.20 起二选一）：本协调器内所有"把 SN 交给外部"的动作【唯一收口】，
+        /// 按 sn.target 二选一路由——
+        ///   - "Mes"（默认）：不再写 PLC SN 区（保持全 0），SN 经 MesService 后台 HTTP 上传；
+        ///   - "Plc"：写 PLC SN 寄存器区（协议 40013 起，既有流程，含传 "" 整区清 0），不上传 MES。
+        /// 配置无界面入口，只改 appconfig.json 的 sn.target（见 SnRouteConfig 与 docs/MES对接说明.md）。
         /// 【时序红线】PLC 目标的写入是同步的——调用点保证在 WriteScanResult(1) 之前完成，
         /// "SN 先于结果落地"（PLC 读到 40004=1 时 SN 区必已就绪）；MES 上传是后台异步的，
         /// 绝不阻塞扫码通道（MES 慢/断网都不影响 PLC 握手节拍）。
@@ -604,14 +604,14 @@ namespace CommandCenter.Services
         /// MES 侧没有"空 SN"上报的概念，不会发送。</param>
         private void DeliverSerialNumber(string serial)
         {
-            // 配置为空按 "Plc" 兜底（Normalize 同时把非法脏值归一到规范值，json 手改不崩流程）
+            // 配置为空按 "Mes" 兜底（Normalize 同时把非法脏值归一到规范值，json 手改不崩流程）
             string target = Models.SerialNumberTargets.Normalize(_snRoute?.Target);
 
-            // PLC 侧：Plc/Both 写 SN 区（serial="" 即整区清 0，防旧件残留被 PLC 误读——既有语义）；Mes 跳过
+            // PLC 侧：Plc 写 SN 区（serial="" 即整区清 0，防旧件残留被 PLC 误读——既有语义）；Mes 跳过
             if (Models.SerialNumberTargets.WritesPlc(target))
                 _plc.WriteSerialNumber(serial);
 
-            // MES 侧：Mes/Both 且拿到有效 SN 才上传（空 SN 只属于 PLC 清区语义）
+            // MES 侧：Mes 且拿到有效 SN 才上传（空 SN 只属于 PLC 清区语义）
             if (Models.SerialNumberTargets.SendsMes(target) && !string.IsNullOrEmpty(serial))
             {
                 if (_mes != null)
@@ -635,7 +635,7 @@ namespace CommandCenter.Services
                     _plc.WriteProductModel(_productModel);
                     // V2.15.17：本件 SN 写进 PLC 的 SN 区（协议 40013 起），与型号同一套设定——
                     // 无独立握手信号，PLC 在读到 40004=1 后读 SN 区即得本件序列号。
-                    // V2.15.19：改走 DeliverSerialNumber 分流——target=Plc/Both 照写本区（顺序保证
+                    // V2.15.19：改走 DeliverSerialNumber 分流——target=Plc 照写本区（顺序保证
                     // "SN 先于结果落地"），target=Mes 不写本区、SN 改走 MES 上传（后台异步）。
                     // 顺序保证"SN 先于结果落地"，PLC 读到结果≠0 时 SN 区必已就绪。
                     DeliverSerialNumber(LatestSerialNumber);
@@ -656,7 +656,7 @@ namespace CommandCenter.Services
                     // 立刻把结果写 2 通知 PLC：PLC 拿到 2 会死等人工补录（V2.14.33 协议，见步骤1），
                     // 不会空等 30s。清标志防残留误判下一轮。
                     _plc.WriteProductModel(_productModel);
-                    // V2.15.19：DeliverSerialNumber("") 分流——target=Plc/Both 时 PLC SN 区整区清 0
+                    // V2.15.19：DeliverSerialNumber("") 分流——target=Plc 时 PLC SN 区整区清 0
                     // （防旧件残留被 PLC 误读，V2.15.17 既有语义）；MES 侧无"空 SN"上报概念，不发送。
                     DeliverSerialNumber("");      // 本件无有效 SN
                     _plc.WriteScanResult(2);      // 扫码结果=2（通知 PLC：扫码失败，等待人工补录）
@@ -671,7 +671,7 @@ namespace CommandCenter.Services
                 else if ((DateTime.UtcNow - _scanArriveUtc).TotalMilliseconds >= ScanWaitMs)
                 {
                     _plc.WriteProductModel(_productModel);
-                    // V2.15.19：DeliverSerialNumber("") 分流——target=Plc/Both 时 PLC SN 区整区清 0
+                    // V2.15.19：DeliverSerialNumber("") 分流——target=Plc 时 PLC SN 区整区清 0
                     // （防旧件残留被 PLC 误读，V2.15.17 既有语义）；MES 侧无"空 SN"上报概念，不发送。
                     DeliverSerialNumber("");      // 超时无码
                     _plc.WriteScanResult(2);      // 扫码结果=2（通知 PLC：超时无码，等待人工补录）
@@ -696,7 +696,7 @@ namespace CommandCenter.Services
             {
                 // V2.15.17：补录的 SN 先落 SN 区再覆盖结果——PLC 读到 1 后读 40013 起拿到的
                 // 必须是本件补录的序列号（与扫码 OK 分支同一顺序保证）。
-                // V2.15.19：改走 DeliverSerialNumber 分流——target=Plc/Both 照写本区后覆盖结果 1，
+                // V2.15.19：改走 DeliverSerialNumber 分流——target=Plc 照写本区后覆盖结果 1，
                 // target=Mes 不写本区、补录 SN 改走 MES 上传（后台异步）。
                 DeliverSerialNumber(LatestSerialNumber);
                 _plc.WriteScanResult(1);          // 覆盖：2(NG) → 1(OK)
