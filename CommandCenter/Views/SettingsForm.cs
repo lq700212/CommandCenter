@@ -11,8 +11,8 @@ namespace CommandCenter.Views
     /// 系统设置窗体：直接编辑 AppConfig（引用同一实例，保存由上层 ConfigStore 完成）。
     ///
     ///     ┌─────────────────────────────────────────────────────────────┐
-    /// │ PLC IP:  [19.87.6.1]  端口:[502] [产品型号配置…]                │
-    /// │ 显示窗口: 行[4] 列[7] [√自适应]                              │
+    /// │ PLC IP:  [19.87.6.1]  端口:[502] [产品型号配置…] [SN 传往:▾]    │
+    /// │ 显示窗口: 行[4] 列[7] [√自适应]   MES 地址:[http://…]（V2.15.19）│
     /// │ 图片保存根目录: [E:\Images]                                    │
     /// │ 目录结构: [配置目录结构...] {年月日}/{SN}/{OKNG}             │
     /// │           ↑ 下方与文件名模板行留 12px 空隙（上下一致）      │
@@ -52,6 +52,9 @@ namespace CommandCenter.Views
     /// 界面说明统一用悬停气泡，见 SettingsForm.Designer.cs 的 tip）。
     /// "窗口/点位配置..."按钮打开 WindowPointForm，可视化设置每个窗口的存图点位
     /// （默认点位=窗口编号，可自定义、可交换窗口位置，见 DisplayConfig.WindowStationMap）。
+    /// V2.15.19 SN 去向：PLC 区行尾"SN 传往"下拉（cmbSnTarget：PLC 寄存器/MES 上传/都传，
+    /// 存储值 SnRouteConfig.Target=Plc/Mes/Both）+ 显示窗口行尾"MES 地址"框（txtMesUrl，
+    /// =SnRouteConfig.MesUrl，HTTP POST 接收 URL）。加载/保存/双语见 LoadFromConfig/OnSave/ApplyLanguage。
     /// </summary>
     public partial class SettingsForm : Form
     {
@@ -110,6 +113,14 @@ namespace CommandCenter.Views
             // PLC 基础参数
             txtPlcIp.Text = _cfg.Plc.IpAddress;
             nudPlcPort.Value = _cfg.Plc.Port;
+            // V2.15.19：SN 去向下拉（sn.target：0=PLC 寄存器 / 1=MES 上传 / 2=都传）与 MES 地址。
+            // 下拉项按当前语言先填一次（ApplyLanguage 里切语言时再刷新），Normalize 把脏值归一后定位。
+            PopulateSnTargetItems();
+            string snTarget = SerialNumberTargets.Normalize(_cfg.Sn?.Target);
+            cmbSnTarget.SelectedIndex =
+                snTarget == SerialNumberTargets.Mes ? 1 :
+                snTarget == SerialNumberTargets.Both ? 2 : 0;
+            txtMesUrl.Text = _cfg.Sn?.MesUrl ?? "";
             // 显示窗口行列（V2.12.0 自适应开关：勾选后行/列输入框置灰，行列按相机点位表自动算）
             chkAutoFit.Checked = _cfg.Display.AutoFit;
             UpdateAutoFitUi();
@@ -134,6 +145,23 @@ namespace CommandCenter.Views
             LoadScannerRows();
             // V2.15.0 界面语言：切换入口在主界面标题栏（btnToggleLanguage，V2.15.1 移出本窗体），
             // 这里不需要任何语言初始化；I18n.Language 由主界面维护，保存时随 _cfg.Language 兜底写盘。
+        }
+
+        /// <summary>
+        /// 填充"SN 传往"下拉的三项文案（V2.15.19，双语）。
+        /// 项下标即存储值映射：0=Plc（写 PLC SN 寄存器区）/ 1=Mes（MES 上传）/ 2=Both（都传）——
+        /// 与 SerialNumberTargets 常量一一对应，加载（LoadFromConfig）、保存（OnSave）、
+        /// 切语言（ApplyLanguage）三处共用，不各写一套。
+        /// 已有选中项时重填后保持选中（切语言场景）。
+        /// </summary>
+        private void PopulateSnTargetItems()
+        {
+            int sel = cmbSnTarget.SelectedIndex;
+            cmbSnTarget.Items.Clear();
+            cmbSnTarget.Items.Add(I18n.T("PLC 寄存器", "PLC Registers"));       // SerialNumberTargets.Plc
+            cmbSnTarget.Items.Add(I18n.T("MES 上传", "MES Upload"));            // SerialNumberTargets.Mes
+            cmbSnTarget.Items.Add(I18n.T("都传（PLC+MES）", "Both (PLC+MES)")); // SerialNumberTargets.Both
+            if (sel >= 0 && sel < cmbSnTarget.Items.Count) cmbSnTarget.SelectedIndex = sel;
         }
 
         /// <summary>
@@ -702,6 +730,10 @@ namespace CommandCenter.Views
             lblPlcIp.Text = I18n.T("PLC IP:", "PLC IP:");
             lblPlcPort.Text = I18n.T("端口:", "Port:");
             btnModelConfig.Text = I18n.T("产品型号配置…", "Model Config…");
+            // V2.15.19：SN 去向下拉（含下拉项双语刷新，保持当前选中）与 MES 地址框
+            PopulateSnTargetItems();
+            lblSnTarget.Text = I18n.T("SN 传往:", "SN Target:");
+            lblMesUrl.Text = I18n.T("MES 地址:", "MES URL:");
             lblRows.Text = I18n.T("显示窗口行:", "Display Rows:");
             lblCols.Text = I18n.T("列:", "Columns:");
             lblDir.Text = I18n.T("图片保存根目录:", "Image Root Dir:");
@@ -767,6 +799,13 @@ namespace CommandCenter.Views
             tip.SetToolTip(btnModelConfig, I18n.T(
                 "打开【产品型号配置】对话框（V2.14.14）：用表格维护\"型号名称 ↔ PLC 序号(40007)\"映射。\r\n表格两列：序号、型号名称；前几行默认预载当前已有型号与序号，可增删改。\r\n【确定】把当前对应关系保存到配置（重启后自动加载），【取消】关闭不保存。\r\n现场默认 Z121=1、U171=2；每次扫码上位机先写 40007=本序号，再写 40008~40012=型号 ASCII 字符串。",
                 "Model Config dialog: maintain the \"model name ↔ PLC index (40007)\" mapping in a table.\r\nTwo columns: index, model name. Default rows are preloaded from current config; add/edit/delete freely.\r\nOK writes back to config, Cancel discards. Site defaults: Z121=1, U171=2."));
+            // V2.15.19：SN 去向下拉与 MES 地址框悬停提示
+            tip.SetToolTip(cmbSnTarget, I18n.T(
+                "扫码 SN 序列号的去向（V2.15.19，配置 sn.target）：\r\n【PLC 寄存器】SN 写进 PLC 的 SN 区（协议 40013 起连续寄存器，既有流程）；\r\n【MES 上传】SN 不写 PLC，改为后台 HTTP POST 给 MES（地址见右侧输入框）；\r\n【都传】PLC 照写 + MES 同时上传（MES 方案验证期两头对照用）。\r\n无论选哪项，扫码结果 40004 的握手流程都不变。保存后热生效。",
+                "Where the scanned SN goes (config sn.target):\r\n[PLC Registers] Write SN into the PLC SN register area (protocol 40013+, existing flow).\r\n[MES Upload] Do not write PLC; POST the SN to MES via HTTP (URL on the right).\r\n[Both] Write PLC and upload to MES at the same time (for MES verification).\r\nThe scan-result 40004 handshake is unaffected in all cases. Hot-apply after Save."));
+            tip.SetToolTip(txtMesUrl, I18n.T(
+                "MES 接收 SN 的完整地址（http/https），SN 以 HTTP POST JSON（sn/型号/时间）提交。\r\n仅\"SN 传往\"选【MES 上传】或【都传】时生效；留空时 SN 不上传并在日志 WARN 提示。\r\nMES 对接协议定稿后由开发者调整报文格式，本地址即客户提供的接口 URL。",
+                "Full URL (http/https) that receives the SN via HTTP POST JSON (sn/model/time).\r\nEffective only when SN Target is [MES Upload] or [Both]; empty = no upload (logged as WARN).\r\nPayload format will be adapted to the customer's MES protocol once finalized."));
             tip.SetToolTip(nudRows, I18n.T(
                 "主界面显示窗口的行数。窗口总数=行×列；保存后即时生效。\r\n新增窗口的存图点位默认=窗口编号，可在下方\"窗口/点位配置...\"里改。\r\n勾选\"自适应\"后本框自动置灰（行数由相机点位表自动计算）。",
                 "Number of rows in the main window matrix. Total windows = rows×columns.\r\nNew windows default to point = window index, changeable in Window/Point Config below.\r\nGreyed out while Auto Fit is checked (rows auto-computed from camera point tables)."));
@@ -862,6 +901,14 @@ namespace CommandCenter.Views
 
             _cfg.Plc.IpAddress = txtPlcIp.Text.Trim();
             _cfg.Plc.Port = (int)nudPlcPort.Value;
+            // V2.15.19：SN 去向（下拉项下标→存储值，映射同 PopulateSnTargetItems）与 MES 地址。
+            // 保存只改内存 _cfg（写盘与热生效由上层 OpenSettings 的 ConfigStore.Save + ApplyRuntimeConfig 完成）。
+            // Target 统一走 Normalize 落规范值（防御下拉意外无选中时回落 Plc）。
+            int snSel = cmbSnTarget.SelectedIndex;
+            _cfg.Sn.Target = SerialNumberTargets.Normalize(
+                snSel == 1 ? SerialNumberTargets.Mes :
+                snSel == 2 ? SerialNumberTargets.Both : SerialNumberTargets.Plc);
+            _cfg.Sn.MesUrl = (txtMesUrl.Text ?? "").Trim();
             // 固定产品型号（V2.7 协议）：保存后每次扫码上位机把型号写入 PLC 40007~40011；
             // V2.8：型号同时决定"点位→相机程序号"查哪张表。
             // V2.14.24：设置页已删"产品型号"下拉，_currentModel = 打开时主界面标题栏选中值（或

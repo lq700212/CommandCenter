@@ -102,6 +102,15 @@ namespace CommandCenter.Models
         /// 日志（LogHelper）不受本值影响，始终中文（工程师排查用）。
         /// </summary>
         public string Language { get; set; } = "zh-CN";
+
+        /// <summary>
+        /// 扫码 SN 序列号去向配置（V2.15.19，JSON 段 `sn`，见 SnRouteConfig）。
+        /// 【为什么独立成顶层段而不放进 PlcConfig】SN 去向（写 PLC 寄存器 / 上传 MES / 都发）
+        /// 是"扫码数据流到哪去"的业务路由决策，不是 PLC 通讯参数——放进 PlcConfig 会把
+        /// "PLC 连接/寄存器地址"与"SN 路由"两个不相关的关注点搅在一起；独立成段后，
+        /// MES 对接地址/超时与路由目标在一处配齐，客户 MES 方案调整时只动这一段。
+        /// </summary>
+        public SnRouteConfig Sn { get; set; } = new SnRouteConfig();
     }
 
     /// <summary>
@@ -1201,5 +1210,75 @@ namespace CommandCenter.Models
         /// </summary>
         public string DevPasswordHash { get; set; }
             = "87274af01876341455b32d805946f272871bb42effa6604dccf28bb027afa82b";
+    }
+
+    /// <summary>
+    /// 扫码 SN 序列号去向配置（V2.15.19，JSON 段 `sn`）。
+    ///
+    /// 【背景】客户提出后续 SN 可能改为"上位机直接传 MES、不再写 PLC 寄存器区（40013 起）"，
+    /// 但 MES 对接方案未最终定稿。为两头都不堵死，本配置把"SN 到哪去"做成三选路由：
+    /// 目标选 PLC 走既有寄存器写入；目标选 MES 走 HTTP 上传（Services/MesService）；
+    /// "都传"用于客户方案验证期两头对照。客户 MES 协议定稿后只改 MesService 的报文格式，
+    /// 配置结构与路由架构不再动。
+    ///
+    /// 【字段说明】
+    ///   - Target：SN 去向目标（"Plc"/"Mes"/"Both"，见 SerialNumberTargets 常量与判定）；
+    ///   - MesUrl：MES 接收地址（完整 http/https URL）；Target 为 Mes/Both 时必须配置，
+    ///     留空时 MesService 会 WARN 提示（每进程一次）且不上传；
+    ///   - MesTimeoutMs：MES 上传超时（毫秒）。上传走后台线程，超时只影响该次上传的
+    ///     失败判定，绝不阻塞协调器扫码通道与 40004 结果写入。
+    /// </summary>
+    public class SnRouteConfig
+    {
+        /// <summary>SN 去向目标（V2.15.19）："Plc"=写 PLC SN 寄存器区（默认，当前现场流程）、
+        /// "Mes"=仅上传 MES、"Both"=两者都发（过渡期对照验证）。
+        /// 空/非法值由 ConfigStore.ApplyDefaults 归一为 "Plc"（见 SerialNumberTargets.Normalize）。</summary>
+        public string Target { get; set; } = SerialNumberTargets.Plc;
+
+        /// <summary>MES 接收 SN 的完整 URL（V2.15.19，如 http://19.87.x.x:8080/api/sn）。
+        /// 仅 Target 为 "Mes"/"Both" 时生效；MesService 以 HTTP POST JSON 提交。</summary>
+        public string MesUrl { get; set; } = "";
+
+        /// <summary>MES 上传超时毫秒（V2.15.19，默认 3000）。上传在后台线程执行，
+        /// 超时不会拖慢 PLC 握手节拍，只决定该次上传多久判失败（失败记 WARN 日志）。</summary>
+        public int MesTimeoutMs { get; set; } = 3000;
+    }
+
+    /// <summary>
+    /// SN 去向目标的常量与判定规则（V2.15.19）。
+    /// 【为什么收敛成静态类】"哪些目标要写 PLC / 要传 MES"的判定在协调器（DeliverSerialNumber）、
+    /// 设置页（下拉选中值↔存储值互转）、测试用例三处都要用——收敛到这里统一维护，
+    /// 禁止各处再各写一套字符串比较（改目标名/加目标时漏一处就是隐性 bug）。
+    /// 存储值大小写不敏感（json 手写 "plc" 也能识别），但落盘统一用常量规范值。
+    /// </summary>
+    public static class SerialNumberTargets
+    {
+        /// <summary>写 PLC SN 寄存器区（协议 40013 起，既有流程）</summary>
+        public const string Plc = "Plc";
+
+        /// <summary>仅上传 MES（HTTP POST，见 Services/MesService）</summary>
+        public const string Mes = "Mes";
+
+        /// <summary>PLC 与 MES 都发（客户 MES 方案验证期用）</summary>
+        public const string Both = "Both";
+
+        /// <summary>
+        /// 把任意输入归一成规范目标值：空串/ null /非法值一律回落 "Plc"（默认走既有 PLC 流程，
+        /// 宁可少传 MES 也不让扫码主流程因配置脏值而偏离现状）。设置页保存与 ApplyDefaults 统一走本方法。
+        /// </summary>
+        public static string Normalize(string target)
+        {
+            if (string.Equals(target, Mes, StringComparison.OrdinalIgnoreCase)) return Mes;
+            if (string.Equals(target, Both, StringComparison.OrdinalIgnoreCase)) return Both;
+            return Plc;   // "Plc"（含大小写变体）与一切非法值都归一到规范 Plc
+        }
+
+        /// <summary>该目标下是否要写 PLC SN 寄存器区（Plc/Both 为 true；Mes 为 false）。
+        /// 注意：无论目标是什么，PLC 扫码结果 40004 的 1/2 握手照常——SN 去向只影响 SN 区，不影响握手。</summary>
+        public static bool WritesPlc(string target) => !string.Equals(Normalize(target), Mes, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>该目标下是否要上传 MES（Mes/Both 为 true；Plc 为 false）。</summary>
+        public static bool SendsMes(string target) => string.Equals(Normalize(target), Mes, StringComparison.OrdinalIgnoreCase)
+                                                    || string.Equals(Normalize(target), Both, StringComparison.OrdinalIgnoreCase);
     }
 }

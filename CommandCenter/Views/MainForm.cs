@@ -66,6 +66,7 @@ namespace CommandCenter.Views
         private ImageStore _imageStore;
         private ProductionCoordinator _coordinator;
         private ConnectionMonitor _monitor;
+        private MesService _mes;                    // MES 上传服务（V2.15.19）：sn.target=Mes/Both 时扫码 SN 经它后台 HTTP 上传；归主窗体所有
         private List<IScanner> _scanners = new List<IScanner>();   // 扫码枪列表（多台各一个实例，V1.8.1 起支持多台；串口/基恩士 TCP 无协议按各自 Mode 二选一）
         private Label[] _lblCamStatuses;            // 每台相机一个连接指示灯（≤2台模式，按相机下标对齐）
         private ComboBox _cmbCamOverview;           // 相机下拉列表（≥3台模式）：下拉查看每台名字+状态圆点
@@ -165,9 +166,15 @@ namespace CommandCenter.Views
             // 过期日期目录；启动后 30 秒跑第一次、之后每 24 小时一次，见 ImageStore.StartPeriodicCleanup）。
             // 热更/关窗时旧 ImageStore Dispose 会自行停掉定时器，这里只对当前新实例启动。
             _imageStore.StartPeriodicCleanup();
+            // V2.15.19：MES 上传服务（sn 段配置）——协调器扫码 OK/人工补录拿到 SN 后按
+            // sn.target 决定经它后台 HTTP 上传（Plc/Mes/Both 三选，见 DeliverSerialNumber）。
+            // 与 PlcService 同级归主窗体所有：热更/关窗 Dispose（见 FormClosing/ApplyRuntimeConfig），
+            // 切型号只重建协调器、本服务复用同一实例。
+            _mes = new MesService(_config.Sn);
+            // 协调器构造尾部两个新参数：SN 去向配置 + MES 服务（分流收口见 DeliverSerialNumber）
             _coordinator = new ProductionCoordinator(_plc, _cameras, cams, _imageStore,
                 _config.Display.WindowEnabled, _config.ProductModel, _config.Display.WindowPointMaps,
-                WindowCount());
+                WindowCount(), _config.Sn, _mes);
 
             // 连接健康监控：后台心跳 + 断连自动重连 + 边沿日志（不影响任何 UI 刷新）
             _monitor = new ConnectionMonitor(_plc, _cameras);
@@ -834,7 +841,7 @@ namespace CommandCenter.Views
             _coordinator = new ProductionCoordinator(_plc, _cameras,
                 _config.Cameras ?? new List<CameraConfig>(), _imageStore,
                 _config.Display.WindowEnabled, _config.ProductModel, _config.Display.WindowPointMaps,
-                WindowCount());
+                WindowCount(), _config.Sn, _mes);   // V2.15.19：切型号只重建协调器，_mes 复用同一实例
             _coordinator.AttachScanners(_scanners);
             _coordinator.LatestSerialNumber = serial;
             SubscribeCoordinatorEvents();
@@ -1162,6 +1169,9 @@ namespace CommandCenter.Views
                 catch (Exception ex) { LogHelper.Warn("关闭：协调器释放异常 " + ex.Message); }
                 try { _plc?.Dispose(); }
                 catch (Exception ex) { LogHelper.Warn("关闭：PLC 释放异常 " + ex.Message); }
+                // V2.15.19：MES 上传服务归主窗体所有，关闭时显式释放（协调器不代关）
+                try { _mes?.Dispose(); }
+                catch (Exception ex) { LogHelper.Warn("关闭：MES 服务释放异常 " + ex.Message); }
                 foreach (var sc in _scanners)
                 {
                     try { sc?.Dispose(); }
@@ -1698,6 +1708,9 @@ namespace CommandCenter.Views
             catch (Exception ex) { LogHelper.Warn("热更：协调器释放异常 " + ex.Message); }
             try { _plc?.Dispose(); }
             catch (Exception ex) { LogHelper.Warn("热更：PLC 释放异常 " + ex.Message); }
+            // V2.15.19：MES 服务随热更重建（BuildServices 用新 sn 段配置 new 新实例），旧实例先释放
+            try { _mes?.Dispose(); }
+            catch (Exception ex) { LogHelper.Warn("热更：MES 服务释放异常 " + ex.Message); }
             foreach (var sc in _scanners)
             { try { sc?.Dispose(); } catch (Exception ex) { LogHelper.Warn("热更：扫码枪释放异常 " + ex.Message); } }
             foreach (var cam in _cameras ?? new List<KeyenceIV4Camera>())

@@ -1,5 +1,61 @@
 # 版本改动记录
 
+## V2.15.19（2026-08-30）SN 去向可配置（PLC 寄存器 / MES 上传 / 都传）
+
+> 需求：客户提出后续 SN 可能改为"上位机直接传 MES、不再写 PLC 寄存器区（40013 起）"，
+> 但 MES 对接方案**未最终定稿**。为两头都不堵死：把"SN 到哪去"做成系统设置里可切换的
+> 三选路由，两条通路都保留——PLC 通路 = 既有寄存器写入原样不动，MES 通路 = 新增
+> HTTP POST 上传服务（通用占位报文，客户协议定稿后只改报文格式，架构不再动）。
+
+### 改动范围
+
+- **配置（Models/AppConfig.cs）**：新增顶层 `sn` 段（`SnRouteConfig`）——`target`
+  （`"Plc"` 写 PLC SN 寄存器区，默认、既有现场流程 / `"Mes"` 仅上传 MES / `"Both"`
+  都发，MES 方案验证期两头对照）+ `mesUrl`（MES 接收 URL）+ `mesTimeoutMs`（上传超时，
+  默认 3000）。判定规则收敛进静态类 `SerialNumberTargets`（Normalize/WritesPlc/SendsMes），
+  协调器/设置页/测试三处共用不各写一套；`ConfigStore.ApplyDefaults` 对 sn 段做 null 兜底
+  与 target 脏值归一（非法值回落 Plc）。**为什么独立成顶层段**：SN 去向是"扫码数据流到
+  哪去"的业务路由，不是 PLC 通讯参数，不塞 PlcConfig。
+- **新服务（Services/MesService.cs，新建）**：MES 上传——`SendSerialAsync(sn, model)`
+  用 Task.Run 后台 HTTP POST JSON（`{sn, model, time}`，报文组装在静态 `BuildPayload`），
+  **绝不阻塞协调器扫码通道**（MES 慢/断网不拖慢 40004 结果写入）；URL 未配置只 WARN 一次；
+  在途计数超 10 丢弃防断网堆积；成功 INFO/失败 WARN，不做业务重试（MES 是尽力而为的数据
+  上报，PLC 流程不依赖它）。HttpClient 惰性单实例（csproj 加框架自带 `System.Net.Http`
+  引用，离线可编译）。**协议适配点**：客户 MES 定稿后只改 BuildPayload/发送方式。
+- **分流收口（Services/ProductionCoordinator.cs）**：新增 `DeliverSerialNumber(serial)`
+  唯一出口，`StepScanChannel` 四处调用点（扫码 OK 写 SN / 读码失败清 0 / 超时清 0 /
+  人工补录写 SN）全部改走它。target=Plc/Both 时 PLC 写入照旧（含传 "" 整区清 0 防旧件
+  残留语义），且仍保证"SN 先于结果落地"；target=Mes 时不再写 40013~ SN 区；MES 上传
+  只在拿到有效 SN 时发（空 SN 清 0 是 PLC 语义，MES 无"空 SN"上报概念）。**扫码结果
+  40004 的 1/2 握手与补录覆盖流程完全不变**。协调器构造尾部新增可选参数
+  `snRoute/mes`（null 时按 Plc 兜底，不影响 PLC 流程）；PlcService 零改动。
+- **生命周期（Views/MainForm.cs）**：`BuildServices` 创建 `_mes = new MesService(_config.Sn)`
+  并传给协调器；切型号只重建协调器、`_mes` 复用同一实例；热更（ApplyRuntimeConfig）与
+  关窗（FormClosing）显式 Dispose `_mes`（与 PlcService 同级归主窗体所有）。
+- **设置页（Views/SettingsForm.cs + Designer）**：PLC 区行尾新增"SN 传往"下拉
+  （`cmbSnTarget`：PLC 寄存器 / MES 上传 / 都传），显示窗口行尾新增"MES 地址"输入框
+  （`txtMesUrl`）；加载/保存/双语（I18n.T 含下拉项文案刷新）与悬停提示齐全；两处
+  ASCII 布局图同步。保存走既有链路（OnSave 改内存 → OpenSettings 写盘热生效）。
+- **测试沉淀（TestRunner.cs，137→168 条）**：新增 ⑨ 组——SerialNumberTargets 三值判定
+  与脏值归一、SnRouteConfig 默认值、`sn` 段小驼峰序列化键名/往返（混淆豁免红线锚点）、
+  ApplyDefaults 补段与脏 target 归一、BuildPayload 字段与 null 防御、SendSerialAsync
+  空 SN/空 URL 不崩不触网。run-all.ps1 全绿（构建 + 168 用例 + 两轮冒烟）。
+
+### 为什么这么设计（要点）
+
+- **默认 `target="Plc"`**：当前现场 PLC 流程是运行事实，配置缺省时行为与 V2.15.18
+  完全一致；切 MES/都传只动一个下拉。
+- **MES 异步**：SN 传 MES 不参与 PLC 握手，HTTP 再快也不能让它挡在 40004 写结果前面
+  （同"判定即写"哲学）；上传失败只记日志——丢的是对账数据，不是控制信号。
+- **都传（Both）**：客户未定稿期间，现场可两边同时发做对照验证，确认后切成单目标，
+  无需再改代码。
+
+### 文档同步
+
+- 本文件 V2.15.19 小节；README 可配置项补 `sn.target/mesUrl/mesTimeoutMs`；
+  docs/CommandCenter.md §5.5 补 SN 去向规则、第一部分补设置页操作说明、第八部分版本；
+  AGENTS.md PLC 握手协议段落补 SN 去向约定。
+
 ## V2.15.18（2026-08-25）自动化测试 skill（commandcenter-test）+ 修复扫码过滤前缀通配失效
 
 > 需求：软件要求"绝对稳定"，为此建立可复用的全面验证设施——① 对 V2.15.17 改动做全面冒烟；

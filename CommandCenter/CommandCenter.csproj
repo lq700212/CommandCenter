@@ -48,6 +48,8 @@
     <Reference Include="System.Xml" />
     <!-- 串口扫码枪 -->
     <Reference Include="System.IO.Ports" />
+    <!-- MES 上传（V2.15.19）：HttpClient 走框架自带 System.Net.Http 程序集，离线可编译 -->
+    <Reference Include="System.Net.Http" />
     <!-- 本地引用的第三方库（libs 目录，离线可编译；版本以 packages.config 为准） -->
     <Reference Include="Newtonsoft.Json">
       <HintPath>libs\Newtonsoft.Json.dll</HintPath>
@@ -140,6 +142,7 @@
     <Compile Include="Services\ScannerService.cs" />
     <Compile Include="Services\ScannerTcpService.cs" />
     <Compile Include="Services\ProductionCoordinator.cs" />
+    <Compile Include="Services\MesService.cs" />
     <Compile Include="Services\ConnectionMonitor.cs" />
     <Compile Include="Utils\ConfigStore.cs" />
     <Compile Include="Utils\I18n.cs" />

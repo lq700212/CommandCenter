@@ -12,7 +12,8 @@ namespace CommandCenter.Views
     /// 【重要】整体顺序请参考 SettingsForm.cs 类注释里的 ASCII 布局图。
     ///   ┌──────────────────────────────────────────────────────────┐
     ///   │ PLC IP: [txtPlcIp] 端口:[nudPlcPort] [btnModelConfig 产品型号配置…] │
-    ///   │ 显示窗口行:[nudRows] 列:[nudCols]                         │
+    ///   │                        SN 传往:[cmbSnTarget▾]（V2.15.19）│
+    ///   │ 显示窗口行:[nudRows] 列:[nudCols] [√chkAutoFit] MES 地址:[txtMesUrl]（V2.15.19）│
     ///   │ 图片保存根目录: [txtSaveDir]                               │
     ///   │ 目录结构: [btnEditDirs 配置目录结构…]                     │
     ///   │    （上下各留 12px 空隙，避免与文件名模板行挤在一起）     │
@@ -44,6 +45,9 @@ namespace CommandCenter.Views
     ///   - V2.14.14 产品型号配置（btnModelConfig）：弹出 ModelIndexEditForm 表格维护"型号↔PLC序号"
     ///     （40007）映射，取代 V2.14.13 的"型号序号"框 nudModelIndex。确定写回 plc.modelIndexes，
     ///     取消关闭不落盘；前几行预载当前已有型号与序号。
+    ///   - V2.15.19 SN 去向（cmbSnTarget，PLC 区行尾）+ MES 地址（txtMesUrl，显示窗口行尾）：
+    ///     扫码 SN 三选路由（PLC 寄存器 / MES 上传 / 都传），MES 地址=HTTP POST 接收 URL；
+    ///     下拉项文案由 SettingsForm.ApplyLanguage 双语刷新，存储值 Plc/Mes/Both（SerialNumberTargets）。
     ///   - 控件说明不占界面：原常驻灰字标签已删除，统一改为 ToolTip 气泡。
     ///   - 控件的"显示内容"（IP/端口/行列/目录模板/相机行/扫码枪行）由 SettingsForm.cs 运行时
     ///     从 AppConfig 填充（LoadFromConfig），设计器里的值只是可视化参照。
@@ -84,6 +88,10 @@ namespace CommandCenter.Views
             this.lblPlcPort = new System.Windows.Forms.Label();
             this.nudPlcPort = new System.Windows.Forms.NumericUpDown();
             this.btnModelConfig = new System.Windows.Forms.Button();
+            this.lblSnTarget = new System.Windows.Forms.Label();
+            this.cmbSnTarget = new System.Windows.Forms.ComboBox();
+            this.lblMesUrl = new System.Windows.Forms.Label();
+            this.txtMesUrl = new System.Windows.Forms.TextBox();
             this.lblRows = new System.Windows.Forms.Label();
             this.nudRows = new System.Windows.Forms.NumericUpDown();
             this.lblCols = new System.Windows.Forms.Label();
@@ -190,6 +198,46 @@ namespace CommandCenter.Views
         "号与序号，可增删改。\r\n【确定】把当前对应关系保存到配置（重启后自动加载），【取消】关闭不保存。\r\n现场默认 Z121=1、U171=2；每次扫码上位机先写 4" +
         "0007=本序号，再写 40008~40012=型号 ASCII 字符串。");
             this.btnModelConfig.UseVisualStyleBackColor = true;
+            //
+            // lblSnTarget（V2.15.19）
+            //
+            this.lblSnTarget.AutoSize = true;
+            this.lblSnTarget.Location = new System.Drawing.Point(596, 21);
+            this.lblSnTarget.Name = "lblSnTarget";
+            this.lblSnTarget.Size = new System.Drawing.Size(70, 20);
+            this.lblSnTarget.TabIndex = 40;
+            this.lblSnTarget.Text = "SN 传往:";
+            //
+            // cmbSnTarget（V2.15.19）
+            //
+            this.cmbSnTarget.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbSnTarget.FormattingEnabled = true;
+            this.cmbSnTarget.Items.AddRange(new object[] {
+            "PLC 寄存器",
+            "MES 上传",
+            "都传（PLC+MES）"});
+            this.cmbSnTarget.Location = new System.Drawing.Point(676, 17);
+            this.cmbSnTarget.Name = "cmbSnTarget";
+            this.cmbSnTarget.Size = new System.Drawing.Size(130, 28);
+            this.cmbSnTarget.TabIndex = 41;
+            this.tip.SetToolTip(this.cmbSnTarget, "扫码 SN 序列号的去向（V2.15.19，配置 sn.target）：\r\n【PLC 寄存器】SN 写进 PLC 的 SN 区（协议 40013 起连续寄存器，既有流程）；\r\n【MES 上传】SN 不写 PLC，改为后台 HTTP POST 给 MES（地址见右侧输入框）；\r\n【都传】PLC 照写 + MES 同时上传（MES 方案验证期两头对照用）。\r\n无论选哪项，扫码结果 40004 的握手流程都不变。保存后热生效。");
+            //
+            // lblMesUrl（V2.15.19）
+            //
+            this.lblMesUrl.AutoSize = true;
+            this.lblMesUrl.Location = new System.Drawing.Point(576, 63);
+            this.lblMesUrl.Name = "lblMesUrl";
+            this.lblMesUrl.Size = new System.Drawing.Size(74, 20);
+            this.lblMesUrl.TabIndex = 42;
+            this.lblMesUrl.Text = "MES 地址:";
+            //
+            // txtMesUrl（V2.15.19）
+            //
+            this.txtMesUrl.Location = new System.Drawing.Point(660, 60);
+            this.txtMesUrl.Name = "txtMesUrl";
+            this.txtMesUrl.Size = new System.Drawing.Size(285, 25);
+            this.txtMesUrl.TabIndex = 43;
+            this.tip.SetToolTip(this.txtMesUrl, "MES 接收 SN 的完整地址（http/https），SN 以 HTTP POST JSON（sn/型号/时间）提交。\r\n仅\"SN 传往\"选【MES 上传】或【都传】时生效；留空时 SN 不上传并在日志 WARN 提示。\r\nMES 对接协议定稿后由开发者调整报文格式，本地址即客户提供的接口 URL。");
             // 
             // lblRows
             // 
@@ -628,6 +676,11 @@ namespace CommandCenter.Views
             this.pnlScroll.Controls.Add(this.nudPlcPort);
             this.pnlScroll.Controls.Add(this.lblPlcPort);
             this.pnlScroll.Controls.Add(this.btnModelConfig);
+            // V2.15.19：SN 去向（PLC/MES/都传）下拉与 MES 地址输入框
+            this.pnlScroll.Controls.Add(this.cmbSnTarget);
+            this.pnlScroll.Controls.Add(this.lblSnTarget);
+            this.pnlScroll.Controls.Add(this.txtMesUrl);
+            this.pnlScroll.Controls.Add(this.lblMesUrl);
             this.pnlScroll.Controls.Add(this.txtPlcIp);
             this.pnlScroll.Controls.Add(this.lblPlcIp);
             this.pnlScroll.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -691,6 +744,11 @@ namespace CommandCenter.Views
         private Label lblPlcPort;
         private NumericUpDown nudPlcPort;
         private Button btnModelConfig;
+        // V2.15.19：SN 去向（PLC/MES/都传）下拉与 MES 地址输入框
+        private Label lblSnTarget;
+        private ComboBox cmbSnTarget;
+        private Label lblMesUrl;
+        private TextBox txtMesUrl;
         private Label lblRows;
         private NumericUpDown nudRows;
         private Label lblCols;
