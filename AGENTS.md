@@ -80,6 +80,14 @@
   高亮判定统一走 `HighlightFor`（优先级：交换完成绿 > 交换起点天蓝 > 普通选中浅黄），渲染统一走
   `ApplyCellHighlight`；**被禁用的格子高亮时保持灰底、只加同色粗边框，绝不能换底色**（否则丢失
   "已禁用"视觉语义）。改高亮渲染先读这两处，禁止各分支各写一套。
+- **DataGridView ComboBox 列选中行高亮（V2.15.22 血泪）**：`DataGridViewComboBoxColumn` 的单元格使用
+  ComboBox 渲染引擎画背景，会**忽略** `DefaultCellStyle.SelectionBackColor`——设置再醒目的蓝色，
+  选中行也只显示系统默认的极淡蓝色，与未选中行几乎无区别。**必须用 `CellPainting` 事件强制覆盖**：
+  在选中行的每个单元格绘制前先铺一层蓝色背景（`e.Graphics.FillRectangle(brush, e.CellBounds)`），
+  再 `e.Paint(ClipBounds, ContentForeground)` 绘制内容，`e.Handled = true` 阻止默认渲染。
+  样式配合：`CellBorderStyle=None`（移除边框让蓝色更连贯）、`GridColor=ControlDark`（恢复系统默认）、
+  `DefaultCellStyle` 用 `SystemColors.Highlight/HighlightText`。**禁止只设 `SelectionBackColor` 不加
+  `CellPainting`**——那是无效的。改 dgvPrograms 等 ComboBox 列表格的选中样式先读这段。
   **编辑副本深拷贝红线（V2.14.2 血泪）**：WindowPointForm 的 `_windowPointEdits` 必须用 `ClonePoints`
   深拷贝 `WindowPointMaps` 里持久化的 Points 列表当编辑副本——**绝不许直接引用目标列表对象**（此前
   引用导致交换/编辑/恢复默认立刻污染 `_cfg`，用户点【取消】也生效、后续保存照落盘）；点【确定】OnOk
@@ -280,7 +288,7 @@ OK/NG 才回退标准格式逐位判定。改动相机读应答/判定逻辑必�
 | `CommandCenter/Views/ModelIndexEditForm.cs` | 产品型号配置对话框（V2.14.14，按钮入口在设置窗体 PLC 区"产品型号配置…"）：表格维护型号↔PLC序号(40007)映射（V2.14.25 起三列=选中勾选列/序号/型号名称，全居中；右上角【新增】/【删除选中】按钮，勾选多行批量删；**V2.14.29 起新增行必须点【新增】按钮（禁用 DataGridView 自带"* 新行"，防"无法删除未提交的新行"异常）；Delete 键与删除按钮共用同一 DeleteRows 逻辑（优先勾选行、无勾选退选中行），编辑单元格中按 Delete 仅删字符不删行**），前几行预载已有映射、确定才写回 `plc.modelIndexes`（编辑副本深拷贝、取消不影响原配置），由设置窗体【保存】统一写盘；外观对齐 LoginForm 横幅+白面板+蓝主按钮 |
 | `CommandCenter/Controls/CameraDisplayControl.cs` | 相机显示窗 + 右下角自绘 OK/NG 徽标（主界面不显示点位标识，点位只走设置界面查询）；左上角窗口编号显隐由配置 `DisplayConfig.WindowIndexVisible` 控制（V2.10.6）。**窗口徽标显隐只随开关走（V2.14.26 还原 V2.14.24 前逻辑）**：`DisplayConfig.WindowOkNgVisible`（默认 true）开着就显示（未判定时默认绿 OK、拿到判定按结果变色），不再受"该窗口是否已拿到相机结果"限制——现场反馈空窗口/未接图时徽标也应在，图异步没取到不能把徽标整个藏掉 |
 | `CommandCenter/Views/DirTreeEditForm.cs` | 图片存储目录结构可视化配置（逐级目录 + 文件名规则 + 实时预览 + 时间戳后缀开关 + 存图保留天数，V2.14.12） |
-| `CommandCenter/Views/WindowPointForm.cs` | 窗口↔存图点位 + 点位↔相机程序号 可视化配置（格子矩阵编辑点位/交换/恢复默认，V2.13 恢复编辑并按型号存 WindowPointMaps + 相机下拉点位程序表，V1.12.25 同页混排、V1.12.26 两列改下拉选择、V2.12.0 自适应下按相机表铺排矩阵/格子标"相机名·点位号"；**相机↔型号单向联动（V2.14.5）**：cmbCamera 恒列所有相机、选定后 cmbModel 只列该相机有点位的型号、切型号不再反过滤相机——见 `ModelCandidatesFor`/`SyncModelForCamera`/`ApplySelections`） |
+| `CommandCenter/Views/WindowPointForm.cs` | 窗口↔存图点位 + 点位↔相机程序号 可视化配置（格子矩阵编辑点位/交换/恢复默认，V2.13 恢复编辑并按型号存 WindowPointMaps + 相机下拉点位程序表，V1.12.25 同页混排、V1.12.26 两列改下拉选择、V2.12.0 自适应下按相机表铺排矩阵/格子标"相机名·点位号"；**相机↔型号单向联动（V2.14.5）**：cmbCamera 恒列所有相机、选定后 cmbModel 只列该相机有点位的型号、切型号不再反过滤相机——见 `ModelCandidatesFor`/`SyncModelForCamera`/`ApplySelections`；**选中行高亮（V2.15.22）**：DataGridViewComboBoxColumn 的 ComboBox 渲染引擎忽略 SelectionBackColor，用 CellPainting 事件强制铺蓝色背景） |
 | `docs/CommandCenter.md` | **项目文档（V2.10 合并版）**：① 用户使用说明（操作手册）② 系统总览与设备清单 ③ 扫码枪对接 ④ 相机对接 ⑤ PLC 通讯对接与对外协议定义（§5.5）⑥ 计数与结果流转 ⑦ IP/参数速查 ⑧ 版本演进 |
 | `docs/上位机通讯封装范式.md` | 通讯架构技术总结（连接/心跳/重连/UI 解耦范式，跨项目可复用，独立保留） |
 | `CommandCenter/tools/Obfuscar/Obfuscar.Console.exe` | 代码混淆器本体（V2.14.31，离线单体 exe，发布时由 build-obfuscated.ps1 调用） |

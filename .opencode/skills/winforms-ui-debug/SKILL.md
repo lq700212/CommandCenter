@@ -184,11 +184,12 @@ Console.WriteLine("lastCol cell0=" + cr);                            // Right=13
 12. **测 AutoScale 缩放必须用 PerMonitorV2 harness**：只 `SetProcessDPIAware()` 是 System-aware，AutoScaleDimensions 自动按当前 DPI 初始化，永远测不出缩放（假结论）。csc 编译带 `/win32manifest:pmv2.manifest` + bin 里放同名 `.exe.config`（`DpiAwareness=PerMonitorV2` 开关）才走真路径；对照 Designer 窗体（SettingsForm）能缩放即证明环境正确。
 13. **禁窗口缩放：`Maximized` 是最大的坑，改用手动铺满 `WorkingArea`**（V1.11.0 CommandCenter 血泪）：想"默认全屏 + 禁止拖拽缩放 + 保留最小化/关闭按钮"时，**绝不能用 `WindowState.Maximized`**——Windows 会在最大化瞬间把 `FixedSingle` 边框强制切换成"可调整"样式，边缘拖拽缩放照常开放，`WndProc` 拦截 `WM_NCHITTEST`（HTLEFT..HTBOTTOMRIGHT 命中码 10~17 改 HTCLIENT）在最大化状态下也挡不住系统这一层。正解组合：`FormBorderStyle=FixedSingle`（Normal 下无拖拽句柄）+ `MaximizeBox=false` + `MinimizeBox=true` + `WindowState=Normal` + 在 `OnShown` 里手动 `Bounds = Screen.FromControl(this).WorkingArea` 铺满屏幕（等效全屏、保留任务栏）。按钮缩放、常规拖拽、最大化边缘拖拽三条通道全关，最小化/关闭按钮不受影响。
 14. **WinForms 点击/双击生效，先问"真实命中谁 + 冒不冒泡"**（V1.12.15 CommandCenter 三轮血泪，做"双击放大/还原/整窗响应双击"先读这条）：判断某控件上"点击/双击有没有反应"，先想清两件事，否则白改：
-   - **① 真实命中目标是谁**：鼠标双击落在**最内层子控件**上（如图像区 `PictureBox` 用 `Dock=Fill` 占满整窗，双击必落它），**不会"自动落到父 UserControl"**。红线：双击 BI 控件时只有被点的那个控件收到消息。
-   - **② 事件冒不冒泡**：WinForms 中带 `Mouse` 前缀的（`MouseClick`/`MouseDoubleClick`/`MouseDown`…）会沿父链冒泡；不带前缀的（`Click`/`DoubleClick`）**不冒泡**。
-   - **最稳写法，直接背**：直接订阅最内层子控件（PictureBox）的 `MouseDoubleClick`（参考 `CommandCenter/Controls/CameraDisplayControl.cs` 的 `HandleDoubleClick`），它在真实命中点、必然触发、不依赖冒泡。**别用**父控件 `OnDoubleClick` 重写（不冒泡→没反应，第一版就这么挂的）；**也别赌**父控件 `MouseDoubleClick` 冒泡（部分环境不稳定，第二版也挂）。
-   - **验证不能用合成鼠标**：headless / 无桌面交互会话下，`mouse_event`、`SendMessage WM_LBUTTONDBLCLK` 都**触发不了 WinForms 双击**——WinForms 对双击有内部状态/计时免疫，合成事件被吞，发多少遍都不生效，别拿它当验证依据（在这上面空转了很久）。
-   - **可靠的验证手段**：进程序 harness 反射调用**真实命中控件（PictureBox）的 `protected OnMouseDoubleClick`** 注入双击（不依赖消息/计时），再反射读私有字段断言结果（如 `_fullScreenForm` 是否非空、放大的 `_windows[?]` 是否同一、`RestoreFullScreenWindow` 后是否置 null）。这是本项目验证"双击→放大→还原"类行为的可靠手段；状态文本类就反射读 `Label.Text`。
+    - **① 真实命中目标是谁**：鼠标双击落在**最内层子控件**上（如图像区 `PictureBox` 用 `Dock=Fill` 占满整窗，双击必落它），**不会"自动落到父 UserControl"**。红线：双击 BI 控件时只有被点的那个控件收到消息。
+    - **② 事件冒不冒泡**：WinForms 中带 `Mouse` 前缀的（`MouseClick`/`MouseDoubleClick`/`MouseDown`…）会沿父链冒泡；不带前缀的（`Click`/`DoubleClick`）**不冒泡**。
+    - **最稳写法，直接背**：直接订阅最内层子控件（PictureBox）的 `MouseDoubleClick`（参考 `CommandCenter/Controls/CameraDisplayControl.cs` 的 `HandleDoubleClick`），它在真实命中点、必然触发、不依赖冒泡。**别用**父控件 `OnDoubleClick` 重写（不冒泡→没反应，第一版就这么挂的）；**也别赌**父控件 `MouseDoubleClick` 冒泡（部分环境不稳定，第二版也挂）。
+    - **验证不能用合成鼠标**：headless / 无桌面交互会话下，`mouse_event`、`SendMessage WM_LBUTTONDBLCLK` 都**触发不了 WinForms 双击**——WinForms 对双击有内部状态/计时免疫，合成事件被吞，发多少遍都不生效，别拿它当验证依据（在这上面空转了很久）。
+    - **可靠的验证手段**：进程序 harness 反射调用**真实命中控件（PictureBox）的 `protected OnMouseDoubleClick`** 注入双击（不依赖消息/计时），再反射读私有字段断言结果（如 `_fullScreenForm` 是否非空、放大的 `_windows[?]` 是否同一、`RestoreFullScreenWindow` 后是否置 null）。这是本项目验证"双击→放大→还原"类行为的可靠手段；状态文本类就反射读 `Label.Text`。
+15. **DataGridView ComboBox 列选中行高亮（V2.15.22 血泪）**：`DataGridViewComboBoxColumn` 的单元格使用 ComboBox 渲染引擎画背景，会**忽略** `DefaultCellStyle.SelectionBackColor`——设置再醒目的蓝色，选中行也只显示系统默认的极淡蓝色，与未选中行几乎无区别。**必须用 `CellPainting` 事件强制覆盖**：在选中行的每个单元格绘制前先铺一层蓝色背景（`e.Graphics.FillRectangle(brush, e.CellBounds)`），再 `e.Paint(ClipBounds, ContentForeground)` 绘制内容，`e.Handled = true` 阻止默认渲染。样式配合：`CellBorderStyle=None`（移除边框让蓝色更连贯）、`GridColor=ControlDark`（恢复系统默认）、`DefaultCellStyle` 用 `SystemColors.Highlight/HighlightText`。**禁止只设 `SelectionBackColor` 不加 `CellPainting`**——那是无效的。改 dgvPrograms 等 ComboBox 列表格的选中样式先读这段。
 
 ## 五·五、窗口全屏 / 禁缩放 / 边框行为专项（V1.11.0 CommandCenter 沉淀）
 

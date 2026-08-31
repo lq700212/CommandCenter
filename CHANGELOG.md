@@ -1,5 +1,46 @@
 # 版本改动记录
 
+## V2.15.23（2026-08-31）ComboBox 编辑态高亮修复 + 颜色对齐
+
+> 用户反馈 WindowPointForm dgvPrograms 选择 ComboBox 值后，选中行高亮消失。
+
+### 根因
+
+DataGridViewComboBoxColumn 的编辑控件（ComboBox）在编辑时会用自己的白色背景覆盖
+CellPainting 绘制的蓝色高亮，导致编辑态和选择后高亮消失。
+
+### 改动范围
+
+- **Views/WindowPointForm.cs**：
+  - CellPainting 使用 `SystemColors.Highlight` 替代 `Color.FromArgb(0, 120, 215)`，与 SettingsForm 对齐；
+  - 新增 `CellBeginEdit` 事件：编辑态设置 ComboBox 背景色为系统高亮色；
+  - 新增 `CellEndEdit` 事件：编辑结束后恢复默认背景色 + `InvalidateRow` 强制重绘当前行；
+- **测试验证**：自动化测试 179 个用例 + 21 个 UI 交互回归 + 两轮冒烟全部通过
+
+## V2.15.22（2026-08-31）dgvPrograms 选中行高亮增强
+
+> 用户反馈 WindowPointForm dgvPrograms 选中行高亮不够醒目，ComboBox 列的渲染引擎会用自己的
+> 白色背景覆盖 DefaultCellStyle.SelectionBackColor，导致选中行几乎看不出高亮。
+
+### 根因
+
+DataGridViewComboBoxColumn 的单元格使用 ComboBox 渲染引擎画背景，会忽略 DefaultCellStyle
+的 SelectionBackColor 设置，导致选中行只显示系统默认的非常淡的蓝色，与未选中行几乎无区别。
+
+### 改动范围
+
+- **Views/WindowPointForm.cs**：新增 `CellPainting` 事件处理程序，在所有单元格绘制之前先铺一层
+  蓝色背景（`Color.FromArgb(0, 120, 215)`），确保选中行整行醒目可见；
+- **Views/WindowPointForm.Designer.cs**：
+  - `CellBorderStyle` 改为 `None`（移除单元格边框，让选中行蓝色更连贯）
+  - `GridColor` 改为 `ControlDark`（恢复系统默认网格线颜色）
+  - `DefaultCellStyle.BackColor` 改为 `SystemColors.Window`（恢复系统默认背景色）
+  - `DefaultCellStyle.ForeColor` 改为 `SystemColors.ControlText`（恢复系统默认前景色）
+  - `DefaultCellStyle.SelectionBackColor` 改为 `SystemColors.Highlight`（使用系统默认选中色）
+  - `DefaultCellStyle.SelectionForeColor` 改为 `SystemColors.HighlightText`（使用系统默认选中字色）
+  - 移除 `EnableHeadersVisualStyles = false`（恢复系统默认表头样式）
+- **测试验证**：UiProbe 全部 21 个测试通过，选中行高亮醒目可见
+
 ## V2.15.21（2026-08-31）窗口/点位配置表防"改完回退"修复 + 行选中整行高亮 + 上相机映射更新 + UI 交互回归层
 
 > 现场反馈（WindowPointForm.dgvPrograms）：① 选中映射行没有高亮，点【删除选中行】不知道删的

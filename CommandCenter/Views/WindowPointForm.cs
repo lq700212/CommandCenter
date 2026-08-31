@@ -315,6 +315,32 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             // 弹"值无效"异常对话框。ReloadProgramGrid 已把候选补齐/规范化，这里再兜底吞掉漏网的，
             // 保证打开对话框不弹窗；该行数据仍保留，用户编辑该行自然修正。
             dgvPrograms.DataError += (s, e) => e.ThrowException = false;
+            // 选中行醒目高亮（V2.15.x）：DataGridViewComboBoxColumn 的 ComboBox 渲染引擎会用自己的
+            // 白色背景覆盖 DefaultCellStyle.SelectionBackColor，导致选中行几乎看不出高亮。
+            // 用 CellPainting 在所有单元格绘制之前先铺一层蓝色背景，确保选中行整行醒目可见。
+            // V2.15.23 修复：移除 e.AdvancedBorderStyle == null 检查，该条件在 ComboBox 编辑状态下
+            // 为 null，导致编辑中的单元格无法绘制蓝色高亮背景。
+            dgvPrograms.CellPainting += (s, e) =>
+            {
+                if (e.RowIndex < 0) return;
+                if (e.PaintParts == DataGridViewPaintParts.None) return;
+                bool isCurrentRow = dgvPrograms.CurrentRow != null && e.RowIndex == dgvPrograms.CurrentRow.Index;
+                if (isCurrentRow && e.ColumnIndex >= 0)
+                {
+                    using (var brush = new SolidBrush(SystemColors.Highlight))
+                        e.Graphics.FillRectangle(brush, e.CellBounds);
+                    e.Paint(e.ClipBounds, DataGridViewPaintParts.ContentForeground);
+                    e.Handled = true;
+                }
+            };
+            // V2.15.x 下拉列禁手输（EditingControlShowing）：把编辑态的下拉框切成 DropDownList，
+            // 用户只能从候选里选、不能键盘敲。
+            // 【为什么必须加】DataGridViewComboBoxCell 的编辑控件默认是可输入的 ComboBox，
+            // 手敲的文本若不在候选里，提交时 DataGridView 判定"值无效"→ 单元格回退成候选第一项
+            // （程序号第一项就是"不切换"）。切成 DropDownList 后提交值恒等于候选里的某一项，
+            // 从源头上杜绝"改完的值被悄悄回退"（配合下面"候选与值全用字符串"的改动）。
+            // 注意：切 DropDownList 会清掉编辑控件的选中项，所以切完要把原来的选中项还原回去，
+            // 否则一点开下拉就是空选、看着像"程序号丢了"。
             // V2.15.x 下拉列禁手输（EditingControlShowing）：把编辑态的下拉框切成 DropDownList，
             // 用户只能从候选里选、不能键盘敲。
             // 【为什么必须加】DataGridViewComboBoxCell 的编辑控件默认是可输入的 ComboBox，
@@ -330,6 +356,37 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                 object current = combo.SelectedItem;
                 combo.DropDownStyle = ComboBoxStyle.DropDownList;
                 if (current != null && combo.Items.Contains(current)) combo.SelectedItem = current;
+            };
+            // V2.15.23：ComboBox 编辑态背景色对齐选中行高亮（系统高亮蓝）。
+            // 问题：CellPainting 绘制的蓝色背景会被 ComboBox 编辑控件覆盖（ComboBox 自带白色背景），
+            // 导致"点位/程序号"列在编辑中看不到蓝色高亮。解决：CellBeginEdit 时把编辑控件的
+            // BackColor/ForeColor 设为系统高亮色，CellEndEdit 恢复默认，确保编辑态整行视觉一致。
+            dgvPrograms.CellBeginEdit += (s, e) =>
+            {
+                if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+                var dgv = s as DataGridView;
+                if (dgv == null || dgv.CurrentCell == null) return;
+                var combo = dgv.EditingControl as ComboBox;
+                if (combo != null)
+                {
+                    combo.BackColor = SystemColors.Highlight;
+                    combo.ForeColor = SystemColors.HighlightText;
+                }
+            };
+            dgvPrograms.CellEndEdit += (s, e) =>
+            {
+                if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+                var dgv = s as DataGridView;
+                if (dgv == null) return;
+                // 编辑结束后恢复 ComboBox 背景色
+                var combo = dgv.EditingControl as ComboBox;
+                if (combo != null)
+                {
+                    combo.BackColor = SystemColors.Window;
+                    combo.ForeColor = SystemColors.ControlText;
+                }
+                // 强制重绘当前行，确保 CellPainting 绘制的蓝色高亮正确显示
+                dgv.InvalidateRow(e.RowIndex);
             };
             BuildMatrix();              // 按 _rows×_cols 动态生成窗口格子按钮
             BuildProgramGrid();         // 初始化相机程序映射区：下拉 + 表格列

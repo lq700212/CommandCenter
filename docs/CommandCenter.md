@@ -257,11 +257,14 @@
    回退成"不切换"（改点位同理回退成最小点位号）。修法（三件套，改这块前先读 WindowPointForm
    的 BuildProgramGrid 红线注释）：① 两列候选与单元格值**全部用字符串**（NumText），读取侧
    FlushProgramGrid 用 Convert.ToString+TryParse 反解（老配置残留 int 也能吃）；② 下拉编辑控件
-   切 DropDownList 禁手输（EditingControlShowing），杜绝手输候选外的值触发回退；③ 重建点位列候选
-   （RefillStationColumn，切型号会整表重建）后调 EnsureGridValuesInCandidates 把表格现有值补回候选，
-   防止切型号时已配点位被悄悄改号。另外表格选中行为**整行高亮**（FullRowSelect + 蓝底白字 +
-   单行选择），【删除选中行】能看清删的是哪行。UI 行为由测试 skill 的 UiProbe.cs（uitests.ps1）
-   守住，纯逻辑（NumText/CellText/EnsureCandidate）由 TestRunner.cs 第⑩组守住。
+    切 DropDownList 禁手输（EditingControlShowing），杜绝手输候选外的值触发回退；③ 重建点位列候选
+    （RefillStationColumn，切型号会整表重建）后调 EnsureGridValuesInCandidates 把表格现有值补回候选，
+    防止切型号时已配点位被悄悄改号。另外表格选中行为**整行高亮**（FullRowSelect + 蓝底白字 +
+    单行选择），【删除选中行】能看清删的是哪行。**选中行高亮通过 CellPainting 事件强制覆盖**
+    （V2.15.22）：DataGridViewComboBoxColumn 的 ComboBox 渲染引擎会忽略 DefaultCellStyle.SelectionBackColor，
+    必须在 CellPainting 中先铺蓝色背景再绘制内容，否则选中行几乎看不出高亮。UI 行为由测试 skill
+    的 UiProbe.cs（uitests.ps1）守住，纯逻辑（NumText/CellText/EnsureCandidate）由 TestRunner.cs
+    第⑩组守住。
    一台相机一行表 = 一台相机的独立映射；设置页相机表加一行新相机，新相机自然有自己的空表，也能
    立刻下拉配置，配好点确定写回、点保存生效（保存不会丢映射）。
   主界面相机下拉/状态灯**有名称（`name` 字段，如上相机/下相机）显示名称，无名称显示"相机N"**，
