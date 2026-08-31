@@ -1,5 +1,69 @@
 # 版本改动记录
 
+## V2.15.21（2026-08-31）窗口/点位配置表防"改完回退"修复 + 行选中整行高亮 + 上相机映射更新 + UI 交互回归层
+
+> 现场反馈（WindowPointForm.dgvPrograms）：① 选中映射行没有高亮，点【删除选中行】不知道删的
+> 是哪行；② 改完某行相机程序号再点其它行，被改那行的程序号显示回退成"不切换"；③ 排查同构问题
+> ——只改点位同样会回退（回退成点位列候选第一项=最小点位号），且切型号重建候选时已配点位
+> 也会被悄悄改号。
+
+### 根因（DataGridViewComboBoxCell 的"值无效→回退"机制）
+
+微软文档明确：**单元格的值必须能在下拉候选（Items）里找到，找不到就判"值无效"并把单元格回退
+成候选第一项**。原实现两列候选是"一个字符串 + 一堆 int"的混合类型（程序号列="不切换"字符串 +
+0~127 的 int、点位列=纯 int），用户在下拉里选完提交时 DataGridView 把提交值转成了字符串"5"，
+与候选里的 int 5 对不上 → 判无效 → 该单元格显示回退成候选第一项。用最小复现程序实测证实
+（改程序号 5 → 显示"不切换"；改点位 6 → 显示"1"，且每次编辑都触发 DataError）。
+
+### 改动范围
+
+- **Views/WindowPointForm.cs + Designer**（三件套修复）：
+  ① **候选与单元格值全部用字符串**：点位列/程序号列候选经 `NumText(int)`（不变文化）转文本灌入，
+  `ReloadProgramGrid` 灌表也放字符串，`FlushProgramGrid` 用 `Convert.ToString`+`TryParse` 反解
+  （老配置残留 int 也能吃）——提交值=候选里的同一字符串，从根上消灭"值无效"；
+  ② **下拉禁手输**：`EditingControlShowing` 把编辑态下拉切成 `DropDownList`（切完还原原选中项），
+  用户只能从候选里选，杜绝手输候选外文本触发回退；
+  ③ **重建候选保号**：`RefillStationColumn()`（切型号/建窗体时整表重建点位列候选）末尾调
+  `EnsureGridValuesInCandidates()` 把表格现有值按文本补回候选——否则 Items 一清空，"新候选没有"
+  的历史值（老配置点位、手改 appconfig 的越界程序号）会被回退成候选第一项并随【确定】写进配置。
+  顺带修 `FlushProgramGrid` 一个隐患：原来 `int.TryParse(progText, out program)` 失败时 out 参数
+  置 0，非法文本会被悄悄解析成程序号 0（相机 P000），与"不切换"（保持当前程序）语义不同——改为
+  只有 0~127 且解析成功才赋值，其余一律 -1。
+- **Designer（用户诉求①）**：dgvPrograms 改 `FullRowSelect` + `MultiSelect=false` + 显式选中色
+  （蓝底 0,120,215 / 白字），选中行整行高亮，删除选中行不再歧义。
+- **测试沉淀（commandcenter-test skill 新增 UI 交互回归层，第 3 层）**：
+  - `scripts/UiProbe.cs`（新）+ `scripts/uitests.ps1`（新）+ `run-all.ps1` 挂上 `-SkipUi` 开关：
+    拉起【真实 WindowPointForm】（放屏幕外）模拟用户操作，断言整行高亮、改程序号/改点位不回退、
+    切型号保号、老配置异常值（点位9/程序200）原样显示、点确定写回值、全程 DataError=0，
+    共 19 条（纯逻辑用例测不到控件层行为，必须真开窗体；本次映射更新后扩到 21 条，见下）；
+  - `scripts/TestRunner.cs` 新增**第⑩组**（11 条）：`NumText`/`CellText`/`EnsureCandidate`
+    三个纯函数反射直测（int→文本、null/空/int 兼容、候选按文本去重补值）；
+  - `scripts/tests.ps1` 补 `/r:System.Windows.Forms.dll /r:System.Drawing.dll`（第⑩组用到 DataGridView）。
+- **文档**：`docs/CommandCenter.md` §设置页"相机程序映射"补"候选与值全字符串（防回退红线）"
+  段落（机制 + 三件套 + 测试锚点索引）。
+- **上相机默认"点位→程序号"映射更新（现场最新定稿）**：`Models/AppConfig.cs` `DefaultCameras()`
+  上相机两张型号表整体替换——**U171 由点位 1~20 缩为 1~17**（17 条：1→0、2→1、3~6→2、7→3、
+  8→5、9→6、10→8、11→9、12/13/15/16→10、14→11、17→12），**Z121 由点位 1~26 缩为 1~18**
+  （18 条：1→13、2→14、3→28、4→15、5→16、6→18、7→19、8→20、9/10→21、11→23、12→19、
+  13→24、14→25、15/16→26、17/18→27）；下相机两张表不动。窗口总数联动变化：U171=上17+下4=21 窗、
+  Z121=上18+下3=21 窗（原 24/29 窗）——`WindowCountFor`/`ResolveLayout` 自动按点位表重算，
+  无代码改动。同步：`bin\Debug\Config\appconfig.json` 上相机两张表（现场已有配置必须一并更新，
+  否则运行时读旧表）；`TestRunner.cs` 第⑤⑥组断言（24→21 窗、20→17 条、点位14→11）；
+  文档/注释里的旧窗口数与旧映射描述（AGENTS.md、README、docs/CommandCenter.md §2.3/§7）。
+
+### 验证
+
+- 全量源码离线编译通过（0 error，含 Program.cs 全部 38 个 .cs）；
+- **UiProbe 19/19 全绿**（真实 exe）；TestRunner 159+11 条用例除第④组外全过——第④组 10 条失败
+  经最小复现定位为**本次临时验证环境（dotnet SDK10 编译器把无 BOM UTF-8 中文字面量按 GBK 误读）
+  的假象**：用真实 MSBuild 产出的 CommandCenter.exe 直测 `IsIgnoredScanText` 全部正确（真实
+  工具链 = VS MSBuild + tests.ps1 的 `/codepage:65001`，不受影响），产品代码无改动、无需处理。
+- **映射更新复验（本次）**：映射探针 40 条逐条核对新表全 PASS；TestRunner **179/179 全绿**
+  （第⑤⑥组断言已同步到新映射：U171=21 窗/17 条/点位14→11、Z121=21 窗）；UiProbe 扩到
+  **21/21 全绿**（新增"点击第2行后 SelectedRows=第2行整行高亮 + 其它行不高亮"两条行为锚点；
+  注：FullRowSelect 下 SelectedCells 只含当前单元格，判整行高亮必须看 SelectedRows——这是
+  测试层踩到的判定陷阱，已写进探针注释）。
+
 ## V2.15.20（2026-08-30）SN 去向改二选一（默认传 MES）+ 删除设置页 SN 去向选项 + 新增 MES 对接文档
 
 > 需求：① 整理一份 MES 对接文档（对接要点 + 协议定稿后代码改哪里），后续对接用；

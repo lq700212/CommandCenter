@@ -11,6 +11,7 @@
 //   ⑦ 密码 SHA-256 哈希 + DPAPI 记住密码往返
 //   ⑧ I18n 双语切换
 //   ⑨ SN 去向路由（V2.15.20 二选一：SerialNumberTargets 判定 / sn 配置段 / MES 报文格式）
+//   ⑩ 窗口点位配置表下拉单元格取值（V2.15.x 防回退：候选/值全字符串）
 //
 // 【红线】禁止调用 ConfigStore.Load()/Save()——无参版本固定读写 bin\Debug\Config\
 //   appconfig.json，会覆盖开发机现有配置。配置测试只做内存序列化往返。
@@ -24,9 +25,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Windows.Forms;   // ⑩ 组要 new DataGridView 单元格做 UI 取值用例（tests.ps1 同步加了 /r）
 using CommandCenter.Models;
 using CommandCenter.Services;
 using CommandCenter.Utils;
+using CommandCenter.Views;
 using Newtonsoft.Json;
 
 internal static class TestRunner
@@ -88,6 +91,7 @@ internal static class TestRunner
         TestStationProgramMap();  // ⑥
         TestSecurity();           // ⑦
         TestSnRoute();            // ⑨ V2.15.20：SN 去向路由二选一（放在 I18n 前，I18n 改全局语言状态须最后跑）
+        TestWindowPointGridCells(); // ⑩ V2.15.x：窗口点位配置表下拉取值（防"改完回退成候选第一项"）
         TestI18n();               // ⑧ 放最后（改全局语言状态）
     }
 
@@ -345,41 +349,41 @@ internal static class TestRunner
     private static void TestWindowLayout()
     {
         Group("⑤ 窗口布局统一模型 ResolveLayout / 默认铺排 / 孤儿映射");
-        var cams = CameraConfig.DefaultCameras();          // 上(id2, U171 表20条) + 下(id1, 4条)
+        var cams = CameraConfig.DefaultCameras();          // 上(id2, U171 表17条) + 下(id1, 4条)
         int totalU171 = DisplayConfig.WindowCountFor(cams, "U171");
-        Eq("U171 窗口总数=24（上20+下4）", 24, totalU171);
+        Eq("U171 窗口总数=21（上17+下4）", 21, totalU171);
 
-        // 自适应形状：total=24 → 最优 (rows=4, cols=6)（行列和最小并列时列多者优先）
+        // 自适应形状：total=21 → 最优 (rows=3, cols=7)（行列和最小并列时列多者优先）
         var auto = DisplayConfig.ResolveLayout(cams, "U171", true, 1, 1);
-        Eq("自适应 rows=4", 4, auto.rows);
-        Eq("自适应 cols=6", 6, auto.cols);
+        Eq("自适应 rows=3", 3, auto.rows);
+        Eq("自适应 cols=7", 7, auto.cols);
         Eq("自适应 windowCount=点位数", totalU171, auto.windowCount);
 
         // 自适应边界：无相机 → 1×1
         var one = DisplayConfig.ResolveLayout(null, "U171", true, 1, 1);
         Check("空相机自适应=1×1×1", one.rows == 1 && one.cols == 1 && one.windowCount == 1);
 
-        // 非自适：手填 2×7 放不下 24 点位 → 自动补行到 ceil(24/7)=4 → windowCount=28
+        // 非自适：手填 2×7 放不下 21 点位 → 自动补行到 ceil(21/7)=3 → windowCount=21
         var manual = DisplayConfig.ResolveLayout(cams, "U171", false, 2, 7);
-        Check("非自适补行 4×7=28", manual.rows == 4 && manual.cols == 7 && manual.windowCount == 28);
+        Check("非自适补行 3×7=21", manual.rows == 3 && manual.cols == 7 && manual.windowCount == 21);
 
         // 非自适列数钳位上限 7（手填 9 列也压回 7）
         var clamp = DisplayConfig.ResolveLayout(cams, "U171", false, 3, 9);
-        Check("手填列钳位 7 且补行", clamp.cols == 7 && clamp.rows == 4 && clamp.windowCount == 28);
+        Check("手填列钳位 7 且补行", clamp.cols == 7 && clamp.rows == 3 && clamp.windowCount == 21);
 
         // 默认铺排：前 N 个有效条目（前上相机 id2 后下相机 id1）+ 尾部 null 空窗口
         var map = DisplayConfig.DefaultWindowPointMap(cams, "U171", 28);
         Eq("铺排长度=windowCount", 28, map.Count);
-        Check("前 24 条目非空", map.Take(24).All(p => p != null));
-        Check("尾部 4 个=空窗口(null)", map.Skip(24).All(p => p == null));
+        Check("前 21 条目非空", map.Take(21).All(p => p != null));
+        Check("尾部 7 个=空窗口(null)", map.Skip(21).All(p => p == null));
         Eq("窗口1=上相机点位1", 1, map[0].StationNo);
         Eq("窗口1 归属上相机 id2", 2, map[0].CameraId);
-        Eq("窗口21=下相机首条", cams[1].ProgramsFor("U171")[0].StationNo, map[20].StationNo);
-        Eq("窗口21 归属下相机 id1", 1, map[20].CameraId);
+        Eq("窗口18=下相机首条", cams[1].ProgramsFor("U171")[0].StationNo, map[17].StationNo);
+        Eq("窗口18 归属下相机 id1", 1, map[17].CameraId);
 
-        // 各相机窗口起始序号（前缀和）：上=1、下=21
+        // 各相机窗口起始序号（前缀和）：上=1、下=18
         var starts = DisplayConfig.AutoFitCameraStarts(cams, "U171");
-        Check("起始序号=[1,21]", starts.Count == 2 && starts[0] == 1 && starts[1] == 21);
+        Check("起始序号=[1,18]", starts.Count == 2 && starts[0] == 1 && starts[1] == 18);
 
         // 孤儿映射校验：合法/孤儿/null 三态
         Check("默认铺排对相机表有效", DisplayConfig.PointMapValidForCameras(cams, map));
@@ -415,12 +419,12 @@ internal static class TestRunner
             var upper = cams[0];   // 上相机
             var lower = cams[1];   // 下相机
             int upTableCnt = upper.ProgramsFor("U171").Count;
-            Eq("上相机 U171 点位表=20 条", 20, upTableCnt);
+            Eq("上相机 U171 点位表=17 条", 17, upTableCnt);
             Eq("下相机 U171 点位表=4 条", 4, lower.ProgramsFor("U171").Count);
 
-            // 锚点断言（固化 V2.14.16 现场映射：点位1→P000=0、点位14→P010=10；变更须同步文档）
+            // 锚点断言（固化 V2.15.21 现场映射：点位1→P000=0、点位14→P011=11；变更须同步文档）
             Eq("上·点位1→程序0(P000)", 0, (int)InvokePrivateInstance(coord, "ResolveProgramForStation", upper, 1));
-            Eq("上·点位14→程序10(P010)", 10, (int)InvokePrivateInstance(coord, "ResolveProgramForStation", upper, 14));
+            Eq("上·点位14→程序11(P011)", 11, (int)InvokePrivateInstance(coord, "ResolveProgramForStation", upper, 14));
             // 自洽性：表中每一条都能反查出自己声明的程序号
             bool selfOk = upper.ProgramsFor("U171")
                 .All(it => it != null && (int)InvokePrivateInstance(coord, "ResolveProgramForStation", upper, it.StationNo) == it.ProgramNo);
@@ -584,5 +588,50 @@ internal static class TestRunner
         Eq("非法语言回落中文", "zh-CN", I18n.Language);
         Eq("非法语言后取 zh 文案", "系统设置", I18n.T("系统设置", "Settings"));
         I18n.Language = "zh-CN";                 // 还原默认
+    }
+
+    // ───────────────────── ⑩ 窗口点位配置表下拉单元格取值（V2.15.x 防回退）──────────────────────
+    // 【背景】DataGridViewComboBoxCell 规定"单元格值必须能在下拉候选里找到"，找不到就判"值无效"，
+    //   并把单元格回退成候选第一项——点位/程序号候选里"一个字符串 + 一堆 int"时，用户改完程序号
+    //   提交后值被转成字符串"5"，与候选里的 int 5 对不上 → 改完的值被悄悄回退成"不切换"（候选第一项）。
+    // 【修法】候选与单元格值【全部用字符串】+ 下拉禁手输（DropDownList）+ 重建候选时把已有值补回候选。
+    // 这里用反射直接测那三个纯函数（UI 交互层由人工/冒烟覆盖，用例集只锚纯逻辑）。
+    private static void TestWindowPointGridCells()
+    {
+        Group("⑩ 窗口点位配置表下拉单元格取值（V2.15.x 防回退：候选/值全字符串）");
+        var t = typeof(CommandCenter.Views.WindowPointForm);
+
+        // NumText：int → 候选文本（固定不变文化，绝不能被本地化成 "1,234"）
+        Eq("NumText(5)", "5", (string)InvokePrivateStatic(t, "NumText", 5));
+        Eq("NumText(0)", "0", (string)InvokePrivateStatic(t, "NumText", 0));
+        Eq("NumText(127)", "127", (string)InvokePrivateStatic(t, "NumText", 127));
+
+        // CellText：单元格值 → 文本（null/空 → 空串；字符串与老配置残留的 int 都能吃；去首尾空格）
+        var grid = new DataGridView();
+        grid.Columns.Add(new DataGridViewTextBoxColumn());
+        grid.Columns.Add(new DataGridViewTextBoxColumn());
+        grid.Rows.Add("3", "5");
+        var c1 = grid.Rows[0].Cells[1];
+        Eq("CellText 取字符串值", "3", (string)InvokePrivateStatic(t, "CellText", grid.Rows[0].Cells[0]));
+        c1.Value = 7;                                    // 老配置残留 int 也要能吃
+        Eq("CellText 取 int 值", "7", (string)InvokePrivateStatic(t, "CellText", c1));
+        c1.Value = null;
+        Eq("CellText null → 空串", "", (string)InvokePrivateStatic(t, "CellText", c1));
+        c1.Value = "  9  ";
+        Eq("CellText 去首尾空格", "9", (string)InvokePrivateStatic(t, "CellText", c1));
+
+        // EnsureCandidate：候选补值 + 按文本去重（候选里的 "5" 与新值 int 5 视为同一项，不重复添加）
+        var col = new DataGridViewComboBoxColumn();
+        col.Items.Add("不切换");
+        col.Items.Add("5");
+        InvokePrivateStatic(t, "EnsureCandidate", col, (object)5);       // 同文本不同类型 → 不重复添加
+        Eq("EnsureCandidate 同文本不重复添加", 2, col.Items.Count);
+        InvokePrivateStatic(t, "EnsureCandidate", col, (object)"9");     // 新值 → 补进候选（保住用户配的值）
+        Eq("EnsureCandidate 新值补进候选", 3, col.Items.Count);
+        Eq("EnsureCandidate 补进去的是字符串", "9", Convert.ToString(col.Items[2]));
+        InvokePrivateStatic(t, "EnsureCandidate", col, (object)null);    // null/空不补、不崩
+        InvokePrivateStatic(t, "EnsureCandidate", col, (object)"");
+        Eq("EnsureCandidate null/空不补", 3, col.Items.Count);
+        grid.Dispose();
     }
 }

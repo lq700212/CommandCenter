@@ -315,6 +315,22 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             // 弹"值无效"异常对话框。ReloadProgramGrid 已把候选补齐/规范化，这里再兜底吞掉漏网的，
             // 保证打开对话框不弹窗；该行数据仍保留，用户编辑该行自然修正。
             dgvPrograms.DataError += (s, e) => e.ThrowException = false;
+            // V2.15.x 下拉列禁手输（EditingControlShowing）：把编辑态的下拉框切成 DropDownList，
+            // 用户只能从候选里选、不能键盘敲。
+            // 【为什么必须加】DataGridViewComboBoxCell 的编辑控件默认是可输入的 ComboBox，
+            // 手敲的文本若不在候选里，提交时 DataGridView 判定"值无效"→ 单元格回退成候选第一项
+            // （程序号第一项就是"不切换"）。切成 DropDownList 后提交值恒等于候选里的某一项，
+            // 从源头上杜绝"改完的值被悄悄回退"（配合下面"候选与值全用字符串"的改动）。
+            // 注意：切 DropDownList 会清掉编辑控件的选中项，所以切完要把原来的选中项还原回去，
+            // 否则一点开下拉就是空选、看着像"程序号丢了"。
+            dgvPrograms.EditingControlShowing += (s, e) =>
+            {
+                var combo = e.Control as ComboBox;
+                if (combo == null || combo.DropDownStyle == ComboBoxStyle.DropDownList) return;
+                object current = combo.SelectedItem;
+                combo.DropDownStyle = ComboBoxStyle.DropDownList;
+                if (current != null && combo.Items.Contains(current)) combo.SelectedItem = current;
+            };
             BuildMatrix();              // 按 _rows×_cols 动态生成窗口格子按钮
             BuildProgramGrid();         // 初始化相机程序映射区：下拉 + 表格列
             WireEvents();               // 挂按钮/格子交互
@@ -323,8 +339,9 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         }
 
         /// <summary>
-        /// 按某产品型号重建窗口矩阵（V2.12.1）：窗口总数/行列随型号点位表变化（U171=上20+下4=24 窗、
-        /// Z121=上26+下3=29 窗…），切型号必须重建 TableLayoutPanel，否则矩阵跟不上新型号（用户实测的
+        /// 按某产品型号重建窗口矩阵（V2.12.1）：窗口总数/行列随型号点位表变化（U171=上17+下4=21 窗、
+        /// Z121=上18+下3=21 窗…，V2.15.21 上相机点位表更新后两型号窗口数一致），切型号必须重建
+        /// TableLayoutPanel，否则矩阵跟不上新型号（用户实测的
         /// "切型号后矩阵不刷新"bug 的根治）。步骤：重算布局 → _map/_enabled 重新对齐（保留已有的
         /// 禁用状态，按窗口号前缀截断）→ BuildMatrix 重建格子 → RefillStationColumn（点位列候选
         /// 随矩阵点位更新）→ RefreshCells。
@@ -460,9 +477,13 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             // 注意：程序号数量和具体编号是【相机侧程序库】定的，与窗口数量无关——相机装了几个程序、
             // 编号是多少（可跳过不连续），现场就在这 0~127 全集里动态选，配几行就是几个程序。
             // 0 也是合法程序号（相机 P000），必须能选到；"不切换"解析为 -1。
+            // 【V2.15.x 候选一律用字符串，红线】候选里"一个字符串 + 一堆 int"是"改完程序号显示回退成
+            // 不切换"的根因：DataGridView 提交下拉编辑时把值转成了字符串"5"，而候选里存的是 int 5，
+            // 二者对不上 → DataGridView 判"值无效"→ 单元格回退成候选第一项（第一项恰好是"不切换"）。
+            // 候选和单元格值【全部用字符串】后，提交值 = 候选里的同一字符串，永远不会判无效。
             colProgram.Items.Clear();
             colProgram.Items.Add(NoSwitch);
-            for (int p = 0; p <= 127; p++) colProgram.Items.Add(p);
+            for (int p = 0; p <= 127; p++) colProgram.Items.Add(NumText(p));
 
             if (_cameras.Count > 0)
             {
@@ -572,8 +593,51 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
                     if (it != null && it.StationNo >= 1) set.Add(it.StationNo);
             }
             foreach (var s in _map) if (s >= 1) set.Add(s);   // 历史兼容兜底（V2.12.1 起 _map 已退役）
+            // 候选一律字符串（同 BuildProgramGrid 的红线注释：int 候选会让编辑后的值判为无效并回退）
             colStation.Items.Clear();
-            foreach (var s in set) colStation.Items.Add(s);
+            foreach (var s in set) colStation.Items.Add(NumText(s));
+            // 【V2.15.x 重建候选必须保号】Items 一清空，表格里"不在新候选里"的行会被 DataGridView
+            // 判无效并回退成候选第一项（点位列第一项=最小点位号）——切型号时用户配好的点位会被悄悄
+            // 改成别的号、点确定还会写进配置。这里把表格现有值补回候选，保证任何值都能原样显示。
+            EnsureGridValuesInCandidates();
+        }
+
+        /// <summary>int → 下拉候选文本（固定用不变文化，避免某些数字格式被加千分位/本地化）。</summary>
+        private static string NumText(int n)
+        {
+            return n.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
+        /// 把表格里现有的单元格值补进对应列的下拉候选（V2.15.x）。
+        /// 【为什么需要】DataGridViewComboBoxCell 规定"单元格值必须能在候选里找到"，找不到就判
+        /// "值无效"并把单元格回退成候选第一项（详见 BuildProgramGrid 里的红线注释）。而本窗体有两个
+        /// 地方会整表重建候选：RefillStationColumn（切型号/建窗体）与列候选补值。重建后表格里那些
+        /// "新候选没有"的历史值（老配置留下来的点位、手改 appconfig 的越界程序号）就会被悄悄改掉。
+        /// 补一项候选没有任何副作用（下拉多一个可选项而已），却能保住用户配的值不被篡改。
+        /// </summary>
+        private void EnsureGridValuesInCandidates()
+        {
+            foreach (DataGridViewRow row in dgvPrograms.Rows)
+            {
+                if (row == null || row.IsNewRow) continue;
+                if (row.Cells.Count > 0) EnsureCandidate(colStation, row.Cells[0].Value);
+                if (row.Cells.Count > 1) EnsureCandidate(colProgram, row.Cells[1].Value);
+            }
+        }
+
+        /// <summary>把某个值补进 col 的候选（已存在则不动；按字符串比较，兼容候选里残留的非字符串项）。</summary>
+        private static void EnsureCandidate(DataGridViewComboBoxColumn col, object value)
+        {
+            if (col == null || value == null) return;
+            string text = Convert.ToString(value);
+            if (text.Length == 0) return;
+            foreach (object item in col.Items)
+            {
+                if (string.Equals(Convert.ToString(item), text, StringComparison.OrdinalIgnoreCase))
+                    return;                       // 候选里已有（只比较文本，避免同文本不同类型重复添加）
+            }
+            col.Items.Add(text);
         }
 
         /// <summary>当前"相机+型号"组合的编辑槽位表；型号槽不存在时自动建空表（首次切过去即可编辑）。</summary>
@@ -622,39 +686,48 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
         }
 
         /// <summary>重新把当前"相机+型号"组合的编辑副本灌入表格（切换相机/型号/增删行后调用）。
-        /// 下拉列填值：点位/程序号都直接放 int；程序号 -1 或超界用"不切换"文案（与下拉选项一致）。
+        /// 下拉列填值：点位/程序号都放【文本】（NumText），程序号 -1 或超界用"不切换"文案。
         /// 【DataError 防控】DataGridViewComboBoxCell 的单元格值【必须在下拉候选里】，否则渲染时抛
         /// "值无效"的 ArgumentException（现场实测报错）。防三件事：
-        ///   ① 程序号 >127（非法，配置越界）统一按"不切换"显示，不放进下拉（候选只到 127）；
+        ///   ① 程序号 >127（非法，配置越界）统一按"不切换"显示（V2.15.x：同时补进候选，
+        ///      保证这个值显示得出来，用户下次能重新选回合法值）；
         ///   ② 点位列值可能来自"该相机某型号编辑副本"，而候选按矩阵型号（_matrixModel）生成——
         ///      打开时 _matrixModel 与程序映射区型号 _programModel 可能不一致（主界面当前型号不在
         ///      第一台相机候选时），点位超出候选。这里逐行把实际点位/程序号**动态补进下拉候选**，
         ///      保证任何值都能显示（下拉多一项无副作用，重选仍可编辑）；
-        ///   ③ 仍有漏网的（用户手改配置/边界值）由 dgvPrograms.DataError 兜底吞掉（见构造）。</summary>
+        ///   ③ 仍有漏网的（用户手改配置/边界值）由 dgvPrograms.DataError 兜底吞掉（见构造）。
+        /// 【V2.15.x 单元格值一律字符串】与下拉候选保持同类型（见 BuildProgramGrid 红线注释）：
+        /// 值类型与候选类型不一致 = DataGridView 判"值无效" → 单元格回退成候选第一项。所以点位/程序号
+        /// 都放 NumText 字符串（程序号"不切换"本来就是字符串），读取侧 FlushProgramGrid 用 Convert
+        /// .ToString + TryParse 反解，字符串/数字两种值都能吃。</summary>
         private void ReloadProgramGrid()
         {
             if (_programCamIdx < 0 || _programCamIdx >= _programEdits.Count) return;
             dgvPrograms.Rows.Clear();
             foreach (var item in _slot())
             {
-                // 程序号：<0（不切换）或 >127（越界）→ "不切换"；其余 0~127 合法才放 int。
-                object prog = (item.ProgramNo < 0 || item.ProgramNo > 127) ? NoSwitch : (object)item.ProgramNo;
+                // 程序号：<0（不切换）或 >127（越界）→ "不切换"；其余 0~127 合法放数字文本。
+                string prog = (item.ProgramNo < 0 || item.ProgramNo > 127) ? NoSwitch : NumText(item.ProgramNo);
+                string station = NumText(item.StationNo);
 
-                // 点位列候选补齐：复制表里有点位、但当前矩阵型号候选没有 → 动态加入，
-                // 否则 DataGridViewComboBoxCell 值无效直接弹异常（见方法注释②）。
-                if (item.StationNo >= 1 && !colStation.Items.Contains(item.StationNo))
-                    colStation.Items.Add(item.StationNo);
-                // 程序号列候选补齐：正常情况下 0~127 已在初始候选里，防列被清空/边界情况再保一手。
-                if (prog is int p && !colProgram.Items.Contains(p))
-                    colProgram.Items.Add(p);
+                // 候选补齐：复制表里有点位/程序号、但当前候选没有 → 动态加入，保证值恒在候选里
+                // （见方法注释②③；EnsureCandidate 内部按文本比较，重复项不会加两遍）。
+                if (item.StationNo >= 1) EnsureCandidate(colStation, station);
+                EnsureCandidate(colProgram, prog);
 
-                dgvPrograms.Rows.Add(item.StationNo, prog);
+                dgvPrograms.Rows.Add(station, prog);
             }
         }
 
+        /// <summary>取下拉单元格的文本（null → 空串）：V2.15.x 起值是字符串，老配置残留的 int 也能吃。</summary>
+        private static string CellText(DataGridViewCell cell)
+        {
+            return cell.Value == null ? "" : Convert.ToString(cell.Value).Trim();
+        }
+
         /// <summary>把表格当前内容回存到正在编辑的"相机+型号"编辑副本（切换相机/型号/确定前调用）。
-        /// 下拉列取值：点位/程序号选中值是 int（或"不切换"）；未选/留空按原语义处理。
-        /// 点位非法→跳过该行（该相机不拍这个点位）；程序号选"不切换"/空→-1（不切换）。</summary>
+        /// 下拉列取值：V2.15.x 起点位/程序号都是文本（"3"/"5"/"不切换"），反解统一用 TryParse。
+        /// 点位非法→跳过该行（该相机不拍这个点位）；程序号选"不切换"/空/非法→-1（不切换）。</summary>
         private void FlushProgramGrid()
         {
             if (_programCamIdx < 0 || _programCamIdx >= _programEdits.Count) return;
@@ -662,16 +735,23 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             list.Clear();
             foreach (DataGridViewRow row in dgvPrograms.Rows)
             {
-                // 点位列：选中值是 int，未选是 null；转字符串解析，非法即跳过（不拍这个点位）
+                // 点位列：V2.15.x 起值是数字文本（老配置残留 int 也能吃）；未选（null/空）/非法
+                // → 跳过该行（该相机不拍这个点位）
                 int station;
-                string stText = row.Cells[0].Value == null ? "" : Convert.ToString(row.Cells[0].Value).Trim();
+                string stText = CellText(row.Cells[0]);
                 if (!int.TryParse(stText, out station) || station < 1 || station > 9999)
                     continue;
-                // 程序号列："不切换"或空/非法 → -1（不切换）；int 则直接用
+                // 程序号列：只有 0~127 才是合法程序号，"不切换"/空/非法/越界一律算 -1（不切换）。
+                // ⚠️ 不能写成 `else if (int.TryParse(text, out program) && (越界)) program = -1;`——
+                // TryParse 失败时会把 out 参数置 0，等于把"非法值"悄悄变成程序号 0（相机 P000），
+                // 与"不切换"（保持相机当前程序）语义完全不同，现场会表现为乱切程序。
                 int program = -1;
-                string progText = row.Cells[1].Value == null ? "" : Convert.ToString(row.Cells[1].Value).Trim();
-                if (NoSwitch.Equals(progText, StringComparison.OrdinalIgnoreCase) || progText.Length == 0) program = -1;
-                else if (int.TryParse(progText, out program) && (program < 0 || program > 127)) program = -1;
+                string progText = CellText(row.Cells[1]);
+                if (progText.Length > 0 && !NoSwitch.Equals(progText, StringComparison.OrdinalIgnoreCase))
+                {
+                    int parsed;
+                    if (int.TryParse(progText, out parsed) && parsed >= 0 && parsed <= 127) program = parsed;
+                }
                 list.Add(new StationProgramItem { StationNo = station, ProgramNo = program });
             }
             // 去重：同一台相机不允许同点位重复（后者覆盖前者，避免映射表里乱）

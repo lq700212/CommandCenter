@@ -154,10 +154,15 @@ namespace CommandCenter.Views
             this.dgvPrograms.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
             this.colStation,
             this.colProgram});
+            // V2.15.x 行选中高亮：整行高亮（蓝底白字）+ 单行选择，让用户一眼看出"当前正在编辑/删除的是哪一行"
+            // （原来是 CellSelect，只高亮一个单元格，点【删除选中行】时不知道删的是哪行）。
+            this.dgvPrograms.DefaultCellStyle.SelectionBackColor = System.Drawing.Color.FromArgb(0, 120, 215);
+            this.dgvPrograms.DefaultCellStyle.SelectionForeColor = System.Drawing.Color.White;
             this.dgvPrograms.Location = new System.Drawing.Point(16, 72);
+            this.dgvPrograms.MultiSelect = false;
             this.dgvPrograms.Name = "dgvPrograms";
             this.dgvPrograms.RowHeadersVisible = false;
-            this.dgvPrograms.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.CellSelect;
+            this.dgvPrograms.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
             this.dgvPrograms.Size = new System.Drawing.Size(688, 116);
             this.dgvPrograms.TabIndex = 11;
             // 

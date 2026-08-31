@@ -23,7 +23,7 @@ $runnerPdb = Join-Path $binDir "cc_test_runner.pdb"
     /r:$exe `
     /r:"$(Join-Path $binDir 'Newtonsoft.Json.dll')" `
     /r:"$(Join-Path $binDir 'NModbus.dll')" `
-    /r:System.dll /r:System.Core.dll `
+    /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
     $cs
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $runner)) {
     Write-Host "[TESTS-FAIL] TestRunner 编译失败"; exit 1
