@@ -2,6 +2,8 @@
 
 相机 + PLC 现场命令中心上位机（Windows 桌面程序，.NET Framework 4.7.2 WinForms）。
 
+<img width="1906" height="1033" alt="image" src="https://github.com/user-attachments/assets/370dfaea-169a-4ef3-9ccc-070333cdad42" />
+
 一句话：**PLC 告诉它"该扫码了" → 它扫 SN、派相机拍照 → 图片进窗口、判定结果写给 PLC → 等 PLC 说
 "下一位"再循环。** 现场操作员盯着大屏窗口矩阵看 OK/NG，改了型号直接点标题栏下拉切换。
 
@@ -155,6 +157,8 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 生产现场的接线关系（默认值，都可在系统设置里改）：
 
+<img width="1880" height="1025" alt="image" src="https://github.com/user-attachments/assets/728c6386-b4af-4af6-b39a-f0aff3891ae8" />
+
 ```
                          生产现场（19.87.6.x 网段）
    汇川 PLC ──────Modbus TCP──▶ 上位机 [监听 0.0.0.0:502，从站]
@@ -302,7 +306,6 @@ modelStationPrograms:
 ### 显示窗口（display{}）
 
 主界面中央是窗口矩阵，**默认"自适应"铺排**（勾选后行列输入框置灰）：
-<img width="1906" height="1033" alt="image" src="https://github.com/user-attachments/assets/370dfaea-169a-4ef3-9ccc-070333cdad42" />
 ```
 U171 默认铺排（4×7=28 格，点位 24 个 → 窗口 25~28 为空窗口）
 ┌────┬────┬────┬────┬────┬────┬────┐
