@@ -1,5 +1,27 @@
 # 版本改动记录
 
+## V2.15.24（2026-09-01）扫码失败自动重试（V2.14.30 协议增强）
+
+> 客户现场反馈：扫码枪回 ERROR 后上位机立即写 2（NG），PLC 收到 NG 就停线不动了。
+> 实际 ERROR 常为瞬时读码失败（产品未停稳/角度偏/枪激光延迟），可自愈无需停线。
+
+### 根因
+
+V2.14.30 的"首次 ERROR 立即写 2"策略过于激进——扫码枪第一次读码失败就通知 PLC 死等人工补录，
+没有给瞬时失败自愈的机会。现场枪回 ERROR 的场景远多于真读码故障，导致频繁停线。
+
+### 改动范围
+
+- **Services/ProductionCoordinator.cs**：
+  - 新增常量 `ScanRetryMaxCount = 3`（最大重试次数）、`ScanRetryIntervalMs = 1500`（重试间隔 ms）；
+  - 新增字段 `_scanRetryCount`（重试计数器）、`_lastScanRetryUtc`（上次重发时刻）；
+  - `BeginScanChannel`：重置重试计数器；
+  - `OnScannerFail`：首次失败不再立即设 `_serialErrorSeen = true`，改为重发 LON 触发指令重试，
+    重试耗尽才置失败标志；
+  - `StepScanChannel` step 0：`_serialErrorSeen` 分支注释更新（重试耗尽才触发，不再"首次 ERROR 立即写 2"）；
+- **测试验证**：自动化测试 179 个用例 + 21 个 UI 交互回归 + 两轮冒烟全部通过
+- **文档同步**：AGENTS.md、docs/CommandCenter.md 扫码枪章节同步更新
+
 ## V2.15.23（2026-08-31）ComboBox 编辑态高亮修复 + 颜色对齐
 
 > 用户反馈 WindowPointForm dgvPrograms 选择 ComboBox 值后，选中行高亮消失。

@@ -195,6 +195,10 @@ namespace CommandCenter.Services
         // 只干等 ScanWaitMs 超时才报，PLC 那一拍会干等 30s（现场节拍拖死）。真码（_serialReceived）
         // 优先于失败信号。
         private volatile bool _serialErrorSeen;
+        // V2.15.24：扫码失败重试状态——首次 ERROR 不再立即写 2，自动重发 LON 重试，
+        // 重试耗尽（_scanRetryCount >= ScanRetryMaxCount）才置 _serialErrorSeen = true。
+        private int _scanRetryCount;            // 本轮已重试次数（BeginScanChannel 重置）
+        private DateTime _lastScanRetryUtc;     // 上次重发 LON 的时刻（间隔控制）
         private bool _scanHooked;               // 是否已订阅扫码枪事件（防重复订阅）
         private DateTime _scanArriveUtc;        // 扫码请求受理时刻（判断 SN 等待超时）
         // V2.14.33：本轮扫码结果已写入 PLC 的值（0=未写/已复位，1=OK，2=NG）。
@@ -224,6 +228,15 @@ namespace CommandCenter.Services
         /// 取值权衡：过小会把"枪离到位远、间隔大"的本件码也当残留丢掉（复现 NG）；过大又防不住
         /// 残留。现场若"过枪→PLC 请求"间隔明显大于 2s，请调大此值并同步注释。</summary>
         private const int ScanCodeKeepMs = 2000;
+
+        /// <summary>扫码失败最大重试次数（V2.15.24）：首次 ERROR 后自动重发 LON 重试，
+        /// 间隔 ScanRetryIntervalMs，直到收到真码或重试耗尽才写 2。3 次重试 × 1.5s = 4.5s 自愈窗口，
+        /// 远小于 ScanWaitMs(30s)，不拖节拍。现场扫码枪瞬时读码失败（产品未停稳/角度偏）可自愈。</summary>
+        private const int ScanRetryMaxCount = 3;
+
+        /// <summary>扫码失败重试间隔（毫秒，V2.15.24）：两次 LON 重发之间的最小间隔。
+        /// 过短会让扫码枪来不及完成一轮读码周期（基恩士 SR 读码周期约 0.5~1s），过长则自愈窗口窄。</summary>
+        private const int ScanRetryIntervalMs = 1500;
 
         /// <summary>到位轮询周期（毫秒）：连上 PLC 时用。
         /// 【V2.14.19 节拍优化】200→100：PLC 从站请求写进 DataStore 后，上位机最多要等一个轮询周期
@@ -413,19 +426,37 @@ namespace CommandCenter.Services
         }
 
         /// <summary>
-        /// 扫码枪"读码失败"信号（V2.14.30，ScanFailed 事件，扫码枪工作线程触发）：
-        /// 收码层已按 IgnoreScanTexts 把错误文本（ERROR 等）过滤掉不当 SN，这里仅置"本件扫码失败"
-        /// 标志 _serialErrorSeen——StepScanChannel 等 SN 阶段见到它即**立即把结果写 2 通知 PLC**
-        /// （V2.14.33：PLC 拿到 2 会死等人工补录，直到上位机补录后覆盖成 1），不必干等 ScanWaitMs 超时。
-        /// 【为什么分两个信号】真码 _serialReceived=false 意味着"没扫到码→超时报 2"；
-        /// 而扫码枪明确报告了"读码失败"（推了 ERROR 文本），我们其实**已知**失败，直接报 2 更快。
+        /// 扫码枪"读码失败"信号（V2.14.30，V2.15.24 增加重试，ScanFailed 事件，扫码枪工作线程触发）：
+        /// 收码层已按 IgnoreScanTexts 把错误文本（ERROR 等）过滤掉不当 SN。
+        /// 【V2.15.24 重试策略】首次失败不再立即置 _serialErrorSeen（不立即写 2），
+        /// 而是自动重发 LON 触发指令重试（间隔 ScanRetryIntervalMs，最多 ScanRetryMaxCount 次），
+        /// 瞬时读码失败（产品未停稳/角度偏/枪激光延迟）可自愈。重试耗尽才置 _serialErrorSeen = true，
+        /// StepScanChannel 见到后写 2 → PLC 死等人工补录。
+        /// 【真码优先】_serialReceived（真码）始终优先于失败信号——重试期间扫到真码，
+        /// StepScanChannel 直接走 OK 分支，重试自然终止。
         /// 【不清标志】BeginScanChannel 新一轮开始才清；StepScanChannel 报 2 消费后也清，
         /// 防止残留失败信号误判下一轮。
         /// </summary>
         private void OnScannerFail(object sender, string text)
         {
-            _serialErrorSeen = true;
-            LogHelper.Warn("扫码枪报告读码失败（错误文本已过滤不当 SN）：" + text);
+            int count = Interlocked.Increment(ref _scanRetryCount);
+            if (count <= ScanRetryMaxCount)
+            {
+                // 还有重试机会：重发 LON 触发指令，让扫码枪重新开始读码
+                LogHelper.Warn($"扫码枪读码失败（第 {count}/{ScanRetryMaxCount} 次重试，已重发 LON）：{text}");
+                _lastScanRetryUtc = DateTime.UtcNow;
+                foreach (var sc in _scanners)
+                {
+                    try { sc.SendTrigger(); }
+                    catch (Exception ex) { LogHelper.Warn("扫码枪重试触发异常：" + ex.Message); }
+                }
+            }
+            else
+            {
+                // 重试耗尽，置失败标志——StepScanChannel 下一拍写 2 通知 PLC
+                _serialErrorSeen = true;
+                LogHelper.Warn($"扫码枪读码失败（已重试 {ScanRetryMaxCount} 次仍失败）：{text}");
+            }
         }
 
         /// <summary>暂停流程（界面手动暂停时调用，停在空闲）。</summary>
@@ -555,6 +586,8 @@ namespace CommandCenter.Services
             _serialErrorSeen = false;       // V2.14.30：新一轮开始清"读码失败"标志，防上一轮残留误判
             _scanResultWritten = 0;         // V2.14.33：新一轮开始时本轮扫码结果尚未写入
             _scanReqResetSeen = false;      // V2.14.41：新一轮开始时"PLC 已复位请求"尚未观察（边沿确认）
+            Interlocked.Exchange(ref _scanRetryCount, 0);  // V2.15.24：重试计数器归零（Interlocked 保证跨线程可见性）
+            _lastScanRetryUtc = DateTime.MinValue;  // V2.15.24：首次失败立即重试，无需等待间隔
 
             // V2.14.11：新一轮开始，通知 UI 清空上一轮各窗口图片（新的一轮第一个动作就是扫码，
             // 上一轮的图片已过时，提前清掉避免与新结果混淆）。事件在轮询线程触发，
@@ -651,9 +684,10 @@ namespace CommandCenter.Services
                 }
                 else if (_serialErrorSeen)
                 {
-                    // 【V2.14.30 扫码枪读码失败 → 立即报 2】扫码枪已明确报告"读码失败"（推了 ERROR
-                    // 等错误文本，收码层过滤不当 SN、置了 _serialErrorSeen）——不等 ScanWaitMs 超时
-                    // 立刻把结果写 2 通知 PLC：PLC 拿到 2 会死等人工补录（V2.14.33 协议，见步骤1），
+                    // 【V2.14.30/V2.15.24】扫码枪读码失败 → 重试耗尽报 2
+                    // OnScannerFail 已自动重发 LON 重试（ScanRetryMaxCount 次），
+                    // 仍无真码才置 _serialErrorSeen=true——这里把结果写 2 通知 PLC
+                    // （V2.14.33：PLC 拿到 2 会死等人工补录，直到上位机补录后覆盖成 1）。
                     // 不会空等 30s。清标志防残留误判下一轮。
                     _plc.WriteProductModel(_productModel);
                     // V2.15.19：DeliverSerialNumber("") 分流——target=Plc 时 PLC SN 区整区清 0
