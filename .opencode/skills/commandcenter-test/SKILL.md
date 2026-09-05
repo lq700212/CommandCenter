@@ -44,7 +44,7 @@ powershell -File ".opencode\skills\commandcenter-test\scripts\smoke.ps1"
 - ⚠️ TestRunner **禁止调用 `ConfigStore.Load()/Save()`**（无参版本固定读写 bin\Debug\Config\appconfig.json，
   会覆盖开发机现有配置）；配置类测试只用 JsonConvert 序列化往返 + 反射调 `ApplyDefaults`（纯内存）；
 - ⚠️ DPAPI 往返测试使用 isDev=true 的开发者记住文件（%LOCALAPPDATA%\CommandCenter），测完自动 Clear；
-- UI 视觉类问题不要往这里塞——那类调试走 `winforms-ui-debug` skill（harness 截图/像素扫描）。
+- UI 视觉类问题不要往这里塞——那类调试走全局技能 `winforms-ui-debug`（harness 截图/像素扫描）。
 
 ## 断言失败怎么处理
 

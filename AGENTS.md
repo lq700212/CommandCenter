@@ -305,6 +305,7 @@ OK/NG 才回退标准格式逐位判定。改动相机读应答/判定逻辑必�
 ```
 
 - 构建成功标准：输出 `CommandCenter -> ...\bin\Debug\CommandCenter.exe` 且无 error。
+- 改构建输出（csproj 路径/bin 目录/主 exe 名）时，同步改全局技能 `winforms-ui-debug` 附录 A 的 CommandCenter 行（防开工查表拿到旧值）。
 - 无单元测试框架；以构建通过 + 冒烟测试为验证手段——**已固化为自动化测试 skill（V2.15.18）**，见下节。
 
 ### 自动化测试 skill（commandcenter-test，改动后必跑）

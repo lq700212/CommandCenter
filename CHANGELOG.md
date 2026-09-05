@@ -1,5 +1,20 @@
 # 版本改动记录
 
+## V2.16.1（2026-09-05）项目内 winforms-ui-debug skill 并入全局版本
+
+### 改动范围
+
+- 删除 `.opencode/skills/winforms-ui-debug/`（Maximized 禁缩放专项、点击双击判定、
+  ComboBox 选中高亮已合并进全局技能 `winforms-ui-debug` §六〜§八）；
+  `commandcenter-test/SKILL.md` 中的分工引用改指全局版本。
+- **为什么这么改**：四项目 UI 调试 skill 合并为同一个全局版本，防分叉；CommandCenter
+  的构建命令与对照窗体已收录进全局 skill 附录 A 项目档案。
+
+### 优化点
+
+- 无代码改动；后续 UI 调试沉淀统一回写全局 skill。
+- 附带机制：AGENTS 构建节加"改构建输出同步改全局 skill 附录 A"一行（防表漂移）。
+
 ## V2.16.0（2026-09-05）发布脚本自动打包 zip ——"混淆→可上传包"全程一键化
 
 > 需求：出发布版/混淆版时不要再一步步引导 AI，一句话（"发布/打包/出发布版/混淆版/生成可部署软件"）
