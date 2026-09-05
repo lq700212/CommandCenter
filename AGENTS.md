@@ -13,7 +13,7 @@
 - 通讯：**NModbus 3.0.83**（汇川 PLC Modbus TCP）；相机走基恩士 TCP 无协议通信（自写 TcpClient）
 - 序列化：**Newtonsoft.Json**（配置/型号）
 - **依赖策略（重要）**：第三方库拷在 `CommandCenter/libs/` 目录由 csproj `<Reference HintPath>` 直接引用，**不依赖 NuGet restore**，离线可编译。新增第三方库请同样"拷 dll 进 libs 再引用"。
-- **代码混淆（V2.14.31）**：发布版必须过混淆再部署（防反编译拿类名/方法名/IP/寄存器号/相机指令），工具 `CommandCenter/tools/Obfuscar/Obfuscar.Console.exe`（离线单体 exe，策略同 libs 离线），配置 `CommandCenter/obfuscar.xml`（全量重命名 + HideStrings 字符串加密），一键脚本 `CommandCenter/build-obfuscated.ps1`（Release 构建 → 混淆 → 补 dll/config → 冒烟），产物 `bin/Obfuscated/`。**混淆豁免红线：配置模型 `CommandCenter.Models*` 命名空间必须 SkipNamespace 跳过**——`ConfigStore.Save` 用小驼峰序列化，属性名=appconfig.json 字段名，混淆属性名会让现场旧配置读不回、新配置字段错乱（改 obfuscar.xml 前先想这条）。新增/修改 P/Invoke（`DllImport`）必须显式写 `EntryPoint="..."`（混淆改方法名后默认按方法名找导出函数会 DllNotFound）。混淆版 PDB 失配不能断点，排查用 Debug 版 + 日志。**改动混淆相关逻辑必须同步 `docs/CommandCenter.md` 第八部分与 `AGENTS.md` 本节**。
+- **代码混淆（V2.14.31）**：发布版必须过混淆再部署（防反编译拿类名/方法名/IP/寄存器号/相机指令），工具 `CommandCenter/tools/Obfuscar/Obfuscar.Console.exe`（离线单体 exe，策略同 libs 离线），配置 `CommandCenter/obfuscar.xml`（全量重命名 + HideStrings 字符串加密），一键脚本 `CommandCenter/build-obfuscated.ps1`（Release 构建 → 混淆 → 补 dll/config → 冒烟 → **自动打包上传 zip**，版本号取最近 git tag），产物混淆目录 `bin/Obfuscated/` + 上传包 `bin/CommandCenter_{版本号}_obfuscated.zip`（V2.16.0）。**混淆豁免红线：配置模型 `CommandCenter.Models*` 命名空间必须 SkipNamespace 跳过**——`ConfigStore.Save` 用小驼峰序列化，属性名=appconfig.json 字段名，混淆属性名会让现场旧配置读不回、新配置字段错乱（改 obfuscar.xml 前先想这条）。新增/修改 P/Invoke（`DllImport`）必须显式写 `EntryPoint="..."`（混淆改方法名后默认按方法名找导出函数会 DllNotFound）。混淆版 PDB 失配不能断点，排查用 Debug 版 + 日志。**改动混淆相关逻辑必须同步 `docs/CommandCenter.md` 第八部分与 `AGENTS.md` 本节**。
 
 ## 铁律（违反即返工）
 
@@ -293,7 +293,7 @@ OK/NG 才回退标准格式逐位判定。改动相机读应答/判定逻辑必�
 | `docs/上位机通讯封装范式.md` | 通讯架构技术总结（连接/心跳/重连/UI 解耦范式，跨项目可复用，独立保留） |
 | `CommandCenter/tools/Obfuscar/Obfuscar.Console.exe` | 代码混淆器本体（V2.14.31，离线单体 exe，发布时由 build-obfuscated.ps1 调用） |
 | `CommandCenter/obfuscar.xml` | 混淆配置（全量重命名 + 字符串加密；**Models 命名空间必须跳过**，见技术栈红线） |
-| `CommandCenter/build-obfuscated.ps1` | 一键混淆发布脚本（Release 构建→混淆→补 dll→冒烟），产物 bin/Obfuscated/ |
+| `CommandCenter/build-obfuscated.ps1` | 一键混淆发布脚本（构建→混淆→补 dll→冒烟→自动打包 zip），产物 bin/Obfuscated/ + 上传包 bin/CommandCenter_{版本号}_obfuscated.zip |
 | `CHANGELOG.md` | 版本改动记录（最新在前） |
 | `.opencode/skills/commandcenter-test/` | **自动化测试 skill（V2.15.18）**：run-all.ps1 一键"构建→回归用例→冒烟"；TestRunner.cs 用例集；改动后必跑，新用例/新冒烟必须沉淀进本 skill（见"自动化测试 skill"节） |
 
@@ -329,13 +329,15 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   无 BOM 文件按 GBK 解析，中文注释会破坏语法）；新写 ps1 后自查前三字节 = EF BB BF。
 - 脚本内仓库根 = `$PSScriptRoot` 向上**四级**（scripts → commandcenter-test → skills → .opencode → 根）。
 
-### 混淆发布命令（V2.14.31，部署前必跑）
+### 混淆发布命令（V2.14.31，部署前必跑；V2.16 起自动打包 zip）
 
 ```powershell
 & ".\CommandCenter\build-obfuscated.ps1"
 ```
 
-- 产物：`CommandCenter\bin\Obfuscated\`（混淆后 exe + 第三方 dll + config + Mapping.txt），整个目录拷去现场。
+- **一键跑完全流程，无需任何引导**：Release 构建 → Obfuscar 混淆 → 补 dll/config → 启动保活冒烟 → **自动打包上传 zip**（版本号取最近 git tag）。
+- 产物：上传包 `CommandCenter\bin\CommandCenter_{最近 tag 版本号}_obfuscated.zip`（内含 CommandCenter.exe 混淆体 + 两个第三方 dll + config + Mapping.txt，**已排除运行时 Logs**）；混淆目录 `CommandCenter\bin\Obfuscated\`（整个目录拷现场部署亦可）。
+- **触发词**：用户说"发布/出发布版/混淆版/打包上传/生成可部署软件"等，直接跑本命令并把上传包路径报告给用户即可，**禁止再驱动用户一步步教流程**。
 - 混淆不改功能；日常 Debug 构建（上面那条）不受影响。混淆版 PDB 失配不能断点，排查用 Debug 版 + 日志。
 
 ## 文档同步（铁律：每次任务必须主动完成，不许等用户提醒）

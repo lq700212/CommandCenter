@@ -137,7 +137,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 配置兼容、扫码过滤、窗口布局、程序映射、密码安全、I18n）→ 两轮进程冒烟**；任一失败非零退出。
 新增可测功能/修 bug 后，对应用例必须同步沉淀进该 skill（见 `.opencode/skills/commandcenter-test/SKILL.md`）。
 
-## 发布（代码混淆，V2.14.31）
+## 发布（代码混淆，V2.14.31；自动打包 zip，V2.16.0）
 
 现场部署用**混淆版**，防止反编译拿到类名/方法名/设备 IP/寄存器号/相机指令等业务细节：
 
@@ -145,8 +145,10 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 & ".\CommandCenter\build-obfuscated.ps1"
 ```
 
-- 流程：Release 构建 → Obfuscar 混淆 → 补第三方 dll + config → 启动冒烟。
-- 产物：`CommandCenter\bin\Obfuscated\`，整个目录拷去现场即可运行。
+- 流程：Release 构建 → Obfuscar 混淆 → 补第三方 dll + config → 启动保活冒烟 → **自动打包上传 zip**（版本号取最近 git tag）。
+- 产物：
+  - 上传包 `CommandCenter\bin\CommandCenter_{版本号}_obfuscated.zip`（含 exe + 两第三方 dll + config + Mapping.txt，已排除运行时 Logs），**直接上传/解压部署**；
+  - 混淆目录 `CommandCenter\bin\Obfuscated\`，整个目录拷去现场亦可运行。
 - 混淆只改名字/字符串（类名变 A.a 乱码、字符串运行时解密），**不改功能**；`Models` 配置模型除外——
   属性名必须保留（`appconfig.json` 字段名依赖它），保证现场旧配置可无缝升级。
 - 混淆版 PDB 失配、无法断点调试；现场/开发排查问题请用 Debug 版 + `Logs/` 日志。

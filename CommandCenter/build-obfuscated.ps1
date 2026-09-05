@@ -1,16 +1,20 @@
 ﻿# ============================================================
 # CommandCenter 代码混淆一键发布脚本（build-obfuscated.ps1）
 # ------------------------------------------------------------
-# 作用：产出"防反编译"的发布版程序。三步走：
+# 作用：产出"防反编译"的发布版程序。四步走：
 #   1. MSBuild 构建 Release 版（混淆输入用）；
 #   2. 调用 tools\Obfuscar\Obfuscar.Console.exe 按 obfuscar.xml
 #      混淆 CommandCenter.exe（类/方法/字段/字符串全部打乱，
 #      Models 配置模型跳过保持 json 兼容）；
 #   3. 把运行必需的第三方 dll 与 exe.config 复制进发布目录，
-#      并做一轮"启动保活"冒烟测试，确保混淆后程序能正常起来。
+#      并做一轮"启动保活"冒烟测试，确保混淆后程序能正常起来；
+#   4. 自动打包成"可直接上传/部署"的 zip（纯 ASCII 文件名，
+#      排除运行时 Logs），版本号取最近 git tag。
 #
-# 产物目录：项目\CommandCenter\bin\Obfuscated\
-#   （现场部署时整个目录拷过去即可，含 exe + 两个第三方 dll + config）
+# 产物：
+#   - 混淆目录：项目\CommandCenter\bin\Obfuscated\
+#     （现场部署时整个目录拷过去即可，含 exe + 两个第三方 dll + config）
+#   - 上传包：  bin\CommandCenter_{版本号}_obfuscated.zip（本条为 V2.16 起新增）
 #
 # 用法（本仓库根目录）：
 #   & ".\CommandCenter\build-obfuscated.ps1"
@@ -80,6 +84,27 @@ if ($p.HasExited) {
 }
 Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
 
-Write-Host "`n混淆发布完成！产物目录：$OutDir" -ForegroundColor Green
-Write-Host "  包含：CommandCenter.exe（已混淆）/ Newtonsoft.Json.dll / NModbus.dll / CommandCenter.exe.config"
+Write-Host "`n[4/4] 打包上传用 zip ..." -ForegroundColor Cyan
+# 打包前清掉冒烟产生的运行时 Logs（上传包只含程序文件，不含运行时日志/数据）
+$SmokeLogs = Join-Path $OutDir "Logs"
+if (Test-Path $SmokeLogs) { Remove-Item $SmokeLogs -Recurse -Force }
+# 版本号取最近 git tag（去 v 前缀），取不到用日期兜底（如非 git 目录）
+$VersionTag = (& git -C $RepoRoot describe --tags --abbrev=0 2>$null) -replace '^v', ''
+if (-not $VersionTag) { $VersionTag = Get-Date -Format 'yyyyMMdd' }
+# 纯 ASCII 文件名：防中文文件名跨机器/网盘/上传控件乱码
+$ZipPath = Join-Path $ScriptDir "bin\CommandCenter_${VersionTag}_obfuscated.zip"
+if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
+# 只打固定 5 个发布文件（不复用"限定通配"以免把 Logs 等运行时文件混进包）
+$PackFiles = @(
+    (Join-Path $OutDir "CommandCenter.exe"),
+    (Join-Path $OutDir "CommandCenter.exe.config"),
+    (Join-Path $OutDir "Mapping.txt"),
+    (Join-Path $OutDir "Newtonsoft.Json.dll"),
+    (Join-Path $OutDir "NModbus.dll")
+)
+foreach ($f in $PackFiles) { if (-not (Test-Path $f)) { throw "打包文件缺失：$f" } }
+Compress-Archive -Path $PackFiles -DestinationPath $ZipPath -Force
+
+Write-Host "`n混淆发布完成！`n  - 混淆目录：$OutDir`n  - 上传包：$ZipPath" -ForegroundColor Green
+Write-Host "  上传包内含：CommandCenter.exe（已混淆）/ Newtonsoft.Json.dll / NModbus.dll / CommandCenter.exe.config"
 Write-Host "  另含 obfuscar 的 Mapping.txt（原名↔混淆名对照表，仅内部排查崩溃栈用，勿对外泄露）"
