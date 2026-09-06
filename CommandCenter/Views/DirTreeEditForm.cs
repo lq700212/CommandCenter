@@ -75,9 +75,10 @@ namespace CommandCenter.Views
         if (lstLevels.Items.Count > 0)
             lstLevels.SelectedIndex = 0;   // 会触发 SelectedIndexChanged → txtLevelName 同步 + 插入目标锁定层级名
 
-        RefreshPreview();               // 初始预览
-        ApplyLanguage();                // V2.15.0 国际化：按当前语言初始化文本
-    }
+            RefreshPreview();               // 初始预览
+            ApplyLanguage();                // V2.15.0 国际化：按当前语言初始化文本
+            ApplyTheme();                   // V2.16.2 深色模式：打开瞬间按当前主题上色（模态期间主题不变，无需订阅事件）
+        }
 
         /// <summary>
         /// 占位符"显示层本地化"（V2.15.12）：统一走 PlaceholderLocalizer（Utils/PlaceholderLocalizer.cs）。
@@ -506,6 +507,16 @@ namespace CommandCenter.Views
             // txtFileNameTpl 刚被上文改成左缘 150、宽 450，Right 仍是 600，
             // 用 Right - AutoSize 宽度 反向校正 Left，保证两者右侧对齐、不重叠。
             chkTimestampSuffix.Left = txtFileNameTpl.Right - chkTimestampSuffix.Width;
+        }
+
+        /// <summary>
+        /// 主题上色（V2.16.2 深色模式）：打开瞬间按当前主题全量上色。
+        /// 模态对话框打开期间主界面点不到主题按钮，无需订阅 ThemeChanged 事件。
+        /// </summary>
+        private void ApplyTheme()
+        {
+            if (IsDisposed) return;
+            AppTheme.ApplyTo(this);
         }
     }
 }

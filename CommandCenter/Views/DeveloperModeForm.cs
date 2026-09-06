@@ -148,6 +148,7 @@ namespace CommandCenter.Views
             AppendLog("开发者模式窗体已打开，复用主窗体已有连接。");
             AppendLog($"PLC={_plc?.IpLabel ?? "null"}，相机数={_cameras.Count}，扫码枪数={_scanners.Count}");
             ApplyLanguage(); // V2.15.0 国际化：按当前语言初始化全部界面文本
+            ApplyTheme();    // V2.16.2 深色模式：打开瞬间按当前主题上色（模态期间主题不变，无需订阅事件）
         }
 
         /// <summary>扫码枪在测试窗体下拉框里的显示名：TCP 显示 IP:端口，串口显示 COM口号+波特率。</summary>
@@ -1094,6 +1095,17 @@ namespace CommandCenter.Views
             btnResCamReset.Text = I18n.T("相机复位 = 0", "Cam Reset = 0");
             grpLog.Text = I18n.T("操作日志", "Operation Log");
             RefreshStates(); // 状态标签按当前语言刷新（初始文案也随语言走）
+        }
+
+        /// <summary>
+        /// 主题上色（V2.16.2 深色模式）：打开瞬间按当前主题全量上色。
+        /// 状态标签的绿/红/灰是通讯状态语义色，由 AppTheme 自动保留，不会被洗掉。
+        /// 模态期间主题不变，无需订阅 ThemeChanged 事件。
+        /// </summary>
+        private void ApplyTheme()
+        {
+            if (IsDisposed) return;
+            AppTheme.ApplyTo(this);
         }
     }
 }

@@ -1,5 +1,77 @@
 # 版本改动记录
 
+## V2.16.3（2026-09-06）修复主题按钮文本不跟随翻转
+
+> 现场反馈：MainForm 标题栏主题按钮点了能换肤，但按钮上的字永远不变（"固定为浅色"）。
+
+### 根因
+
+- 主题按钮文本（目标主题名）只在 `ApplyLanguage()` 里设置；点主题按钮走的是
+  `AppTheme.ThemeChanged → ApplyTheme()`（只刷配色），根本不经过 `ApplyLanguage`，
+  文本自然永远停在旧值。切语言/切主题两条路径都要刷这个按钮，V2.16.2 只接了一条。
+
+### 改动范围
+
+- **`Views/MainForm.cs`**：新增 `RefreshThemeButtonText()`（文本=目标主题名 + 悬停提示，
+  与语言按钮同策略）；`ApplyLanguage()` 与 `ApplyTheme()`（末尾）两处都调，绝不漂移。
+- 验证：一次性 harness 真实 `new MainForm()`（不 Show，构造即建站与真实一致），反射调
+  `ApplyTheme`/`ApplyLanguage` 断言文本双向翻转——浅色→"深色"、深色→"浅色"、
+  英文深色→"Light"、构造后=配置主题对应的目标名（附带验出"重启保持"正常），5/5 通过，
+  探针已删不进仓库。回归用例是纯逻辑层（够不到 MainForm 私有方法），本次不扩 TestRunner。
+
+### 优化点
+
+- 无行为变化，只补刷文本；`AppTheme.ApplyTo` 不碰按钮文本内容（只保白字），放末尾调安全。
+
+## V2.16.2（2026-09-06）深色/浅色主题切换 —— 全界面跟随，按钮在标题栏语言按钮右侧
+
+> 需求：加深色/浅色两套主题，所有 UI 界面都要支持，切换按钮放在 MainForm 标题栏中英文切换按钮的右边。
+
+### 改动范围
+
+- **新增 `CommandCenter/Utils/AppTheme.cs`（主题管理器，与 `I18n` 对等）**：
+  `Theme`（"Light"/"Dark"，默认浅色，setter 触发 `ThemeChanged`）+ `Normalize`
+  （非法值回落浅色）+ `IsDark` + 配色常量（浅色=历史外观像素级保留，深色=VS 深色系）+
+  `ApplyTo/ApplyOne`（递归整树上色）+ `ApplyGridTheme`（表格全套）+
+  `IsSemanticColor`（OK绿/NG红/PLC黄/主按钮蓝/Green/Red/Gray/白字命中保留）。
+  上色原则：只动底板/普通文字/输入框，语义色一律保留；品牌蓝横幅（对话框 `pnlHeader`）
+  自动保留；图片区（PictureBox）与 OK/NG 自绘徽标跳过。
+- **配置持久化（`Models/AppConfig.cs` + `Utils/ConfigStore.cs`）**：新增顶层 `Theme`
+  （默认 "Light"，小驼峰 `theme` 落盘）；`ApplyDefaults` 经 `AppTheme.Normalize` 兜底
+  （旧配置缺字段默认浅色、手改脏值回落浅色）；csproj 补 `Utils\AppTheme.cs` 编译项
+  （老式 csproj 新文件必须显式注册，否则 CS0103）。
+- **主界面（`Views/MainForm.cs` + `MainForm.Designer.cs`）**：标题栏新增主题按钮
+  `btnToggleTheme`（语言按钮右侧最右，蓝底白字 88×30 同款；文本=目标主题名，
+  浅色显示"深色/Dark"、深色显示"浅色/Light"，与语言按钮同策略自解释）；
+  点击即切即存（`_config.Theme` 翻转 → `AppTheme.Theme` 热刷新 → `ConfigStore.Save`
+  写盘，失败只告警不阻断）；`RelayoutTitleBar` 排布序列追加最右；构造同步主题 +
+  末尾 `ApplyTheme()`；订阅 `ThemeChanged` 实时重刷；热更/切型号重建后补上色；
+  `ApplyTheme()` 恢复矩阵/标题栏层级色（浅色像素级对齐历史）+ 状态栏默认字跟随主题
+  （绿提示保留）+ 遍历窗口 `ApplyTheme()`；`OnStateChanged` 默认字色改跟随主题
+  （深色下不再写死深蓝灰）；新窗口创建即上色（深色切型号不回浅）。
+- **其余全部界面跟随**：`CameraDisplayControl.ApplyTheme()`（空态卡底/编号标签跟随，
+  图片与徽标不动）；SettingsForm / DeveloperModeForm / LoginForm / SerialInputForm /
+  ScannerFailForm / ModelIndexEditForm / DirTreeEditForm / WindowPointForm
+  构造末尾各加 `ApplyTheme()`（模态打开瞬间上色一次，期间点不到主题按钮、无需订阅事件；
+  WindowPointForm 上色后 `RefreshCells()` 重刷格子三态语义底）。
+- **测试沉淀**：`TestRunner.cs` ③组加 Theme 默认/落盘/兼容/归一断言 + 新增 ⑪ 组
+  `TestAppTheme`（归一/语义判定/切换事件/单控件上色/表格，共 31 条）；
+  另用一次性 harness 真实拉起 LoginForm 等 4 对话框验证深浅两套不崩、
+  蓝横幅保留、面板跟随（8/8 通过，临时探针已删，不进仓库）。
+
+### 为什么这么改
+
+- 夜班/暗光车间浅色刺眼，现场要深色；且"所有界面"必须一致，否则弹窗一弹回到浅色更晃眼。
+- 对标语言切换的成熟路径（`I18n` 全局开关 + 常驻窗订阅 + 模态打开即刷 + 配置持久化），
+  主题照抄同一套，不发明新机制；浅色像素级保留历史，老用户无感。
+- WinForms 原生深色弱 + 项目离线无换肤库，自写递归上色最可靠；语义色保留是红线
+  （状态灯/计数徽标/品牌蓝洗掉就看不见），收敛在 `IsSemanticColor` 一处。
+
+### 优化点
+
+- 一键切换、即时生效、重启保持；旧配置零迁移（缺字段默认浅色）。
+- run-all 全绿：构建 + 210 回归（含新增主题用例）+ UI 交互 21 + 两轮进程冒烟。
+
 ## V2.16.1（2026-09-05）项目内 winforms-ui-debug skill 并入全局版本
 
 ### 改动范围

@@ -110,6 +110,7 @@ namespace CommandCenter.Views
             txtUser.Focus();
             txtUser.SelectAll(); // 选中整个账号文本，用户若想改直接输入即覆盖
             ApplyLanguage();    // V2.15.0 国际化：按当前语言初始化全部文本
+            ApplyTheme();       // V2.16.2 深色模式：打开瞬间按当前主题上色（模态期间主题不变，无需订阅事件）
         }
 
         /// <summary>ESC 键：改密码面板时先回登录面板；登录面板时直接关闭（同取消）。</summary>
@@ -360,6 +361,17 @@ namespace CommandCenter.Views
             // 中文提示较短，保持原左对齐（左缘 114，与输入框文字起点对齐）。
             // 注意：AutoSize 下 Width 已随上一步 lblPwdHint.Text 更新，这里按最终宽度算 Left。
             lblPwdHint.Left = en ? (pnlChangePwd.ClientSize.Width - lblPwdHint.Width) / 2 : 114;
+        }
+
+        /// <summary>
+        /// 主题上色（V2.16.2 深色模式）：打开瞬间按当前主题全量上色。
+        /// 蓝横幅（pnlHeader 品牌蓝）由 AppTheme 自动保留，不会被洗灰。
+        /// 模态期间主题不变，无需订阅 ThemeChanged 事件。
+        /// </summary>
+        private void ApplyTheme()
+        {
+            if (IsDisposed) return;
+            AppTheme.ApplyTo(this);
         }
     }
 }

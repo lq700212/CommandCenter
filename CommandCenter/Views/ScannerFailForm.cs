@@ -99,6 +99,7 @@ namespace CommandCenter.Views
             }
             FormClosed += (s, e) => UnsubscribeScanners();
             ApplyLanguage(); // V2.15.0 国际化：按当前语言初始化文本
+            ApplyTheme();    // V2.16.2 深色模式：打开瞬间按当前主题上色（模态期间主题不变，无需订阅事件）
         }
 
         /// <summary>
@@ -116,6 +117,16 @@ namespace CommandCenter.Views
             chkMuteToday.Text = I18n.T("今日不再提醒", "Don't remind today");
             btnLater.Text = I18n.T("稍后处理", "Later");
             btnManual.Text = I18n.T("人工补录", "Manual");
+        }
+
+        /// <summary>
+        /// 主题上色（V2.16.2 深色模式）：打开瞬间按当前主题全量上色。
+        /// 蓝横幅（pnlHeader 品牌蓝）由 AppTheme 自动保留。模态期间主题不变，无需订阅事件。
+        /// </summary>
+        private void ApplyTheme()
+        {
+            if (IsDisposed) return;
+            AppTheme.ApplyTo(this);
         }
 
         /// <summary>

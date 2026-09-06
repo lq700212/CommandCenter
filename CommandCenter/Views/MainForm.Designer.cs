@@ -13,7 +13,8 @@ namespace CommandCenter.Views
     ///   ┌──────────────────────────────────────────────────────────────┐
     ///   │ 产品型号:[cmbModel▾] 序列号:[lblSerialTitle][lblSerial·只读框]    │
     ///   │   [btnManualSerial人工补录] | 总数:[lblTotal] OK:[lblOk]      │
-    ///   │   NG:[lblNg] | [btnSettings系统设置]                          │
+    ///   │   NG:[lblNg] | [btnSettings系统设置][btnToggleLanguage中/英] │
+    ///   │   [btnToggleTheme深/浅色·最右]                                │
     ///   │          ●[lblPlcStatus] ●[lblScannerStatus] ●[相机灯]        │
     ///   ├──────────────────────────────────────────────────────────────┤
     ///   │  pnlWindowScroll（AutoScroll=true，行多超高时出竖直滚动条）       │
@@ -60,6 +61,7 @@ namespace CommandCenter.Views
             this.lblCamPlaceholder = new System.Windows.Forms.Label();
             this.btnSettings = new System.Windows.Forms.Button();
             this.btnToggleLanguage = new System.Windows.Forms.Button();
+            this.btnToggleTheme = new System.Windows.Forms.Button();
             this.btnManualSerial = new System.Windows.Forms.Button();
             this.lblSep2 = new System.Windows.Forms.Label();
             this.lblNg = new System.Windows.Forms.Label();
@@ -93,6 +95,7 @@ namespace CommandCenter.Views
             this.pnlTitleBar.Controls.Add(this.lblCamPlaceholder);
             this.pnlTitleBar.Controls.Add(this.btnSettings);
             this.pnlTitleBar.Controls.Add(this.btnToggleLanguage);
+            this.pnlTitleBar.Controls.Add(this.btnToggleTheme);
             this.pnlTitleBar.Controls.Add(this.lblSep2);
             this.pnlTitleBar.Controls.Add(this.lblNg);
             this.pnlTitleBar.Controls.Add(this.lblOk);
@@ -184,6 +187,26 @@ namespace CommandCenter.Views
             this.btnToggleLanguage.TabIndex = 10;
             this.btnToggleLanguage.Text = "English";
             this.btnToggleLanguage.UseVisualStyleBackColor = false;
+            //
+            // btnToggleTheme
+            // 界面主题切换按钮（V2.16.2 深色模式）：
+            // 排布在【语言切换】按钮右侧（RelayoutTitleBar 的 seq 数组里 btnToggleLanguage 之后即最右）。
+            // 点击直接切换深/浅色（浅色界面 → 深色、深色界面 → 浅色），立即热生效并写盘持久化。
+            // 按钮文本 = "目标主题名"（与语言按钮同策略，自解释），由 ApplyLanguage() 按当前主题设置。
+            // 外观与 btnSettings/btnToggleLanguage 完全一致：蓝底白字、Flat 无边框、微软雅黑 9F、88×30。
+            // 运行期位置由 RelayoutTitleBar 重排（Designer 里的 Location 只是初始值）。
+            //
+            this.btnToggleTheme.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
+            this.btnToggleTheme.FlatAppearance.BorderSize = 0;
+            this.btnToggleTheme.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnToggleTheme.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.btnToggleTheme.ForeColor = System.Drawing.Color.White;
+            this.btnToggleTheme.Location = new System.Drawing.Point(949, 9);
+            this.btnToggleTheme.Name = "btnToggleTheme";
+            this.btnToggleTheme.Size = new System.Drawing.Size(88, 30);
+            this.btnToggleTheme.TabIndex = 11;
+            this.btnToggleTheme.Text = "深色";
+            this.btnToggleTheme.UseVisualStyleBackColor = false;
             // 
             // lblSep2
             // 
@@ -422,6 +445,7 @@ namespace CommandCenter.Views
         private Label lblSep2;
         private Button btnSettings;
         private Button btnToggleLanguage;
+        private Button btnToggleTheme;
         private Label lblPlcStatus;
         private Label lblScannerStatus;
         private Label lblCamPlaceholder;

@@ -105,6 +105,7 @@ namespace CommandCenter.Views
             LoadFromConfig();               // 把当前配置值填进各输入框
             WireButtonEvents();             // 添加/删除相机按钮事件
             ApplyLanguage();                // V2.15.0 国际化：按配置语言初始化本窗体全部文本
+            ApplyTheme();                   // V2.16.2 深色模式：打开瞬间按当前主题上色（模态期间主题不变，无需订阅事件）
         }
 
         /// <summary>把现有配置值填充到控件（配置来源是上层传来的 _cfg 实例）。</summary>
@@ -832,6 +833,16 @@ namespace CommandCenter.Views
             // 两个动态 ToolTip（含当前配置内容）随语言刷新
             tip.SetToolTip(btnEditPoints, AutoFitPointsButtonTipText());
             RefreshDirPreview();
+        }
+
+        /// <summary>
+        /// 主题上色（V2.16.2 深色模式）：打开瞬间按当前主题全量上色（含三张配置表格）。
+        /// 模态期间主题不变，无需订阅 ThemeChanged 事件；子对话框各自上色。
+        /// </summary>
+        private void ApplyTheme()
+        {
+            if (IsDisposed) return;
+            AppTheme.ApplyTo(this);
         }
 
         /// <summary>

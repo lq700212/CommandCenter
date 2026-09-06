@@ -11,7 +11,7 @@
 //   ⑦ 密码 SHA-256 哈希 + DPAPI 记住密码往返
 //   ⑧ I18n 双语切换
 //   ⑨ SN 去向路由（V2.15.20 二选一：SerialNumberTargets 判定 / sn 配置段 / MES 报文格式）
-//   ⑩ 窗口点位配置表下拉单元格取值（V2.15.x 防回退：候选/值全字符串）
+//   ⑪ 深色/浅色主题（V2.16.2：AppTheme 归一/语义色保留/控件上色 + Theme 配置持久化）
 //
 // 【红线】禁止调用 ConfigStore.Load()/Save()——无参版本固定读写 bin\Debug\Config\
 //   appconfig.json，会覆盖开发机现有配置。配置测试只做内存序列化往返。
@@ -92,6 +92,7 @@ internal static class TestRunner
         TestSecurity();           // ⑦
         TestSnRoute();            // ⑨ V2.15.20：SN 去向路由二选一（放在 I18n 前，I18n 改全局语言状态须最后跑）
         TestWindowPointGridCells(); // ⑩ V2.15.x：窗口点位配置表下拉取值（防"改完回退成候选第一项"）
+        TestAppTheme();           // ⑪ V2.16.2：深色/浅色主题（改全局主题状态，放 I18n 紧前，结尾还原浅色）
         TestI18n();               // ⑧ 放最后（改全局语言状态）
     }
 
@@ -277,6 +278,19 @@ internal static class TestRunner
         // 手改脏值防御：len 配成 0/负数/超大，写入时被钳位（见 PlcService 内 Math.Max/Min）
         // 这里验证属性可写不抛异常（钳位发生在服务层写入路径，②组已覆盖真实写入）
         cfg.Plc.ScanSerialNumberLen = -5; Check("负数 Len 可赋值(钳位在服务层)", cfg.Plc.ScanSerialNumberLen == -5);
+
+        // V2.16.2 主题配置：默认浅色 + 小驼峰落盘 + 旧 json 缺字段兼容 + 脏值归一
+        Eq("Theme 默认 Light", "Light", new AppConfig().Theme);
+        Check("json 含 theme 字段(小驼峰)", json.Contains("\"theme\""));
+        var oldNoTheme = JsonConvert.DeserializeObject<AppConfig>("{\"productModel\":\"U171\"}", settings);
+        Eq("旧json 缺 theme→默认 Light", "Light", oldNoTheme.Theme);
+        var bareTheme = new AppConfig();
+        bareTheme.Theme = "xxx";
+        InvokePrivateStatic(typeof(ConfigStore), "ApplyDefaults", bareTheme);
+        Eq("ApplyDefaults 脏 theme 回落 Light", "Light", bareTheme.Theme);
+        bareTheme.Theme = "dark";
+        InvokePrivateStatic(typeof(ConfigStore), "ApplyDefaults", bareTheme);
+        Eq("ApplyDefaults dark 归一 Dark", "Dark", bareTheme.Theme);
 
         // ApplyDefaults（private static，纯内存兜底）：空段补齐
         var bare = new AppConfig();
@@ -633,5 +647,87 @@ internal static class TestRunner
         InvokePrivateStatic(t, "EnsureCandidate", col, (object)"");
         Eq("EnsureCandidate null/空不补", 3, col.Items.Count);
         grid.Dispose();
+    }
+
+    // ───────────────────── ⑪ 深色/浅色主题（V2.16.2）──────────────────────
+    // 【背景】主界面标题栏主题按钮切深/浅色，全界面跟随；语义色（OK绿/NG红/PLC黄/
+    // 主按钮蓝/白字）绝不能被洗掉，否则状态灯与品牌横幅直接看不见。
+    // 这里锚死三层：归一规则 / 语义色判定 / 单控件上色（含表格），UI 交互由冒烟覆盖。
+    private static void TestAppTheme()
+    {
+        Group("⑪ 深色/浅色主题 AppTheme（V2.16.2：归一/语义保留/控件上色）");
+        AppTheme.Theme = "Light";   // 先复位，防用例顺序污染
+
+        // 归一：Dark 大小写不敏感进深色，其余一切回落浅色
+        Eq("Normalize Dark", "Dark", AppTheme.Normalize("Dark"));
+        Eq("Normalize dark 小写", "Dark", AppTheme.Normalize("dark"));
+        Eq("Normalize DARK 大写", "Dark", AppTheme.Normalize("DARK"));
+        Eq("Normalize null 回落 Light", "Light", AppTheme.Normalize(null));
+        Eq("Normalize 空串回落 Light", "Light", AppTheme.Normalize(""));
+        Eq("Normalize Light", "Light", AppTheme.Normalize("Light"));
+        Eq("Normalize 非法值回落 Light", "Light", AppTheme.Normalize("xxx"));
+
+        // 语义色保留：状态/品牌色一律 true，普通文字色 false
+        Check("OK绿是语义色", AppTheme.IsSemanticColor(System.Drawing.Color.FromArgb(46, 158, 107)));
+        Check("NG红是语义色", AppTheme.IsSemanticColor(System.Drawing.Color.FromArgb(229, 72, 77)));
+        Check("PLC黄是语义色", AppTheme.IsSemanticColor(System.Drawing.Color.FromArgb(240, 173, 78)));
+        Check("主按钮蓝是语义色", AppTheme.IsSemanticColor(System.Drawing.Color.FromArgb(52, 152, 219)));
+        Check("白字是语义色", AppTheme.IsSemanticColor(System.Drawing.Color.White));
+        Check("Green/Red/Gray 保留", AppTheme.IsSemanticColor(System.Drawing.Color.Green)
+            && AppTheme.IsSemanticColor(System.Drawing.Color.Red)
+            && AppTheme.IsSemanticColor(System.Drawing.Color.Gray));
+        Check("普通深蓝灰非语义", !AppTheme.IsSemanticColor(System.Drawing.Color.FromArgb(52, 73, 94)));
+        Check("黑色非语义", !AppTheme.IsSemanticColor(System.Drawing.Color.Black));
+
+        // 切换事件：值变化触发一次，相同值不触发
+        int fired = 0;
+        EventHandler h = (s, e) => fired++;
+        AppTheme.ThemeChanged += h;
+        AppTheme.Theme = "Dark";
+        Eq("切深色触发一次", 1, fired);
+        Check("IsDark 深色为 true", AppTheme.IsDark);
+        AppTheme.Theme = "dark";   // 归一后与当前相同 → 不触发
+        Eq("相同值不重复触发", 1, fired);
+        AppTheme.ThemeChanged -= h;
+
+        // 单控件上色（浅色下）：普通 Label 黑字→主题文字色，语义红字保留
+        AppTheme.Theme = "Light";
+        var lbl = new Label();
+        lbl.ForeColor = System.Drawing.Color.Black;
+        AppTheme.ApplyOne(lbl);
+        Eq("普通 Label 换主题文字色", AppTheme.TextPrimary.ToArgb(), lbl.ForeColor.ToArgb());
+        var lblNg = new Label();
+        lblNg.ForeColor = System.Drawing.Color.Red;
+        AppTheme.ApplyOne(lblNg);
+        Eq("语义红字保留", System.Drawing.Color.Red.ToArgb(), lblNg.ForeColor.ToArgb());
+        lbl.Dispose(); lblNg.Dispose();
+
+        // 主按钮蓝底白字保留；次按钮跟随主题
+        var primary = new Button();
+        primary.BackColor = AppTheme.PrimaryBlue;
+        primary.ForeColor = System.Drawing.Color.White;
+        AppTheme.ApplyOne(primary);
+        Eq("主按钮蓝底保留", AppTheme.PrimaryBlue.ToArgb(), primary.BackColor.ToArgb());
+        Eq("主按钮白字保留", System.Drawing.Color.White.ToArgb(), primary.ForeColor.ToArgb());
+        var secondary = new Button();
+        secondary.BackColor = System.Drawing.Color.FromArgb(236, 240, 245);
+        AppTheme.ApplyOne(secondary);
+        Eq("次按钮底跟随主题", AppTheme.SecondaryButtonBackground.ToArgb(), secondary.BackColor.ToArgb());
+        primary.Dispose(); secondary.Dispose();
+
+        // 输入框跟随主题；表格上色不崩且底色跟随
+        var txt = new TextBox();
+        AppTheme.ApplyOne(txt);
+        Eq("输入框底跟随主题", AppTheme.InputBackground.ToArgb(), txt.BackColor.ToArgb());
+        txt.Dispose();
+        var grid = new DataGridView();
+        grid.Columns.Add(new DataGridViewTextBoxColumn());
+        grid.Rows.Add("x");
+        AppTheme.ApplyGridTheme(grid);
+        Eq("表格底跟随主题", AppTheme.Surface.ToArgb(), grid.BackgroundColor.ToArgb());
+        Eq("表格单元格底跟随主题", AppTheme.InputBackground.ToArgb(), grid.DefaultCellStyle.BackColor.ToArgb());
+        grid.Dispose();
+
+        AppTheme.Theme = "Light";   // 还原默认（防污染冒烟/后续用例）
     }
 }

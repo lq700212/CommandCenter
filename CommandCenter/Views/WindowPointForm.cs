@@ -393,6 +393,7 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             WireEvents();               // 挂按钮/格子交互
             RefreshCells();             // 首次填充"编号 + 相机·点位"文字
             ApplyLanguage();            // V2.15.0 国际化：按当前语言初始化文本
+            ApplyTheme();               // V2.16.2 深色模式：打开瞬间按当前主题上色（模态期间主题不变，无需订阅事件）
         }
 
         /// <summary>
@@ -1628,6 +1629,20 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             // 英文"Disable/Enable"宽度根本没被测量；且 ApplyLanguage 里 lblHint.Text 设为与当前相同
             // 的文本不触发事件）——这里显式调用一次，确保英文按钮宽度按英文文本实测撑开。
             ApplyHintHeightForLanguage();
+        }
+
+        /// <summary>
+        /// 主题上色（V2.16.2 深色模式）：打开瞬间按当前主题全量上色。
+        /// 格子按钮的底色是"三态语义"（禁用灰/空窗浅灰/高亮黄蓝绿，见 RefreshCells），
+        /// 通用 ApplyTo 会把它洗成普通按钮底——上色后立即 RefreshCells() 按状态重刷回来，
+        /// 语义优先于主题（深色下格子保持浅底语义，保证可读与功能正确）。
+        /// 模态期间主题不变，无需订阅 ThemeChanged 事件。
+        /// </summary>
+        private void ApplyTheme()
+        {
+            if (IsDisposed) return;
+            AppTheme.ApplyTo(this);
+            try { RefreshCells(); } catch { }
         }
     }
 }

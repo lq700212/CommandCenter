@@ -185,6 +185,31 @@ namespace CommandCenter.Controls
             if (_toolTipEnabled) ApplyToolTip();
         }
 
+        /// <summary>
+        /// 主题切换时刷新本窗口配色（V2.16.2 深色模式）：
+        /// 空态卡底跟随主题（浅色历史淡蓝、深色深灰），编号标签同步换底/字；
+        /// 图像区（PictureBox 深灰）与 OK/NG 徽标（语义色）两主题通用、不动。
+        /// 由 MainForm.ApplyTheme/BuildWindowGrid 遍历调用；在 UI 线程执行。
+        /// </summary>
+        public void ApplyTheme()
+        {
+            if (IsDisposed) return;
+            BackColor = AppTheme.CardBackground;
+            if (_windowIndexLabel != null)
+            {
+                if (AppTheme.IsDark)
+                {
+                    _windowIndexLabel.BackColor = Color.FromArgb(30, 30, 30, 200);
+                    _windowIndexLabel.ForeColor = Color.FromArgb(220, 220, 220);
+                }
+                else
+                {
+                    _windowIndexLabel.BackColor = Color.FromArgb(255, 255, 255, 200);
+                    _windowIndexLabel.ForeColor = Color.FromArgb(52, 73, 94);
+                }
+            }
+        }
+
         /// <summary>按开关状态设置/移除悬停气泡（V2.10.8；文本按当前语言取）。</summary>
         private void ApplyToolTip()
         {

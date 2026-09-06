@@ -16,7 +16,7 @@ namespace CommandCenter.Views
     /// 控制中心主窗体。
     /// 【界面布局】
     /// ┌───────────────────────────────────────────────────────────────────┐
-    /// │ 产品型号:[cmbModel▾] 序列号:[框][人工补录] | 总数:0 | [OK] | [NG] | [系统设置] │
+    /// │ 产品型号:[cmbModel▾] 序列号:[框][人工补录] | 总数:0 | [OK] | [NG] | [系统设置][中/英][深/浅色] │
     /// │                                        ●PLC ●扫码枪 ●上相机 ●下相机 │
     /// │（相机灯/下拉显示配置名称：有名称显名称，无名称回退"相机N"即序号；      │
     /// │  ≤2台相机名限长10字符超出"…"截断、灯宽自适应，悬停看完整名/IP/状态；  │
@@ -74,6 +74,7 @@ namespace CommandCenter.Views
         private Panel _pnlCamOverview;              // ≥3台模式的容器：装下拉框统一垂直居中（V2.15.16 起只剩下拉框，无总标签）
         private ToolTip _camTip;                    // 相机下拉框的悬停明细提示（列出每台相机连/断）
         private ToolTip _langTip;                   // 语言切换按钮的悬停提示（V2.15.1，惰性创建）
+        private ToolTip _themeTip;                  // 主题切换按钮的悬停提示（V2.16.2，惰性创建）
         private ToolTip _plcTip;                    // PLC 灯悬停提示（说明三态灯当前含义，V1.12.11）
         private bool _modelComboInit;     // 型号下拉程序内初始化/刷新时防误触 SelectedIndexChanged
         private bool _modelComboWired;    // 型号下拉事件是否已挂线（构造与热更都会走 InitModelCombo，只挂一次）
@@ -119,12 +120,17 @@ namespace CommandCenter.Views
             // setter 触发的 LanguageChanged 此刻尚无订阅者（SubscribeEvents 在后面），安全。
             I18n.Language = _config.Language;
 
+            // V2.16.2 深色模式：把配置里持久化的主题同步给全局 AppTheme（与上面语言同步同理，
+            // 放在一切界面上色之前；setter 触发的 ThemeChanged 此刻尚无订阅者，安全）。
+            AppTheme.Theme = _config.Theme;
+
             BuildServices();         // PLC/多相机/图像/协调器 就绪（相机灯数量依赖 _cameras）
             InitTitleBarRuntime();   // 按配置补全标题栏：文案/可见性/型号下拉/动态相机灯/紧凑重排
             BuildWindowGrid();       // 窗口矩阵（用设计器的 gridCameraWindows 容器，动态重建行列）
             SubscribeEvents();
             _coordinator.Start();
             ApplyLanguage();   // V2.15.0 国际化：构造末尾统一按配置语言刷新界面文本
+            ApplyTheme();      // V2.16.2 深色模式：构造末尾按当前主题全量上色（含动态窗口）
         }
 
         /// <summary>组装底层服务（PLC/多相机/图像/协调器）。</summary>
@@ -243,6 +249,26 @@ namespace CommandCenter.Views
                     MessageBox.Show(
                         I18n.T("界面语言已切换，但配置保存失败，重启后可能恢复原语言。",
                                "Language switched, but saving config failed; it may revert after restart."),
+                        I18n.T("提示", "Notice"),
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            };
+
+            // ③'' 主题切换按钮（V2.16.2 深色模式，位于语言按钮右侧标题栏最右）：
+            //    点击直接切换深/浅色，立即热生效（AppTheme.Theme 触发 ThemeChanged → ApplyTheme
+            //    全量重刷）并写盘持久化。按钮文本 = 目标主题名，由 ApplyLanguage() 设置。
+            //    写盘失败处理与语言按钮同策略：已即时生效，只影响重启保持，记日志+双语提示。
+            btnToggleTheme.Click += (s, e) =>
+            {
+                _config.Theme = AppTheme.IsDark ? AppTheme.Light : AppTheme.Dark;
+                AppTheme.Theme = _config.Theme;
+                try { ConfigStore.Save(_config); }
+                catch (Exception ex)
+                {
+                    LogHelper.Warn("主题切换：配置写盘失败（重启后可能恢复原主题）" + ex.Message);
+                    MessageBox.Show(
+                        I18n.T("界面主题已切换，但配置保存失败，重启后可能恢复原主题。",
+                               "Theme switched, but saving config failed; it may revert after restart."),
                         I18n.T("提示", "Notice"),
                         MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
@@ -711,9 +737,9 @@ namespace CommandCenter.Views
             ApplyConfigVisibility();
 
             // 排布顺序固定：产品前缀 → 型号下拉(V2.8) → 序列号标题 → 序列号框 → 人工补录按钮(V2.14.6)
-            // → | → 总数 → OK → NG → | → 系统设置按钮 → 语言切换按钮(V2.15.1，最右)
+            // → | → 总数 → OK → NG → | → 系统设置按钮 → 语言切换按钮(V2.15.1) → 主题按钮(V2.16.2，最右)
             Control[] seq = { lblProductPrefix, cmbModel, lblSerialTitle, lblSerial, btnManualSerial,
-                              lblSep1, lblTotal, lblOk, lblNg, lblSep2, btnSettings, btnToggleLanguage };
+                              lblSep1, lblTotal, lblOk, lblNg, lblSep2, btnSettings, btnToggleLanguage, btnToggleTheme };
 
             // 右侧 Dock 区（PLC 灯 + 相机聚拢容器）占用的总宽：Dock.Right 控件从右往左叠，
             // 每个控件之间留 6px 视觉间距（间距是内在间距，宽幅估算 ±几像素不影响正确性）。
@@ -953,6 +979,7 @@ namespace CommandCenter.Views
                 // 构造与热更都会调用，改配置保存后即时生效）
                 win.SetOkNgVisible(_config.Display.WindowOkNgVisible);
                 win.SetOkNgColors(_config.Display.OkColor, _config.Display.NgColor);
+                win.ApplyTheme(); // V2.16.2：新窗口按当前主题上色（切型号/热更重建时深色不回浅）
                 // 双击放大/还原（V1.12.15）：每格订阅双击事件，由 OnWindowDoubleClicked 统一处理。
                 win.WindowDoubleClicked += OnWindowDoubleClicked;
                 _windowControls[w] = win;
@@ -1152,6 +1179,15 @@ namespace CommandCenter.Views
                 if (IsDisposed) return;
                 if (InvokeRequired) { BeginInvoke(new Action(ApplyLanguage)); return; }
                 ApplyLanguage();
+            };
+
+            // V2.16.2 深色模式：主题切换 → 主界面全量重刷配色（切主题入口就在标题栏，
+            // 事件在 UI 线程触发；保险起见 InvokeRequired 判断回 UI 线程，与语言事件同策略）。
+            AppTheme.ThemeChanged += (s, e) =>
+            {
+                if (IsDisposed) return;
+                if (InvokeRequired) { BeginInvoke(new Action(ApplyTheme)); return; }
+                ApplyTheme();
             };
 
             FormClosing += (s, e) =>
@@ -1604,7 +1640,7 @@ namespace CommandCenter.Views
         {
             if (IsDisposed) return;
             if (InvokeRequired) { BeginInvoke(new Action<string>(OnStateChanged), text); return; }
-            lblStatus.ForeColor = Color.FromArgb(52, 73, 94); // 恢复默认深蓝灰
+            lblStatus.ForeColor = AppTheme.TextPrimary; // 恢复默认文字色（V2.16.2 起跟随主题，深色下不再写死深蓝灰）
             lblStatus.Text = I18n.T("状态", "Status") + ": " + text;
         }
 
@@ -1638,6 +1674,10 @@ namespace CommandCenter.Views
             _langTip = _langTip ?? new ToolTip();
             _langTip.SetToolTip(btnToggleLanguage, I18n.T("点击切换界面语言（立即生效并保存）",
                 "Click to switch UI language (applies & saves immediately)"));
+            // 主题切换按钮文本 = 目标主题名（与语言按钮同策略，自解释），见 RefreshThemeButtonText。
+            // 【V2.16.3】抽成独立方法：切语言（ApplyLanguage）与切主题（ApplyTheme）两条路径都要刷，
+            // 此前只在 ApplyLanguage 里设，切主题走 ThemeChanged→ApplyTheme 不经过这里，文本永远不变。
+            RefreshThemeButtonText();
             btnManualSerial.Text = I18n.T("人工补录", "Manual");
             lblScannerStatus.Text = I18n.T("● 扫码枪", "● Scanner");
             this.Text = I18n.T("上位机控制中心", "Host Computer Control Center");
@@ -1664,7 +1704,7 @@ namespace CommandCenter.Views
                 string st = _coordinator.CurrentStateUiText;
                 if (!string.IsNullOrEmpty(st))
                 {
-                    lblStatus.ForeColor = Color.FromArgb(52, 73, 94);
+                    lblStatus.ForeColor = AppTheme.TextPrimary; // V2.16.2 跟随主题
                     lblStatus.Text = I18n.T("状态", "Status") + ": " + st;
                 }
             }
@@ -1680,6 +1720,62 @@ namespace CommandCenter.Views
             //    不再调 RelayoutTitleBar()（此前英文文案更长会按 PreferredWidth 重排，
             //    导致系统设置/语言/人工补录等按钮与字段位置移动）。
             //    标题栏排布只在窗体 Resize 时重算（见 Resize 事件挂接处）。
+        }
+
+        /// <summary>
+        /// 刷新主题切换按钮的文本与悬停（V2.16.3 从 ApplyLanguage 抽出独立）：
+        /// 文本 = 目标主题名（与语言按钮同策略，自解释）——浅色界面显示"深色/Dark"
+        /// （点一下变深）、深色界面显示"浅色/Light"（点一下变浅）。
+        /// 【为什么必须独立】切语言（ApplyLanguage）与切主题（ApplyTheme）都会改变这个按钮
+        /// 该显示什么：切语言换中英文案、切主题换深浅目标。V2.16.2 只在 ApplyLanguage 里设，
+        /// 切主题走 ThemeChanged→ApplyTheme 不经过，文本永远停在旧值（"固定为浅色"bug 根因）。
+        /// 独立后两处都调，绝不漂移。注意 AppTheme.ApplyTo 不碰按钮文本内容（只保白字），
+        /// 所以在 ApplyTo 前后调都安全，本方法放在 ApplyTheme 末尾调用。
+        /// </summary>
+        private void RefreshThemeButtonText()
+        {
+            if (IsDisposed || btnToggleTheme == null) return;
+            btnToggleTheme.Text = AppTheme.IsDark ? I18n.T("浅色", "Light") : I18n.T("深色", "Dark");
+            _themeTip = _themeTip ?? new ToolTip();
+            _themeTip.SetToolTip(btnToggleTheme, I18n.T("点击切换深色/浅色主题（立即生效并保存）",
+                "Click to switch dark/light theme (applies & saves immediately)"));
+        }
+
+        /// <summary>
+        /// 主界面全量主题刷新（V2.16.2 深色模式；V2.16.3 补刷主题按钮文本）：按当前 AppTheme 重刷整窗配色。
+        /// 调用时机：① 构造末尾（按配置主题初始化）；② AppTheme.ThemeChanged 事件（点主题按钮实时生效）；
+        /// ③ ApplyRuntimeConfig 热更末尾（重建后新控件复位）。仅 UI 线程调用。
+        /// 通用上色走 AppTheme.ApplyTo（递归整树，语义色自动保留），本方法只补"层级色"：
+        /// 通用规则把 Panel/TableLayoutPanel 一律刷成 Surface（白/深灰），而主界面历史底
+        /// （窗体/矩阵/滚动宿主）是 Background（淡蓝 240,245,250）、标题栏/状态栏是 TitleBar，
+        /// 浅色下必须恢复这两级，否则矩阵会从淡蓝变成纯白、与历史外观不一致。
+        /// </summary>
+        private void ApplyTheme()
+        {
+            if (IsDisposed) return;
+            AppTheme.ApplyTo(this);
+
+            // V2.16.3：切主题后按钮文本必须同步翻转（目标主题名），否则文本永远停在旧值。
+            RefreshThemeButtonText();
+
+            // 层级色恢复（浅色像素级对齐历史，通用规则覆盖不到这么细）。
+            this.BackColor = AppTheme.Background;
+            if (pnlTitleBar != null) pnlTitleBar.BackColor = AppTheme.TitleBar;
+            if (pnlStatusBar != null) pnlStatusBar.BackColor = AppTheme.TitleBar;
+            if (gridCameraWindows != null) gridCameraWindows.BackColor = AppTheme.Background;
+            if (pnlWindowScroll != null) pnlWindowScroll.BackColor = AppTheme.Background;
+            // ≥3台相机下拉容器：与标题栏同色保持"隐形"（构造时即此策略，见 BuildCameraStatusLights）。
+            if (_pnlCamOverview != null && pnlTitleBar != null)
+                _pnlCamOverview.BackColor = pnlTitleBar.BackColor;
+
+            // 状态栏默认文字跟随主题（深蓝灰→浅灰）；绿色的"型号切换完成"提示是语义色、保留。
+            if (lblStatus != null
+                && lblStatus.ForeColor.ToArgb() == Color.FromArgb(52, 73, 94).ToArgb())
+                lblStatus.ForeColor = AppTheme.TextPrimary;
+
+            // 各显示窗口跟随主题（空态卡底/编号标签，图片与徽标不动）。
+            foreach (var w in _windowControls.Values)
+                try { w?.ApplyTheme(); } catch { }
         }
 
         /// <summary>
@@ -1733,6 +1829,7 @@ namespace CommandCenter.Views
             RelayoutTitleBar();
             RefreshTitle();
             ApplyLanguage();   // V2.15.0 国际化：热更后按新语言统一刷新界面文本
+            ApplyTheme();      // V2.16.2 深色模式：热更重建后新控件按当前主题上色
 
             LogHelper.Info("配置已保存并热生效（服务层已按新配置重建）");
         }

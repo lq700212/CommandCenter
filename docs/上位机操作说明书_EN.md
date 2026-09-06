@@ -41,7 +41,8 @@ Explanations:
 | Button | **【Manual Entry】** | Used to manually enter or modify a barcode when the scanner fails to read it |
 | Title bar | **Total / OK / NG** | Inspection point count for **the current single workpiece**: OK = green, NG = red. It resets automatically to zero each time a new workpiece arrives |
 | Top-right | **● Dot lights** | Four lights: PLC, scanner, camera 1, camera 2. **Green = normal, red = problem** (PLC yellow = waiting for the master station, which is normal) |
-| Top-right | **Language switch** | The **中文/English** button at the far right of the title bar (the Chinese UI shows English, the English UI shows 中文). Click it to switch between Chinese and English instantly; it saves automatically and persists after restart |
+| Top-right | **Language switch** | The **中文/English** button in the title bar (the Chinese UI shows English, the English UI shows 中文). Click it to switch between Chinese and English instantly; it saves automatically and persists after restart |
+| Top-right | **Dark/Light** | The **Dark/Light** button at the far right of the title bar, right of the language button (V2.16.2). Click it to switch between dark/light themes instantly; it saves automatically and persists after restart |
 | Center | **Window matrix** | Each cell is the camera image of one inspection point. The latest image refreshes automatically after each shot; **a green border in the bottom-right of a cell = this point is OK, red border = NG** |
 | Bottom | **Status bar** | Shows what the system is doing right now: waiting for a scan, taking a photo, switching model, etc. |
 

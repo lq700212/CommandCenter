@@ -106,6 +106,8 @@ namespace CommandCenter.Utils
             if (cfg.Security == null) cfg.Security = new Models.SecurityConfig();
             // V2.15.0：界面语言兜底——空串/非法值一律回落中文（json 手改脏也不崩）。
             if (string.IsNullOrWhiteSpace(cfg.Language)) cfg.Language = "zh-CN";
+            // V2.16.2：界面主题兜底——非法值一律回落浅色（与历史外观一致，json 手改脏也不崩）。
+            cfg.Theme = AppTheme.Normalize(cfg.Theme);
             // V2.15.19：SN 去向配置兜底——sn 段缺失 new 出默认实例（V2.15.20 起 Target 默认 "Mes"），
             // Target 脏值经 Normalize 归一（非法值回落默认 "Mes"，绝不因手改 json 让扫码主流程走偏）。
             if (cfg.Sn == null) cfg.Sn = new Models.SnRouteConfig();

@@ -80,6 +80,7 @@ namespace CommandCenter.Views
             grid.KeyDown += Grid_KeyDown;
             LoadFromConfig();
             ApplyLanguage(); // V2.15.0 国际化：按当前语言初始化文本
+            ApplyTheme();    // V2.16.2 深色模式：打开瞬间按当前主题上色（模态期间主题不变，无需订阅事件）
         }
 
         /// <summary>
@@ -97,6 +98,16 @@ namespace CommandCenter.Views
             btnCancel.Text = I18n.T("取 消", "Cancel");
             btnAdd.Text = I18n.T("新 增", "Add");
             btnDelete.Text = I18n.T("删除选中", "Delete Selected");
+        }
+
+        /// <summary>
+        /// 主题上色（V2.16.2 深色模式）：打开瞬间按当前主题全量上色。
+        /// 模态对话框打开期间主界面点不到主题按钮，无需订阅 ThemeChanged 事件。
+        /// </summary>
+        private void ApplyTheme()
+        {
+            if (IsDisposed) return;
+            AppTheme.ApplyTo(this);
         }
 
         /// <summary>把当前映射填充进表格（前几行 = 已有型号与序号）。</summary>

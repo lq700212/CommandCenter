@@ -104,6 +104,13 @@ namespace CommandCenter.Models
         public string Language { get; set; } = "zh-CN";
 
         /// <summary>
+        /// 界面主题（V2.16.2 深色模式）："Light" 浅色 / "Dark" 深色，默认浅色（与历史外观一致）。
+        /// 主界面标题栏主题按钮点击即切换并写盘持久化（Utils.AppTheme.Theme 热更），重启后保持；
+        /// json 缺字段/手改脏值由 ConfigStore.ApplyDefaults 经 AppTheme.Normalize 回落浅色。
+        /// </summary>
+        public string Theme { get; set; } = "Light";
+
+        /// <summary>
         /// 扫码 SN 序列号去向配置（V2.15.19，V2.15.20 起二选一默认 Mes，JSON 段 `sn`，见 SnRouteConfig）。
         /// 【为什么独立成顶层段而不放进 PlcConfig】SN 去向（上传 MES / 写 PLC 寄存器）
         /// 是"扫码数据流到哪去"的业务路由决策，不是 PLC 通讯参数——放进 PlcConfig 会把
