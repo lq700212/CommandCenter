@@ -337,7 +337,7 @@ U171 默认铺排（4×7=28 格，点位 24 个 → 窗口 25~28 为空窗口）
 | --- | --- | --- |
 | `autoFit` | true | 行列是否自动铺排 |
 | `rows` / `columns` | 4 / 7 | 非自适应下的手填行列 |
-| `okColorName` / `ngColorName` | Green / Red | **OK=绿、NG=红**（现场习惯，可改） |
+| `okColorName` / `ngColorName` | Green / Red | **OK=绿、NG=红**（现场习惯，可改；V2.16.4 起配错名回默认绿/红、不再隐身） |
 | `windowOkNgVisible` | true | 窗口右下角 OK/NG 徽标；**只随开关走（V2.14.26 还原）**——开着就显示，未判定时默认绿 OK、拿到判定按结果变色 |
 | `windowIndexVisible` | true | 窗口左上角编号 |
 | `windowToolTipVisible` | true | 悬停"双击放大/还原"气泡 |

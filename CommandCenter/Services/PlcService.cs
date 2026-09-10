@@ -338,8 +338,15 @@ namespace CommandCenter.Services
             }
         }
 
-        /// <summary>写扫码结果（V2.7，上位机写索引 4 = 协议 40004，PLC 来读）：0=默认/复位，1=扫码OK，2=扫码NG。</summary>
-        public void WriteScanResult(int code) => WriteLocalSafe(_cfg.ScanResultAddress, (ushort)code);
+        /// <summary>写扫码结果（V2.7，上位机写索引 4 = 协议 40004，PLC 来读）：0=默认/复位，1=扫码OK，2=扫码NG。
+        /// 【V2.16.4 零地址守卫】ScanResultAddress=0（脏配置/未配置）时跳过不写——协议地址从 D1 起，
+        /// 没有 D0，直写会污染 DataStore[0] 且真正的 40004 永远没值（PLC 死等）。与 WriteCameraResult
+        /// 的 addr>0 守卫、ResetResultRegisters 的 ScanResultAddress>0 守卫同语义，三处一致。</summary>
+        public void WriteScanResult(int code)
+        {
+            if (_cfg != null && _cfg.ScanResultAddress > 0)
+                WriteLocalSafe(_cfg.ScanResultAddress, (ushort)code);
+        }
 
         /// <summary>读某台相机的拍照请求（V2.12.6 起每台相机一路通道）：返回点位编号（1~255），0=无请求。
         /// 【V2.13.4 起地址全部显式】请求地址 = 相机配置 PlcRequestAddress（不再按列表序号自动推导）：

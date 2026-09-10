@@ -1,5 +1,67 @@
 # 版本改动记录
 
+## V2.16.4（2026-09-10）全面测试补强：538 + 70 条用例 + 修颜色回退真 bug
+
+> 目标 0BUG，对全仓库做纯逻辑覆盖率审查：两路并行审出约 70 个未覆盖缺口，
+> 按"协议/存图/判定 > 配置迁移 > 交互显示"风险排序全部补进自动化 skill。
+
+### 改动范围
+
+- **修复真 bug（`Models/AppConfig.cs` `ColorFromName`）**：`display.okColorName/ngColorName`
+  配错（非法名/空串）时，旧判据 `Color.FromName(name).IsEmpty` 拦不住——Framework 下
+  `FromName("xxx")` 返回"有名但 ARGB=0"的透明黑（`IsEmpty=false`，`IsNamedColor` 也是 true），
+  徽标拿透明色自绘形同隐身。改判 `IsKnownColor || IsSystemColor`（只有颜色表里真有的
+  Green/Red 等才采用），配错即回默认绿/红、绝不隐身。回归用例⑳组锚死非法/空/null 三态。
+- **修复脏配置写 D0（`Services/PlcService.cs` `WriteScanResult` 加零地址守卫）**：
+  协议地址从 D1 起、没有 D0，但 `WriteScanResult` 是全仓库唯一没有 `addr>0` 守卫的写入——
+  `scanResultAddress` 被手改成 0 时每次扫码都往 `DataStore[0]` 写 1/2（污染 D0），且真正的
+  40004 永远没值（PLC 死等，现象与通讯断开无异）。加与 `WriteCameraResult`/
+  `ResetResultRegisters`（该处早已有守卫）同语义的守卫，三处一致；正常配置（=4）行为零变化。
+  回归用例⑰组翻转为"D0 不变 + 地址 4 照写"双断言。
+- **修复停止位带空格静默配错（`Services/ScannerService.cs` `StopBitsFromString` 加 Trim）**：
+  手改 json 把 `stopBits` 写成 `" 2 "`（带空格）时旧实现按"非法值"静默回落 One，与
+  `ParityFromName` 的容忍风格不对齐——串口枪帧格式对错位后收码乱码/收不到且零日志，
+  极易误判成硬件故障。先 Trim 再匹配；非法值仍回落 One（旧配置兼容）。用例⑲组期望已翻转。
+- **测试沉淀（`.opencode/skills/commandcenter-test/`，137 → 538 + 70 条）**：
+  - `TestRunner.cs` 新增 ⑫~⑳ 组（纯逻辑/服务层，无需设备）：⑫ 相机判定 `ParseResult`
+    全分支（详细任一 NG 即 NG/标准逐位/`OkChar` 定制/触发计数）；⑬ 指令校验无设备防御
+    （`SetOutputFormat` 形状/`SwitchProgram`/`ReadProgramNo`/`SendTrigger`/`TriggerAndRead`）；
+    ⑭ 存图模板与路径（`RenderTemplate` 全占位符/`RenderSubDirsToSegments` 拆段丢盘符去重/
+    `Sanitize`/`NormalizeDir`）；⑮ 存图文件链路（`FindLatestPair` 同主名配对/
+    `DeleteSourceFile`/归档命名/`SaveImage` 重名 `_2`/清理日期判定与盘根放弃，临时目录 harness）；
+    ⑯ 协调器纯函数（`CameraLabel`/`CameraIdFor`/`IndexOfCamera`/`FindProgram`/
+    `IsWindowEnabled`/`IsTcpImage`/`FtpDirFor`/`SetManualSerial`/`IsNewerThanTrigger`/
+    `TryResolveActiveWindow` 唯一反查/扫码重试计数/动态磨合期）；⑰ SN 分流与 PLC 分支
+    （`DeliverSerialNumber` 三态/`ResolveModelIndex`/`len` 钳位/零地址跳过/站号透传；
+    另立锚"扫码结果地址配 0 会写 D0"，修需用户确认）；⑱ 配置迁移兜底
+    （`DefaultCameras` 现场锚点/补号三遍/顺序修复/映射对齐/型号双向/目录归一/布局边界/
+    小驼峰键名）；⑲ 扫码串口 TCP 约定（停止位/校验/`SendTrigger` 三态/默认全字段）；
+    ⑳ 杂项（占位符中英互逆/徽标开关/出厂账号/MES 在途上限与空 URL/`AppTheme` 剩余分支/
+    `I18n` 事件）。
+  - `UiProbe.cs` 新增 ②③④ 组（真实窗体，21 → 70 条）：② 窗口点位编辑（`SwapCells`
+    点位互换 + 禁用跟随/`HighlightFor` 三态优先级/`ClonePoints`/`CloneTable` 深拷贝/
+    相机型号单向联动/`FlushProgramGrid` 去重排序）；③ 型号配置窗（预载/深拷贝隔离/
+    确定写回/`DeleteRows` 优先勾选）；④ 补录/异常弹窗（构造预填/失败文本显隐/
+    `MuteToday`/读到真码自动关闭，V2.14.48 首覆盖）。
+  - 探针规范：显示态（`Visible`）断言必须 `Show` 后做——未 Show 窗体的子控件读
+    `Visible` 恒 false（本次实证，见 ④ 组注释）。
+  - 未覆盖但说清楚的：弹窗失败校验路径（空提交/非法序号/重名）点确定会弹模态框，
+    无人值守跑会阻塞，只覆盖成功路径并在用例注释注明；`MainForm` 节流/`LoginForm`
+    改密规则需重型窗体 harness，暂不进自动化。
+
+### 为什么这么改
+
+- 审查发现"非法颜色名→透明黑"是配错即隐身的真 bug（现场手改配置即中招），必须修；
+  其余 6 个 FAIL 全是"断言与实际行为的偏差"（空层 0 段/斜杠只去尾/空日期目录可删/
+  `params null` 反射坑），逐个核实源码后修正断言并注释锚定，不盲改产品代码。
+- 用例库随代码长大（skill 沉淀铁律）：凡可测纯逻辑全部进 `TestRunner`，控件层行为进
+  `UiProbe`，`run-all` 一条命令全绿（构建 + 538 + 70 + 两轮冒烟）才算交付。
+
+### 优化点
+
+- 无业务行为变化（除颜色回退修回正确默认）；`run-all` 耗时仍约 35s（无设备分支全用
+  127.0.0.1 闭端口短超时 + 临时目录 harness 自删，不拖节拍、不污染 Logs/配置）。
+
 ## V2.16.3（2026-09-06）修复主题按钮文本不跟随翻转
 
 > 现场反馈：MainForm 标题栏主题按钮点了能换肤，但按钮上的字永远不变（"固定为浅色"）。

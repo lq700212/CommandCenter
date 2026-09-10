@@ -979,7 +979,17 @@ namespace CommandCenter.Models
 
         private static Color ColorFromName(string name, Color fallback)
         {
-            try { return Color.FromName(name).IsEmpty ? fallback : Color.FromName(name); }
+            try
+            {
+                if (string.IsNullOrWhiteSpace(name)) return fallback;
+                var c = Color.FromName(name.Trim());
+                // 【V2.16.3 修复"配错颜色名徽标隐身"】Color.FromName 对未知名的返回不是 Empty：
+                // .NET Framework 下 FromName("xxx") 返回"有名但 ARGB=0"的透明黑（IsEmpty=false，
+                // IsNamedColor=true），旧判据 IsEmpty/IsNamedColor 都拦不住，徽标拿透明色自绘看似消失。
+                // 改判 IsKnownColor/IsSystemColor：只有系统/已知颜色表里真有的才采用（如 Green/Red），
+                // 其余一律回退 fallback（绿/红），配错即回默认、绝不隐身。
+                return (c.IsKnownColor || c.IsSystemColor) ? c : fallback;
+            }
             catch { return fallback; }
         }
     }

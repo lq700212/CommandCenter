@@ -169,8 +169,11 @@ namespace CommandCenter.Services
 
         private static StopBits StopBitsFromString(string s)
         {
-            if (s == "2") return StopBits.Two;
-            if (s == "15") return StopBits.OnePointFive;
+            // 【V2.16.4】先 Trim：手改 json 带空格（" 2 "）时按真实值匹配，不再静默回落 One；
+            // 与 ParityFromName 的大小写/空容忍对齐。非法值仍回落 One（旧配置兼容）。
+            string t = (s ?? "").Trim();
+            if (t == "2") return StopBits.Two;
+            if (t == "15") return StopBits.OnePointFive;
             return StopBits.One;
         }
 
