@@ -1,7 +1,32 @@
 # DocShot 截图 harness 说明（培训文档配图专用）
 
-`DocShot.cs` 独立编译成临时 exe，直接 `new` 真实产品窗体逐张 PrintWindow，
-配图落 `docs/images/`。以后改了界面，重跑一遍即换图。
+`DocShot.cs` + `RealShot.cs` 配合出图，落 `docs/images/`。以后改了界面，
+两脚本各重跑一遍即换图。
+
+**管线分工（V2.16.8 定稿，以后不要改）**：
+- 静态对话框（登录/设置/点位/目录/型号/补录/异常/开发者模式）→ `RealShot.cs`
+  真进程实拍（地面真相）。harness 直 new 的对话框恒为 classic 边框（外框小一圈），
+  根因未查明，直接绕过。
+- 动态态（主界面 OK/NG 完成态，无硬件演不出）→ `DocShot.cs` harness 演出。
+  主界面全屏无边框问题，不受影响。
+
+## RealShot（真进程驱动）
+
+```powershell
+# 编译（仓库根）与运行（workdir=CommandCenter\bin\Debug）见 RealShot.cs 头部注释
+.\cc_realshot.exe E:\Project\CommandCenter\docs\images
+```
+
+- 另起真实 exe，Win32 消息像用户一样开窗：只开窗截图 + 取消，
+  绝不点保存/删除/启动/触发/写入类真动作。前提：开发机账号是出厂默认
+  （先读配置哈希比对，不瞎试密码）。
+- **V1 事故铁律**：开窗点击一律 `PostMessage` + WaitTitle（`SendMessage` 点弹模态框的
+  按钮会卡死发送线程，现场每个弹窗都得人工关）；登录框按坐标排序一次填对；
+  看门狗只关非目标小弹窗；FAIL 截全屏；单实例预检；全英文日志；finally 验退。
+- 跑完删 exe/pdb；`Logs\` 全程备份、跑完还原（真进程启动即写当天日志），
+  控制台打 "logs restored" 确认行，不污染开发机日志。
+
+## DocShot（harness 演出，主界面专用）
 
 ## 编译（仓库根，产物跑完即删，不污染 bin）
 
@@ -42,8 +67,16 @@
 ## R2 截图方式
 
 - 全部标准窗体 → PrintWindow 整窗（含标题栏，文档要看到窗口名）。
-- 主界面拍前固定 1400×820（`OnShown` 会先铺满，拍前改回，保证文档图统一）。
-- Show 后 sleep 700ms 等首帧；主界面另等 2.5s 让建站/连接超时结束、状态灯稳定。
+- **视觉样式（V2.16.8 血泪）**：`Main()` 开头必须调
+  `Application.EnableVisualStyles()` + `SetCompatibleTextRenderingDefault(false)`
+  （与产品 `Program.Main` 一致），否则 ComboBox/滚动条/表格头/按钮按 Classic
+  渲染、与真实软件颜色风格不一致（A/B 实测：标题栏区逐像素 diff mean≈20）。
+- 主界面铺满工作区（与真实 `OnShown` 一致），不再固定尺寸——窄尺寸会挤掉
+  标题栏按钮（V2.16.6 图曾把"系统设置"挤成"系统设"、语言/主题按钮消失）。
+- 拍前 `Activate()`（非激活标题栏灰蓝）、Show 后 sleep 700ms 等首帧；
+  主界面另等 2.5s 让建站/连接超时结束、状态灯稳定。
+- A/B 保真验证法：另起真实 exe 跑稳后同手法 PrintWindow 抓一张，
+  与 harness 图逐像素 diff 分区看（标题栏/内容/状态栏），mean<10 即达标。
 
 ## R3 非空校验（阈值已校准，勿沿用别项目）
 

@@ -158,6 +158,9 @@ public static class DocShot
         f.StartPosition = FormStartPosition.CenterScreen;
         f.Show();
         lock (knownWindows) { knownWindows.Add(f.Handle); }
+        // V2.16.8：激活窗口再拍——非激活态标题栏是灰蓝色，与真实使用态（激活蓝）不一致。
+        try { f.Activate(); }
+        catch { }
         Application.DoEvents();
         Thread.Sleep(700);
         Application.DoEvents();
@@ -218,6 +221,10 @@ public static class DocShot
     public static int Main(string[] args)
     {
         if (args.Length < 1) { Console.WriteLine("用法：cc_docshot.exe <docs/images绝对路径>"); return 2; }
+        // V2.16.8 血泪：必须与 Program.Main 一致先开视觉样式，否则全部标准控件
+        // （ComboBox 边框/滚动条/表格头/按钮）按 Windows Classic 渲染，与真实软件不一致。
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
         imgDir = args[0];
         Directory.CreateDirectory(imgDir);
         string workDir = Environment.CurrentDirectory;
@@ -271,7 +278,11 @@ public static class DocShot
             Application.DoEvents();
             Thread.Sleep(2500);   // 等建站/连接超时结束、状态灯稳定
             Application.DoEvents();
-            main.Bounds = new Rectangle(100, 60, 1400, 820);   // 固定尺寸，文档图统一
+            // V2.16.8：铺满工作区（与真实 OnShown 一致），不再固定 1400×820——
+            // 窄尺寸会把标题栏按钮挤掉（"系统设置"截断、语言/主题按钮消失），与真机不符。
+            main.Bounds = Screen.PrimaryScreen.WorkingArea;
+            try { main.Activate(); }
+            catch { }
             Application.DoEvents();
             Thread.Sleep(700);
             Shoot_NoShow(main, "main_idle");
@@ -364,6 +375,8 @@ public static class DocShot
     // 已 Show 窗体的补拍（不重复 Show，只 PrintWindow + 校验 + 存盘）
     private static void Shoot_NoShow(Form f, string name)
     {
+        try { f.Activate(); }
+        catch { }
         Application.DoEvents();
         Thread.Sleep(700);
         Application.DoEvents();

@@ -302,6 +302,7 @@ OK/NG 才回退标准格式逐位判定。改动相机读应答/判定逻辑必�
 | `CHANGELOG.md` | 版本改动记录（最新在前） |
 | `.opencode/skills/commandcenter-test/` | **自动化测试 skill（V2.15.18）**：run-all.ps1 一键"构建→回归用例→冒烟"；TestRunner.cs 用例集；改动后必跑，新用例/新冒烟必须沉淀进本 skill（见"自动化测试 skill"节） |
 | `CommandCenter/tools/DocShot/` | **培训配图 harness（V2.16.6）**：DocShot.cs 直连真实窗体实拍 `docs/images/`（11 张），改了界面重跑即换图；check_docs.py 一键核验 + md_to_pdf.py 转 PDF；用法见目录内 README |
+| `CommandCenter/tools/DocShot/RealShot.cs` | **真进程实拍驱动（V2.16.8）**：另起真实 exe 开全部门窗实拍（静态对话框地面真相，管线分工见 DocShot README）；开窗点击只许 PostMessage（SendMessage 点模态框会卡死，V1 事故） |
 | `docs/光阑视界操作员手册.md` / `客户技术手册.md` / `内部手册.md`（各+同名pdf） | **培训文档三份制（V2.16.6）**：操作员（大白话）/ 客户技术（给方法不给实现，无 dev 账号）/ 内部（含开发者账号与技术实现篇）；旧 `上位机操作说明书(.md/_EN.md)` 已删 |
 
 ## 构建与验证命令
