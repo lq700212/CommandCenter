@@ -13,4 +13,7 @@ if ($LASTEXITCODE -ne 0) { Write-Host "[BUILD-FAIL] MSBuild 退出码 $LASTEXITC
 $exe = Join-Path $repoRoot "CommandCenter\bin\Debug\CommandCenter.exe"
 if (-not (Test-Path -LiteralPath $exe)) { Write-Host "[BUILD-FAIL] 未产出 $exe"; exit 1 }
 Write-Host "[BUILD-OK] $exe"
+# 品牌/图标检查（V2.16.5）：多尺寸 app.ico → csproj 接线 → exe 版本资源与内嵌图标，不断裂才算构建通过
+& (Join-Path $PSScriptRoot "check-branding.ps1")
+if ($LASTEXITCODE -ne 0) { Write-Host "[BUILD-FAIL] 品牌/图标检查未通过"; exit 1 }
 exit 0

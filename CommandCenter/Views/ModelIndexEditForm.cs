@@ -68,6 +68,10 @@ namespace CommandCenter.Views
                 .ToList();
 
             InitializeComponent();
+            // V2.16.5 品牌图标：标题栏/任务栏用 exe 内嵌主图标（光阑视界 IrisVision，
+            // 与桌面快捷方式/资源管理器图标同一来源，见 Utils\AppIcon 类注释）。
+            var appIcon = Utils.AppIcon.Get();
+            if (appIcon != null) this.Icon = appIcon;
 
             // 回车=确定 / Esc=取消（AcceptButton/CancelButton 在 Designer 已设）。
             btnOk.Click += (s, e) => OnOk();

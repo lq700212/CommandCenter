@@ -101,6 +101,10 @@ namespace CommandCenter.Views
             }
 
             InitializeComponent();          // 先解析设计器里的控件
+            // V2.16.5 品牌图标：标题栏/任务栏用 exe 内嵌主图标（光阑视界 IrisVision，
+            // 与桌面快捷方式/资源管理器图标同一来源，见 Utils\AppIcon 类注释）。
+            var appIcon = Utils.AppIcon.Get();
+            if (appIcon != null) this.Icon = appIcon;
 
             LoadFromConfig();               // 把当前配置值填进各输入框
             WireButtonEvents();             // 添加/删除相机按钮事件

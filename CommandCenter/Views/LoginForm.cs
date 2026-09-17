@@ -79,6 +79,10 @@ namespace CommandCenter.Views
         {
             _config = config ?? new AppConfig();
             InitializeComponent();
+            // V2.16.5 品牌图标：标题栏/任务栏用 exe 内嵌主图标（光阑视界 IrisVision，
+            // 与桌面快捷方式/资源管理器图标同一来源，见 Utils\AppIcon 类注释）。
+            var appIcon = Utils.AppIcon.Get();
+            if (appIcon != null) this.Icon = appIcon;
             ShowLoginPanel(null, EventArgs.Empty); // 默认显示登录面板
 
             // 账号默认填管理员账号（通常 "admin"），现场就一个管理员，免输入；

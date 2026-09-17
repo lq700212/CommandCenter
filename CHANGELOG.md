@@ -1,5 +1,46 @@
 # 版本改动记录
 
+## V2.16.5（2026-09-17）品牌更名光阑视界 IrisVision + 全套图标替换
+
+> 软件中文名"光阑视界"、英文名"IrisVision"：exe / 桌面快捷方式 / 任务栏 / 标题栏图标统一替换，
+> 窗口标题与程序集显示名同步更名（exe 文件名 `CommandCenter.exe`、命名空间、单实例互斥名一律不变）。
+
+### 改动范围
+
+- **图标单一来源（`CommandCenter/Resources/`，位置不变、只接线）**：`app.png`（1600px 源图）重制
+  `app.ico`（16/24/32/48/64/128/256 共 7 层，小图标独立层、标题栏/任务栏不糊）；csproj 新增
+  `<ApplicationIcon>Resources\app.ico</ApplicationIcon>`——exe 文件图标 / 资源管理器 /
+  桌面快捷方式 / 任务栏（运行中 + 固定）四处自动取它，无需逐处配图。
+- **标题栏图标显式设置（新增 `Utils/AppIcon.cs` + 9 个窗体各 2 行）**：`AppIcon.Get()` 取"自己 exe
+  的内嵌主图标"（`Icon.ExtractAssociatedIcon`，进程缓存单例；VS 设计时返回 null 不污染设计器；
+  失败返回 null 绝不拖累启动），MainForm/SettingsForm/WindowPointForm/DirTreeEditForm/
+  DeveloperModeForm/LoginForm/SerialInputForm/ScannerFailForm/ModelIndexEditForm 在构造里
+  `InitializeComponent()` 后赋值（全屏承载窗 `ShowInTaskbar=false` 不需设）。
+- **品牌更名（只改显示名）**：`AssemblyTitle/FileDescription`="光阑视界 IrisVision"、
+  `AssemblyProduct`="IrisVision"；主窗体标题 `I18n.T("光阑视界", "IrisVision")`
+  （中文界面显中文名、英文界面显英文名）；已有部署/脚本/文档里的 exe 引用零改动。
+- **桌面快捷方式一键脚本（新增 `CommandCenter/tools/Create-DesktopShortcut.ps1`）**：桌面建
+  "光阑视界 IrisVision.lnk"（目标按 混淆版→Release→Debug 自动找，可 `-ExePath` 显式指定，
+  `IconLocation=exe,0` 取内嵌图标，UTF-8 with BOM）。
+- **测试沉淀（`.opencode/skills/commandcenter-test/`）**：新增 `scripts/check-branding.ps1`
+  （ico 七层齐全 + csproj 接线 + exe 产品名/中文说明 + 内嵌图标可提取），由 `build.ps1`
+  在产出 exe 后自动调用，断裂即 BUILD-FAIL；另用一次性 harness 验证真实 `new MainForm()`
+  的 `Icon` 非空且标题为光阑视界（[BRAND-PROBE-OK]，脚本已删）。
+
+### 为什么这么改
+
+- 此前 `Resources/app.ico/app.png` 已放好但 csproj 从未引用（缺 `ApplicationIcon`），
+  exe/快捷方式/任务栏全是 WinForms 默认图标；4 个 resx 里的 `Icon1` 只是模板占位、
+  各窗体从未真正设图标——属于"资源放了、线没接"。
+- 任务栏/快捷方式图标天然取 exe 图标，不必逐处配图；标题栏则须每个窗体显式设
+  （`AppIcon` 统一收口，避免 9 处各写一套取法；禁止按文件路径读 Resources，
+  现场部署目录里没有它）。
+
+### 优化点
+
+- `run-all` 全绿（构建 + 品牌检查 + 回归用例 + 70 条 UI 交互 + 两轮冒烟）；图标编译进 exe 本体，
+  现场部署不需多拷资源文件；混淆只改托管元数据、原生图标资源不受影响，混淆版图标同样生效。
+
 ## V2.16.4（2026-09-10）全面测试补强：538 + 70 条用例 + 修颜色回退真 bug
 
 > 目标 0BUG，对全仓库做纯逻辑覆盖率审查：两路并行审出约 70 个未覆盖缺口，

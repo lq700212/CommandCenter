@@ -418,7 +418,8 @@ namespace CommandCenter.Views
             this.MaximizeBox = false;
             this.MinimizeBox = true;
             this.WindowState = System.Windows.Forms.FormWindowState.Normal;
-            this.Text = "上位机控制中心";
+            // V2.16.5 品牌更名：设计器初始标题（运行时 ApplyLanguage 按语言重设为"光阑视界"/"IrisVision"）。
+            this.Text = "光阑视界";
             this.pnlTitleBar.ResumeLayout(false);
             this.pnlTitleBar.PerformLayout();
             this.pnlStatusBar.ResumeLayout(false);

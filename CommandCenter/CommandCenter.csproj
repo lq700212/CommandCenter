@@ -13,6 +13,12 @@
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <Deterministic>true</Deterministic>
     <LangVersion>7.3</LangVersion>
+    <!-- 软件主图标（V2.16.5 光阑视界 IrisVision）：exe 文件图标 / 资源管理器 /
+         桌面快捷方式 / 任务栏（运行中 + 固定）的图标全部从这里来，单一来源。
+         源图 Resources\app.png（1600px），app.ico 含 16~256 共 7 层多尺寸：
+         小图标（任务栏/标题栏 16×16）用独立小尺寸层，不拿 256 缩放，保证清晰不糊。
+         注意：只改文件名/路径要同步改 Utils\AppIcon.cs 的注释与桌面快捷方式脚本。 -->
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
@@ -145,6 +151,7 @@
     <Compile Include="Services\MesService.cs" />
     <Compile Include="Services\ConnectionMonitor.cs" />
     <Compile Include="Utils\ConfigStore.cs" />
+    <Compile Include="Utils\AppIcon.cs" />
     <Compile Include="Utils\AppTheme.cs" />
     <Compile Include="Utils\I18n.cs" />
     <Compile Include="Utils\LogHelper.cs" />
@@ -155,6 +162,10 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
+    <!-- 图标资源：app.ico（编译进 exe 的主图标）+ app.png（制 ico 的源图，留档备改）；
+         只做 None（进方案管理器可见），不复制到输出目录（图标已打进 exe 本体）。 -->
+    <None Include="Resources\app.ico" />
+    <None Include="Resources\app.png" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Views\DeveloperModeForm.resx">

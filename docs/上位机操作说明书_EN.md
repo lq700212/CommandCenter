@@ -9,7 +9,7 @@
 ## 1. Power-On and Startup
 
 1. Turn on the computer and wait for Windows to finish starting.
-2. Double-click the **CommandCenter** (host inspection program) icon on the desktop.
+2. Double-click the **IrisVision** (host inspection program) icon on the desktop.
 3. Wait 2~3 seconds. When the **main window fills the screen** and rows of inspection windows appear, the program has started successfully.
 4. Normal production **does not require login**. Only maintenance personnel need to enter an administrator account when changing parameters by clicking "System Settings" in the top-right corner.
 

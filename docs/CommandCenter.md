@@ -47,7 +47,8 @@
 <a name="part1-s1"></a>
 ## 一、软件启动
 
-1. 双击 `CommandCenter.exe`（或桌面快捷方式）启动。
+1. 双击桌面"光阑视界 IrisVision"快捷方式（目标 `CommandCenter.exe`；V2.16.5 起品牌更名，
+   exe 文件名不变）启动。无快捷方式时到部署目录直接双击 `CommandCenter.exe` 也一样。
 2. 启动即自动铺满屏幕工作区（保留任务栏，不是全屏独占；边框固定不可拖拽缩放，
    最小化 / 关闭按钮正常可用）。
 3. 无需登录即可观看主界面；只有点 **"系统设置"** 按钮时才需要登录（见 §四）。
@@ -1748,6 +1749,17 @@ SubDirs 为空时用模型默认含 `{相机}` 的四层 `{年月日}/{SN}/{相�
 # 第八部分 版本
 
 > 本部分保留原 `通讯接入.md` 的版本演进记录，最新在前。
+
+- V2.16.5（2026-09-17，品牌更名光阑视界 IrisVision + 全套图标替换）：`Resources/app.ico`
+  由 `app.png`（1600px）重制 7 层多尺寸（16/24/32/48/64/128/256），csproj 新增
+  `<ApplicationIcon>` 打进 exe（exe 文件图标/资源管理器/桌面快捷方式/任务栏同一来源）；
+  新增 `Utils/AppIcon.cs`（取自身 exe 内嵌图标：进程缓存、设计时 null、失败 null），
+  9 个窗体构造 `InitializeComponent()` 后显式设标题栏图标；`AssemblyTitle/Product` 与
+  主窗体标题更名（`I18n.T("光阑视界","IrisVision")`），exe 文件名/命名空间/互斥名不变；
+  新增 `tools/Create-DesktopShortcut.ps1` 一键建桌面"光阑视界 IrisVision.lnk"。
+  同步 CHANGELOG（V2.16.5）/ README（标题 + 图标小节）/ 操作说明书中英 / AGENTS.md；
+  测试沉淀 `check-branding.ps1`（ico 七层 + csproj 接线 + exe 版本资源与内嵌图标，
+  `build.ps1` 产出 exe 后自动调）。
 
 - V2.16.3（2026-09-06，主题按钮文本不跟随翻转修复）：`btnToggleTheme` 文本只在
   `ApplyLanguage()` 里设，切主题走 `ThemeChanged→ApplyTheme` 不经过，文本永远不变。

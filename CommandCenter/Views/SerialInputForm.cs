@@ -62,6 +62,10 @@ namespace CommandCenter.Views
             // Designer 已建好全部控件与外观（见 SerialInputForm.Designer.cs），这里只补业务：
             // 预填 + 全选聚焦 + 回车/Esc + 确定空校验。
             InitializeComponent();
+            // V2.16.5 品牌图标：标题栏/任务栏用 exe 内嵌主图标（光阑视界 IrisVision，
+            // 与桌面快捷方式/资源管理器图标同一来源，见 Utils\AppIcon 类注释）。
+            var appIcon = Utils.AppIcon.Get();
+            if (appIcon != null) this.Icon = appIcon;
             _scanners = scanners ?? new List<IScanner>();
 
             // ── 预填当前 SN 并全选：直接打字即覆盖旧值 ────────────────

@@ -72,6 +72,10 @@ namespace CommandCenter.Views
         {
             // Designer 已建好全部控件与外观（见 ScannerFailForm.Designer.cs），这里只补业务。
             InitializeComponent();
+            // V2.16.5 品牌图标：标题栏/任务栏用 exe 内嵌主图标（光阑视界 IrisVision，
+            // 与桌面快捷方式/资源管理器图标同一来源，见 Utils\AppIcon 类注释）。
+            var appIcon = Utils.AppIcon.Get();
+            if (appIcon != null) this.Icon = appIcon;
             _scanners = scanners ?? new List<IScanner>();
 
             // 失败文本有值才显示（线程安全：构造在 UI 线程，只在 ShowDialog 前设置一次）

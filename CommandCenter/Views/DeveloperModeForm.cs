@@ -117,6 +117,10 @@ namespace CommandCenter.Views
             _serialSnapshot = serialSnapshot ?? "";
             _config = config;
             InitializeComponent();
+            // V2.16.5 品牌图标：标题栏/任务栏用 exe 内嵌主图标（光阑视界 IrisVision，
+            // 与桌面快捷方式/资源管理器图标同一来源，见 Utils\AppIcon 类注释）。
+            var appIcon = Utils.AppIcon.Get();
+            if (appIcon != null) this.Icon = appIcon;
 
             // 填充相机下拉框：每台一行"相机N IP:端口"（V1.12.22 起带名称：上相机/下相机；
             // V2.13.4 无名称时优先用 CameraId 真编号、其次行序，与设置页第一列一致）

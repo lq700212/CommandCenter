@@ -111,6 +111,11 @@ namespace CommandCenter.Views
         {
             InitializeComponent();   // 先解析设计器里的静态控件（否则后续代码引用会拿到 null）
 
+            // V2.16.5 品牌图标：标题栏/任务栏用 exe 内嵌主图标（光阑视界 IrisVision，
+            // 与桌面快捷方式/资源管理器图标同一来源，见 Utils\AppIcon 类注释）。
+            var appIcon = Utils.AppIcon.Get();
+            if (appIcon != null) this.Icon = appIcon;
+
             _config = ConfigStore.Load();
 
             // V2.15.3 修复"重启语言不保持"：把配置里持久化的语言（language 字段）同步给全局
@@ -1680,7 +1685,9 @@ namespace CommandCenter.Views
             RefreshThemeButtonText();
             btnManualSerial.Text = I18n.T("人工补录", "Manual");
             lblScannerStatus.Text = I18n.T("● 扫码枪", "● Scanner");
-            this.Text = I18n.T("上位机控制中心", "Host Computer Control Center");
+            // V2.16.5 品牌更名：中文界面标题"光阑视界"、英文界面"IrisVision"
+            // （exe 文件名 CommandCenter.exe 与程序集名保持不变，只改显示名）。
+            this.Text = I18n.T("光阑视界", "IrisVision");
             if (_serialTip != null)
                 _serialTip.SetToolTip(btnManualSerial, I18n.T("手动输入/修改当前序列号", "Enter / modify current serial number"));
 

@@ -1,4 +1,7 @@
-# CommandCenter
+# 光阑视界 IrisVision
+
+> 软件中文名**光阑视界**、英文名 **IrisVision**（V2.16.5 起；主窗体标题与程序集显示名均为此名）。
+> 工程名与 exe 文件名保持 `CommandCenter` / `CommandCenter.exe` 不变，已有部署与脚本零改动。
 
 相机 + PLC 现场命令中心上位机（Windows 桌面程序，.NET Framework 4.7.2 WinForms）。
 
@@ -154,6 +157,21 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 - 混淆版 PDB 失配、无法断点调试；现场/开发排查问题请用 Debug 版 + `Logs/` 日志。
 - `bin\Obfuscated\Mapping.txt` 是"原名↔混淆名"对照表，仅内部反查崩溃栈用，勿随安装包发放。
 - 依赖工具 `tools\Obfuscar\Obfuscar.Console.exe` 已随仓库入库（离线可用，策略同 `libs/`）。
+
+### 软件图标与桌面快捷方式（V2.16.5）
+
+- 图标唯一来源 `CommandCenter/Resources/app.ico`（由 `app.png` 源图重制的 16~256 七层多尺寸），
+  经 csproj `<ApplicationIcon>` 编译进 exe——exe 文件图标、资源管理器、桌面快捷方式、
+  任务栏（运行中 + 固定）四处自动取它；9 个窗体标题栏图标统一走 `Utils/AppIcon.cs`
+  取自身 exe 内嵌图标（现场部署不需多拷资源文件）。
+- 桌面快捷方式一键创建（名"光阑视界 IrisVision"，图标取目标 exe 内嵌图标）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\CommandCenter\tools\Create-DesktopShortcut.ps1"
+```
+
+默认按 混淆版→Release→Debug 自动找 exe，也可用 `-ExePath` 显式指定现场部署路径。
+换图标后重编 + 重跑本脚本即可刷新；任务栏已固定的旧图标注销重登/重启资源管理器后生效。
 
 ## 现场设备对表
 

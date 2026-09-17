@@ -295,6 +295,10 @@ public WindowPointForm(List<int> targetMap, int rows, int cols, List<CameraConfi
             }
 
             InitializeComponent();      // 先解析设计器里的静态控件
+            // V2.16.5 品牌图标：标题栏/任务栏用 exe 内嵌主图标（光阑视界 IrisVision，
+            // 与桌面快捷方式/资源管理器图标同一来源，见 Utils\AppIcon 类注释）。
+            var appIcon = Utils.AppIcon.Get();
+            if (appIcon != null) this.Icon = appIcon;
             // V2.14.21 交换完成闪烁定时器：SwapCells/EditSelectedPoint 互换后把两扇窗加入
             // _swapFlash 绿色高亮，1600ms 后自动熄灭（Timer 不放 components 容器，FormClosed 手动释放
             // 防句柄泄漏；WireEvents 尚未挂、此时 FormClosed 事件直接挂在本窗体上不受影响）。
