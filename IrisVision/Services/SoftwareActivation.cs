@@ -4,6 +4,7 @@ using System.Management;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using IrisVision.Utils;
 
 namespace IrisVision.Services
 {
@@ -242,18 +243,23 @@ namespace IrisVision.Services
         }
 
         /// <summary>
-        /// 状态显示文案（与 HJVision 激活窗的"激活状态:"三档文案一致）。
+        /// 状态显示文案（与 HJVision 激活窗的"激活状态:"三档文案一致；V2.17.2 起双语，
+        /// 默认中文——回归㉑组中文断言不受影响，英文界面跟随切换）。
         /// </summary>
         public static string StatusText(ActivationStatus status, int slot, int daysLeft)
         {
             switch (status)
             {
-                case ActivationStatus.Permanent: return "激活状态: 永久使用";
+                case ActivationStatus.Permanent:
+                    return I18n.T("激活状态: 永久使用", "Status: Permanent");
                 case ActivationStatus.InTrial:
-                    if (slot > ValidSlots) return "激活状态: 软件已过期";
-                    return "激活状态: 剩余使用天数 / " + daysLeft.ToString();
-                case ActivationStatus.NewDevice: return "激活状态: 未绑定设备";
-                default: return "激活状态: 软件已过期";
+                    if (slot > ValidSlots)
+                        return I18n.T("激活状态: 软件已过期", "Status: Expired");
+                    return I18n.T("激活状态: 剩余使用天数 / ", "Status: Days left / ") + daysLeft.ToString();
+                case ActivationStatus.NewDevice:
+                    return I18n.T("激活状态: 未绑定设备", "Status: Unbound device");
+                default:
+                    return I18n.T("激活状态: 软件已过期", "Status: Expired");
             }
         }
 

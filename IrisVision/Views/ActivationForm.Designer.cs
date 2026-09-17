@@ -25,7 +25,7 @@ namespace IrisVision.Views
         /// <summary>
         /// 设计器支持所需的方法 - 不要修改
         /// 使用代码编辑器修改此方法的内容。
-        /// 界面布局（ClientSize 400x348，外观对齐 LoginForm：顶部蓝色横幅 + 白色面板 + 蓝主按钮）：
+        /// 界面布局（ClientSize 400x320，外观对齐 LoginForm：顶部蓝色横幅 + 白色面板 + 蓝主按钮）：
         /// ┌────────────────────────────────────┐
         /// │ pnlHeader 蓝横幅48 "软件授权"       │ lblBanner 白色粗体居中
         /// ├────────────────────────────────────┤
@@ -97,7 +97,7 @@ namespace IrisVision.Views
             this.pnlBody.Dock = System.Windows.Forms.DockStyle.Fill;
             this.pnlBody.Location = new System.Drawing.Point(0, 48);
             this.pnlBody.Name = "pnlBody";
-            this.pnlBody.Size = new System.Drawing.Size(400, 300);
+            this.pnlBody.Size = new System.Drawing.Size(400, 272);
             this.pnlBody.TabIndex = 1;
             //
             // lblStatus
@@ -185,9 +185,9 @@ namespace IrisVision.Views
             this.lblHint.ForeColor = System.Drawing.Color.Gray;
             this.lblHint.Location = new System.Drawing.Point(24, 152);
             this.lblHint.Name = "lblHint";
-            this.lblHint.Size = new System.Drawing.Size(348, 56);
+            this.lblHint.Size = new System.Drawing.Size(348, 36);
             this.lblHint.TabIndex = 6;
-            this.lblHint.Text = "把设备码报给厂商换激活码，粘到上面点激活。\r\n也可双击 tools/auto_activate.bat 一键激活。";
+            this.lblHint.Text = "把设备码报给厂商换激活码，粘到上面点激活。";
             //
             // btnActivate
             // 蓝色主按钮"激活"：回车触发（Form.AcceptButton），逻辑在 BtnActivate_Click
@@ -197,7 +197,7 @@ namespace IrisVision.Views
             this.btnActivate.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnActivate.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
             this.btnActivate.ForeColor = System.Drawing.Color.White;
-            this.btnActivate.Location = new System.Drawing.Point(112, 216);
+            this.btnActivate.Location = new System.Drawing.Point(112, 196);
             this.btnActivate.Name = "btnActivate";
             this.btnActivate.Size = new System.Drawing.Size(120, 36);
             this.btnActivate.TabIndex = 7;
@@ -213,7 +213,7 @@ namespace IrisVision.Views
             this.btnClose.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnClose.Font = new System.Drawing.Font("Microsoft YaHei", 10F);
             this.btnClose.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(73)))), ((int)(((byte)(94)))));
-            this.btnClose.Location = new System.Drawing.Point(252, 216);
+            this.btnClose.Location = new System.Drawing.Point(252, 196);
             this.btnClose.Name = "btnClose";
             this.btnClose.Size = new System.Drawing.Size(120, 36);
             this.btnClose.TabIndex = 8;
@@ -226,7 +226,7 @@ namespace IrisVision.Views
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.btnClose;
-            this.ClientSize = new System.Drawing.Size(400, 348);
+            this.ClientSize = new System.Drawing.Size(400, 320);
             this.Controls.Add(this.pnlBody);
             this.Controls.Add(this.pnlHeader);
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;

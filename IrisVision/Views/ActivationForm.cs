@@ -65,10 +65,17 @@ namespace IrisVision.Views
             lblDeviceCode.Text = I18n.T("设备码:", "Device Code:");
             lblActCode.Text = I18n.T("激活码:", "Activation Code:");
             lblHint.Text = I18n.T(
-                "把设备码报给厂商换激活码，粘到上面点激活。\r\n也可双击 tools/auto_activate.bat 一键激活。",
-                "Send the device code to the vendor for an activation code, paste it above and click Activate.\r\nOr double-click tools/auto_activate.bat for one-click activation.");
+                "把设备码报给厂商换激活码，粘到上面点激活。",
+                "Send the device code to the vendor for an activation code, paste it above and click Activate.");
             btnActivate.Text = I18n.T("激活", "Activate");
             btnClose.Text = I18n.T("关闭", "Close");
+            // V2.17.2 英文布局：英文标签长（"Activation Code:"约95px，中文标签位宽61装不下，
+            // harness 实拍抓获截断"Activation Co…"），英文时标签加宽＋输入框右让；
+            // 中文恢复设计值（方便 VS 设计器维护，见 DirTreeEditForm.ApplyLayoutForLanguage 同模式）。
+            bool isEn = I18n.Language == "en-US";
+            lblActCode.Width = isEn ? 104 : 61;
+            txtActivationCode.Left = isEn ? 136 : 112;
+            txtActivationCode.Width = isEn ? 236 : 260;
         }
 
         /// <summary>主题跟随（模态打开瞬间上色，与其它弹窗同策略）。</summary>
@@ -114,13 +121,13 @@ namespace IrisVision.Views
                 if (kind == SoftwareActivation.ActivationKind.Permanent)
                 {
                     SoftwareActivation.WriteRunHash2(SoftwareActivation.PermanentMark(cpuId));
-                    lblStatus.Text = "激活状态: 永久使用";
+                    lblStatus.Text = I18n.T("激活状态: 永久使用", "Status: Permanent");
                     ActivatedSuccessfully = true;
                 }
                 else
                 {
                     SoftwareActivation.WriteRunHash2(SoftwareActivation.TrialStartMark(cpuId));
-                    lblStatus.Text = "激活状态: 剩余使用天数 / "
+                    lblStatus.Text = I18n.T("激活状态: 剩余使用天数 / ", "Status: Days left / ")
                         + SoftwareActivation.SlotDaysLeft(0).ToString();
                     ActivatedSuccessfully = true;
                 }

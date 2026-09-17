@@ -24,6 +24,10 @@
   菜单文字——`RefreshThemeButtonText` 删除（V2.16.3 的"两条路径都要刷"在此终结），
   `ApplyLanguage`/`ApplyTheme` 只管主界面。
 - **回归锁**：`TestRunner` 新增㉒分组 11 条（宽恒等/高下限/撑高/非法钳制/真实文本装得下）。
+- **授权窗收尾**：hint 去掉"也可双击 tools/auto_activate.bat 一键激活"第二句（只留主流程），
+  窗高 348→320（hint 高56→36＋按钮上移20）；`StatusText`＋激活成功状态双语
+  （英文界面不再说中文，默认中文既有断言不变）；英文布局"Activation Code:"标签
+  加宽＋输入框右让（harness 中英双版实拍无裁字）。
 
 ### 验证
 
