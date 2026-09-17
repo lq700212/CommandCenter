@@ -56,6 +56,8 @@
     <Reference Include="System.IO.Ports" />
     <!-- MES 上传（V2.15.19）：HttpClient 走框架自带 System.Net.Http 程序集，离线可编译 -->
     <Reference Include="System.Net.Http" />
+    <!-- 软件授权（V2.17.0）：读 CPU 序列号走 WMI（System.Management，框架自带程序集，离线可编译） -->
+    <Reference Include="System.Management" />
     <!-- 本地引用的第三方库（libs 目录，离线可编译；版本以 packages.config 为准） -->
     <Reference Include="Newtonsoft.Json">
       <HintPath>libs\Newtonsoft.Json.dll</HintPath>
@@ -150,6 +152,15 @@
     <Compile Include="Services\ProductionCoordinator.cs" />
     <Compile Include="Services\MesService.cs" />
     <Compile Include="Services\ConnectionMonitor.cs" />
+    <!-- 软件授权（V2.17.0，与 AgingTestSystem/HJVision 同源同口径，同一套激活工具/脚本通用） -->
+    <Compile Include="Services\SoftwareActivation.cs" />
+    <!-- 软件授权窗（V2.17.0，原生 WinForms，外观对齐 LoginForm；业务分部 + Designer 分部） -->
+    <Compile Include="Views\ActivationForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Views\ActivationForm.Designer.cs">
+      <DependentUpon>ActivationForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="Utils\ConfigStore.cs" />
     <Compile Include="Utils\AppIcon.cs" />
     <Compile Include="Utils\AppTheme.cs" />

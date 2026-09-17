@@ -10,6 +10,10 @@ debug.log
 Config/*.json
 *.tmp
 
+# 软件激活运行时文件（V2.17.0 起：与 AgingTestSystem 同源，跟机器，绝不入库）
+MainSetting.ini
+MainSetting.ini.bak.*
+
 # VS 用户文件
 *.user
 .vs/

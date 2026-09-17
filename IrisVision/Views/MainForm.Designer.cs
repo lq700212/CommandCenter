@@ -13,8 +13,8 @@ namespace IrisVision.Views
     ///   ┌──────────────────────────────────────────────────────────────┐
     ///   │ 产品型号:[cmbModel▾] 序列号:[lblSerialTitle][lblSerial·只读框]    │
     ///   │   [btnManualSerial人工补录] | 总数:[lblTotal] OK:[lblOk]      │
-    ///   │   NG:[lblNg] | [btnSettings系统设置][btnToggleLanguage中/英] │
-    ///   │   [btnToggleTheme深/浅色·最右]                                │
+    ///   │   NG:[lblNg] | [btnSettings系统设置][btnAbout选项·最右]        │
+    ///   │   （btnAbout 下拉：语言切换/主题切换/软件授权，V2.17.0）        │
     ///   │          ●[lblPlcStatus] ●[lblScannerStatus] ●[相机灯]        │
     ///   ├──────────────────────────────────────────────────────────────┤
     ///   │  pnlWindowScroll（AutoScroll=true，行多超高时出竖直滚动条）       │
@@ -55,13 +55,14 @@ namespace IrisVision.Views
         /// <summary>设计器支持所需的方法 - 不要修改此方法的内容，使用代码编辑器修改此方法的内容。</summary>
         private void InitializeComponent()
         {
+            // 组件容器（ToolTip 等挂这里，随窗体自动释放）。
+            this.components = new System.ComponentModel.Container();
             this.pnlTitleBar = new System.Windows.Forms.Panel();
             this.lblPlcStatus = new System.Windows.Forms.Label();
             this.lblScannerStatus = new System.Windows.Forms.Label();
             this.lblCamPlaceholder = new System.Windows.Forms.Label();
             this.btnSettings = new System.Windows.Forms.Button();
-            this.btnToggleLanguage = new System.Windows.Forms.Button();
-            this.btnToggleTheme = new System.Windows.Forms.Button();
+            this.btnAbout = new System.Windows.Forms.Button();
             this.btnManualSerial = new System.Windows.Forms.Button();
             this.lblSep2 = new System.Windows.Forms.Label();
             this.lblNg = new System.Windows.Forms.Label();
@@ -94,8 +95,7 @@ namespace IrisVision.Views
             // 运行时 InitTitleBarRuntime 生成真灯后会把占位隐藏（隐藏控件不占 Dock 空间）。
             this.pnlTitleBar.Controls.Add(this.lblCamPlaceholder);
             this.pnlTitleBar.Controls.Add(this.btnSettings);
-            this.pnlTitleBar.Controls.Add(this.btnToggleLanguage);
-            this.pnlTitleBar.Controls.Add(this.btnToggleTheme);
+            this.pnlTitleBar.Controls.Add(this.btnAbout);
             this.pnlTitleBar.Controls.Add(this.lblSep2);
             this.pnlTitleBar.Controls.Add(this.lblNg);
             this.pnlTitleBar.Controls.Add(this.lblOk);
@@ -167,46 +167,24 @@ namespace IrisVision.Views
             this.btnSettings.TabIndex = 9;
             this.btnSettings.Text = "系统设置";
             this.btnSettings.UseVisualStyleBackColor = false;
-            // 
-            // btnToggleLanguage
-            // 界面语言切换按钮（V2.15.0 国际化，V2.15.1 从设置窗体移到主界面标题栏）：
-            // 排布在【系统设置】按钮右侧（RelayoutTitleBar 的 seq 数组里 btnSettings 之后即最右）。
-            // 点击直接切换中/英文（中文界面 → English、英文界面 → 中文），立即热生效并写盘持久化。
-            // 按钮文本 = "目标语言名"（语言名本身不翻译，自解释），由 ApplyLanguage() 按当前语言设置。
-            // 外观与 btnSettings 完全一致：蓝底白字、Flat 无边框、微软雅黑 9F、88×30。
-            // 运行期位置由 RelayoutTitleBar 重排（Designer 里的 Location 只是初始值）。
-            // 
-            this.btnToggleLanguage.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
-            this.btnToggleLanguage.FlatAppearance.BorderSize = 0;
-            this.btnToggleLanguage.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnToggleLanguage.Font = new System.Drawing.Font("微软雅黑", 9F);
-            this.btnToggleLanguage.ForeColor = System.Drawing.Color.White;
-            this.btnToggleLanguage.Location = new System.Drawing.Point(853, 9);
-            this.btnToggleLanguage.Name = "btnToggleLanguage";
-            this.btnToggleLanguage.Size = new System.Drawing.Size(88, 30);
-            this.btnToggleLanguage.TabIndex = 10;
-            this.btnToggleLanguage.Text = "English";
-            this.btnToggleLanguage.UseVisualStyleBackColor = false;
             //
-            // btnToggleTheme
-            // 界面主题切换按钮（V2.16.2 深色模式）：
-            // 排布在【语言切换】按钮右侧（RelayoutTitleBar 的 seq 数组里 btnToggleLanguage 之后即最右）。
-            // 点击直接切换深/浅色（浅色界面 → 深色、深色界面 → 浅色），立即热生效并写盘持久化。
-            // 按钮文本 = "目标主题名"（与语言按钮同策略，自解释），由 ApplyLanguage() 按当前主题设置。
-            // 外观与 btnSettings/btnToggleLanguage 完全一致：蓝底白字、Flat 无边框、微软雅黑 9F、88×30。
-            // 运行期位置由 RelayoutTitleBar 重排（Designer 里的 Location 只是初始值）。
+            // btnAbout
+            // 选项按钮（V2.17.0）：标题栏最右，蓝底白字 88×30 与 btnSettings 同款。
+            // 点击弹真按钮下拉（语言/主题/软件授权，V2.17.1 起对齐 AgingTestSystem
+            // ShowDropdownPopup 口径：无边框窗体＋真 Button 列表，选项样式与本按钮一致，
+            // 见 MainForm.cs 的 ShowAboutMenu/ShowDropdownPopup）。运行期位置由 RelayoutTitleBar 重排。
             //
-            this.btnToggleTheme.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
-            this.btnToggleTheme.FlatAppearance.BorderSize = 0;
-            this.btnToggleTheme.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnToggleTheme.Font = new System.Drawing.Font("微软雅黑", 9F);
-            this.btnToggleTheme.ForeColor = System.Drawing.Color.White;
-            this.btnToggleTheme.Location = new System.Drawing.Point(949, 9);
-            this.btnToggleTheme.Name = "btnToggleTheme";
-            this.btnToggleTheme.Size = new System.Drawing.Size(88, 30);
-            this.btnToggleTheme.TabIndex = 11;
-            this.btnToggleTheme.Text = "深色";
-            this.btnToggleTheme.UseVisualStyleBackColor = false;
+            this.btnAbout.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(152)))), ((int)(((byte)(219)))));
+            this.btnAbout.FlatAppearance.BorderSize = 0;
+            this.btnAbout.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnAbout.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.btnAbout.ForeColor = System.Drawing.Color.White;
+            this.btnAbout.Location = new System.Drawing.Point(853, 9);
+            this.btnAbout.Name = "btnAbout";
+            this.btnAbout.Size = new System.Drawing.Size(88, 30);
+            this.btnAbout.TabIndex = 10;
+            this.btnAbout.Text = "选项";
+            this.btnAbout.UseVisualStyleBackColor = false;
             // 
             // lblSep2
             // 
@@ -445,8 +423,7 @@ namespace IrisVision.Views
         private Label lblNg;
         private Label lblSep2;
         private Button btnSettings;
-        private Button btnToggleLanguage;
-        private Button btnToggleTheme;
+        private Button btnAbout;   // 选项按钮（V2.17.0）：点弹真按钮下拉（语言/主题/软件授权），标题栏最右
         private Label lblPlcStatus;
         private Label lblScannerStatus;
         private Label lblCamPlaceholder;

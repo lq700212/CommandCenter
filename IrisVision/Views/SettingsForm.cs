@@ -141,8 +141,8 @@ namespace IrisVision.Views
             // 扫码枪表格：先建列，再逐行填数据（V1.8.1 起支持多台）
             SetupScannerGridColumns();
             LoadScannerRows();
-            // V2.15.0 界面语言：切换入口在主界面标题栏（btnToggleLanguage，V2.15.1 移出本窗体），
-            // 这里不需要任何语言初始化；I18n.Language 由主界面维护，保存时随 _cfg.Language 兜底写盘。
+            // V2.15.0 界面语言：切换入口在主界面标题栏【选项】下拉菜单（V2.17.0 起收进菜单，
+            // 此前 V2.15.1 为独立按钮），这里不需要任何语言初始化；I18n.Language 由主界面维护，保存时随 _cfg.Language 兜底写盘。
         }
 
         /// <summary>
@@ -525,7 +525,7 @@ namespace IrisVision.Views
         /// </summary>
         private void WireButtonEvents()
         {
-            // V2.15.1 起语言切换入口移到主界面标题栏（btnToggleLanguage，见 MainForm），
+            // V2.15.1 起语言切换入口移到主界面标题栏（V2.17.0 起收进【选项】下拉菜单，见 MainForm），
             // 本窗体不再提供语言控件；保存时仍写 _cfg.Language（见 OnSave 前配置回写逻辑）。
             // 刚勾选时弹气泡明示"自适下哪些功能不可用"，避免误操作（见 UpdateAutoFitUi / AutoFitDisabledHint）
             chkAutoFit.CheckedChanged += (s, e) =>

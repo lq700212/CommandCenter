@@ -269,6 +269,9 @@ OK/NG 才回退标准格式逐位判定。改动相机读应答/判定逻辑必�
 
 - **品牌与图标单一来源（V2.16.5，必须遵守；V2.16.9 起工程彻底更名）**：软件显示名中文"光阑视界"/英文"IrisVision"（主窗体标题 `I18n.T("光阑视界","IrisVision")` + AssemblyTitle/Product）；**工程名 / exe 文件名 `IrisVision.exe` / 命名空间 `IrisVision.*` / 单实例互斥名 `IrisVision_SingleInstance` 统一为 IrisVision**（V2.16.9 由 CommandCenter 彻底更名，项目未上线、不兼容旧名；此前 V2.16.5 曾保留旧 exe/命名空间名，现已作废）。图标唯一来源 `IrisVision/Resources/app.ico`（`app.png` 源图重制 7 层 16~256 多尺寸），经 csproj `<ApplicationIcon>` 打进 exe——exe 文件图标/资源管理器/桌面快捷方式/任务栏（运行中+固定）自动取它；9 个窗体标题栏图标统一走 `Utils/AppIcon.Get()`（取自身 exe 内嵌图标，设计时返回 null，失败返回 null 绝不拖累启动），禁止各窗体各写一套取法、禁止按文件路径读 Resources（现场不部署它）。桌面快捷方式用 `IrisVision/tools/Create-DesktopShortcut.ps1` 一键建"光阑视界 IrisVision.lnk"（`IconLocation=exe,0`）。换图标=重制 app.ico 多尺寸 + 重编 + 重跑快捷方式脚本；品牌/图标改动同步 CHANGELOG + README + docs 主文档第一/八部分 + 操作说明书中英。
 
+- **软件授权铁律（V2.17.0，与 AgingTestSystem/HJVision 同源，同一套《获取激活码》工具与一键脚本通用；涉及授权的改动必读）**：
+  **公式逐字节照抄，改一字工具就对不上**：`Encrypt`=MD5 取前 15 字节 hex（30 字符）；设备ID=WMI 第一块 CPU 的 ProcessorId；设备ID码=`Encrypt(ID+"A")`/设备码=`Encrypt(ID+"1")`/30天码=`Encrypt(设备码+"30")`/永久码=`Encrypt(设备码+"ALL")`/`RunHash2`=`Encrypt(ID+i)`（i=0..839，<768 有效≈30天）/永久=`Encrypt(ID+"ALL")`。**设备码恒 "1" 是照抄不是 bug**（HJVision 的 `currentTime` 恒 0001-01-01，Day 恒 "1"），**不许"顺手修成当天"**。**无密钥、无试用、无启动闸**：新机无 ini 即"新设备"，每小时提醒一次；不阻断启动、不拦生产（失败只置灰【系统设置】按钮，【选项】菜单永不置灰否则进不去授权=死锁；计时器内不自动恢复，激活成功关窗即重查解灰，不用重启）。不要加试用/宽限/点数/到期——加了工具发不出。**存储**：程序目录 `MainSetting.ini [RunHash] RunHash1/RunHash2`（与那边同名同结构，kernel32 INI API 读写，gitignore 绝不入库）；判定逻辑只进纯函数（`VerifyActivationCode`/`FindSlot`/`ComputeStatus`），Timer 与激活窗共用。**P/Invoke 已显 `EntryPoint`**（混淆红线，加了行为不变）。**回归锁**：TestRunner ㉑分组 + UiProbe ⑤分组；ini 测试走显式 path，不碰真实文件；激活窗只构造不 Show（错码调 handler，对码写盘不测，防污染开发机 ini）。
+
 ## 关键文件导航
 
 | 文件 | 作用 |
@@ -281,12 +284,15 @@ OK/NG 才回退标准格式逐位判定。改动相机读应答/判定逻辑必�
 | `IrisVision/Services/ImageStore.cs` | 相机 FTP 推图监听 + 图片归档（SaveImageFilePair 双格式 jpeg+iv4p） |
 | `IrisVision/Models/AppConfig.cs` | 全部可配置项模型（相机/PLC/显示/图像/扫码/安全） |
 | `IrisVision/Utils/ConfigStore.cs` | appconfig.json 读写（小驼峰序列化） |
-| `IrisVision/Utils/I18n.cs` | 界面国际化（V2.15.0）：`I18n.T("中文","English")` 双参内联翻译，`I18n.Language`（zh-CN/en-US，默认中文，setter 触发 LanguageChanged 由 MainForm 热刷新）；日志保持中文，OK/NG/PLC/IP/SN 专有名词不翻译。新增界面文本一律用 `I18n.T` 双语。**切换入口在主界面标题栏【系统设置】按钮右侧的 `btnToggleLanguage`（V2.15.1 起，点击即切即存）** |
-| `IrisVision/Utils/AppTheme.cs` | 界面深浅色主题（V2.16.2，与 I18n 对等）：`AppTheme.Theme`（Light/Dark，默认浅色，setter 触发 ThemeChanged 由 MainForm.ApplyTheme 热刷新）+ `ApplyTo/ApplyOne` 递归上色 + `ApplyGridTheme` 表格适配 + `IsSemanticColor` 语义色保留（OK绿/NG红/PLC黄/主按钮蓝/白字命中保留，新增语义色先加进它）。**切换入口在标题栏语言按钮右侧的 `btnToggleTheme`（点击即切即存）**；新窗体构造末尾调 `ApplyTheme()`（模态打开瞬间上色，无需订阅事件）；老式 csproj 新文件须显式注册 Compile Include，否则 CS0103 |
+| `IrisVision/Utils/I18n.cs` | 界面国际化（V2.15.0）：`I18n.T("中文","English")` 双参内联翻译，`I18n.Language`（zh-CN/en-US，默认中文，setter 触发 LanguageChanged 由 MainForm 热刷新）；日志保持中文，OK/NG/PLC/IP/SN 专有名词不翻译。新增界面文本一律用 `I18n.T` 双语。**切换入口在主界面标题栏【选项】下拉菜单第一项（V2.17.0 起收进菜单，此前 V2.15.1 为独立 `btnToggleLanguage`，点击即切即存）** |
+| `IrisVision/Utils/AppTheme.cs` | 界面深浅色主题（V2.16.2，与 I18n 对等）：`AppTheme.Theme`（Light/Dark，默认浅色，setter 触发 ThemeChanged 由 MainForm.ApplyTheme 热刷新）+ `ApplyTo/ApplyOne` 递归上色 + `ApplyGridTheme` 表格适配 + `IsSemanticColor` 语义色保留（OK绿/NG红/PLC黄/主按钮蓝/白字命中保留，新增语义色先加进它）。**切换入口在【选项】下拉菜单第二项（V2.17.0 起收进菜单，此前为独立 `btnToggleTheme`，点击即切即存）**；新窗体构造末尾调 `ApplyTheme()`（模态打开瞬间上色，无需订阅事件）；老式 csproj 新文件须显式注册 Compile Include，否则 CS0103 |
 | `IrisVision/Utils/SecurityUtil.cs` | 管理员密码 SHA-256 哈希 + 记住密码 DPAPI 加解密（登录/改密码/回填共用） |
 | `IrisVision/Utils/AppIcon.cs` | 软件主图标统一入口（V2.16.5）：取自身 exe 内嵌主图标（ApplicationIcon 打进去的那个），进程缓存单例，9 个窗体标题栏图标共用；设计时 null、失败 null（见类注释） |
 | `IrisVision/tools/Create-DesktopShortcut.ps1` | 桌面快捷方式一键创建（V2.16.5）：建"光阑视界 IrisVision.lnk"（目标按 混淆版→Release→Debug 自动找，可 -ExePath 指定，图标取 exe 内嵌；ps1 含中文须 UTF-8 with BOM） |
 | `IrisVision/Views/LoginForm.cs` | 账号登录对话框（管理员 admin / 开发者 dev 双账号，按角色分流进设置或功能测试，V1.9.0/V1.12.0） |
+| `IrisVision/Services/SoftwareActivation.cs` | 软件授权算法（V2.17.0，与 AgingTestSystem/HJVision 同源同口径，同一套《获取激活码》工具通用；P/Invoke 已显 EntryPoint，混淆安全；改动先读下方"软件授权铁律"） |
+| `IrisVision/Views/ActivationForm.cs` | 软件授权窗（V2.17.0，原生 WinForms，外观对齐 LoginForm；入口=主界面【选项】下拉第三项，人人可开） |
+| `IrisVision/tools/auto_activate.ps1` / `.bat` / `.py` | 工控机一键激活三件套（V2.17.0，与 AgingTestSystem 同逻辑，产品名 IrisVision；双击 bat 即永久激活；ps1/bat 含中文须 UTF-8 with BOM） |
 | `IrisVision/Views/DeveloperModeForm.cs` | 开发者模式窗体（V2.15.10 由 DevTestForm 更名，开发者专用：相机 T1/T2 触发（T2 取图闪图存图，V1.12.24）+ PLC 寄存器交互 + 扫码枪读码展示/发触发指令 + 账号管理（V2.15.10，重置账号密码），复用主窗体连接，V1.12.0） |
 | `IrisVision/Views/SerialInputForm.cs` | 手动输入序列号对话框（V2.14.6 恢复；V2.14.7 外观改到 Designer 分部文件 SerialInputForm.Designer.cs，可用 VS 设计器拖拽微调 UI，本类只留业务：预填全选/回车确定/Esc取消/空提交拦截；V2.14.48 构造新增可选 `scanners` 参数，打开期间读到真码自动关闭）：外观对齐 LoginForm（顶部蓝色横幅+白面板+蓝主按钮），点标题栏"人工补录"按钮弹出（V2.14.7 起双击序列号框入口已取消） |
 | `IrisVision/Views/ScannerFailForm.cs` | 扫码枪异常提醒对话框（V2.14.32）：扫码枪读码失败（推 ERROR 等错误文本）时弹窗，提醒检查扫码枪或【人工补录】接手本件；外观对齐 LoginForm（蓝横幅+白面板+【人工补录】蓝主按钮/【稍后处理】白次按钮），回 OK 由 MainForm 调 PromptManualSerial 接手；【稍后处理】**不是放行本件**（V2.14.33：PLC 死等 2，需稍后补录覆盖成 1）；**☐ 今日不再提醒 复选框（V2.14.32 增强）**：勾选后 MainForm 记 `_scannerFailMuteDate=Today`，当日后续失败不再弹窗（次日自动恢复，业务照常）；**打开期间读到真码自动关闭（V2.14.48）**：构造新增可选 `scanners` 参数，订阅每台枪 `SerialNumberScanned`，读到真码自动以"稍后处理"语义关闭（免人工补录） |

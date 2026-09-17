@@ -1,5 +1,81 @@
 # 版本改动记录
 
+## V2.17.1（2026-09-18）选项下拉改真按钮列表（对齐 AgingTestSystem 口径）
+
+> V2.17.0 的 ContextMenuStrip 方案（`cmsAbout` + `AboutMenuColors`）上线前推翻：
+> 用户要的是"3 个按钮的样式"，与 AgingTestSystem【关于】下拉（无边框窗体＋真 Button
+> 列表，选项字体/尺寸与主按钮同源）对齐风格。
+
+### 改动范围
+
+- **下拉实现**：删 `cmsAbout`/`miLanguage`/`miTheme`/`miLicense` + `AboutMenuColors`
+  （`ProfessionalColorTable` 染色方案一并删除）；新增 `ShowDropdownPopup`
+  （移植 AgingTestSystem `ShowDropdownPopup` 口径：无边框 Form＋TableLayoutPanel＋
+  真 Button 列表；选项蓝底白字/字体（微软雅黑9）与【选项】按钮一致；
+  `AutoScaleMode.None`＋`MinimumSize(1,1)` 破 136px 最小跟踪宽度；
+  点选项/失焦/Esc 关窗，`FormClosed` 解绑＋`Dispose` 防泄漏；
+  适配点：本项目原生按钮直接读色，不走 ThemeManager）。
+  宽度与那边不同：**选项宽恒＝按钮宽（88，用户要求对齐，harness 实拍验收），
+  文本再长也不撑开**——`ComputePopupItemSize` 纯函数（`public static` 供用例直调）
+  只留高下限＋非法钳制；三项文本去前缀只留目标名（`English`/`深色`/`软件授权`，
+  双语），此前"语言：English"在 88 宽里被挤成两行（harness 实拍抓获）。
+  加长文本前先跑 AboutProbe harness 看裁字（见方法注释）。
+- **文本策略**：下拉三项每次打开现拼（点一下去哪一目了然），切语言/切主题不再同步
+  菜单文字——`RefreshThemeButtonText` 删除（V2.16.3 的"两条路径都要刷"在此终结），
+  `ApplyLanguage`/`ApplyTheme` 只管主界面。
+- **回归锁**：`TestRunner` 新增㉒分组 11 条（宽恒等/高下限/撑高/非法钳制/真实文本装得下）。
+
+### 验证
+
+- 跑 `irisvision-test` skill 全绿：构建 + 回归 612/612 + UI 交互 80/80 + 两轮进程冒烟。
+
+## V2.17.0（2026-09-18）软件授权激活（与 AgingTestSystem/HJVision 同源，同一套工具/脚本通用）
+
+> 参考 AgingTestSystem 落一套软件授权：算法逐字节一致，同一套《获取激活码》工具零改动通用；
+> 主界面标题栏新增【选项】下拉按钮（语言切换/主题切换/软件授权），原来两个独立切换按钮收进菜单。
+
+### 改动范围
+
+- **算法层**：新增 `Services/SoftwareActivation.cs`（与 AgingTestSystem `SoftwareActivation`
+  逐字节同源：Encrypt=MD5 前 15 字节 hex；设备ID码=Encrypt(ID+"A")/设备码=Encrypt(ID+"1")
+  /30天码=Encrypt(设备码+"30")/永久码=Encrypt(设备码+"ALL")；计数格 0..839、768 分界；
+  设备码恒 "1" 照抄不修）。两处 kernel32 P/Invoke 按本项目混淆红线显式写
+  `EntryPoint="..."`（行为不变，混淆后不 DllNotFound）；csproj 新增 `System.Management`
+  框架引用（WMI 读 CPU 号，离线可编译）。
+- **界面**：新增 `Views/ActivationForm`（业务+Designer 双文件，原生 WinForms，外观对齐
+  LoginForm：蓝横幅+白面板+蓝主按钮；设备ID/设备码只读+激活码可输+状态行；对不上静默，
+  `ActivatedSuccessfully` 供主窗付费即恢复）；主窗标题栏新增【选项】按钮
+  （三项：语言/主题/软件授权，文本双语；V2.17.1 起下拉改真按钮列表详见上节）；
+  V2.15.1/V2.16.2 的语言/主题独立按钮删除（逻辑原样抽成 `ToggleLanguage()`/`ToggleTheme()`）。
+- **主窗授权链路**：`EnsureIniTemplate()` 启动补空模板 + 1 小时 `LicenseTimer`（挂 components
+  随窗体释放；启动不立即检查）；新设备/过期弹框 + 置灰【系统设置】按钮（=
+  AgingTestSystem 置灰用户权限入口），不阻断启动、不拦生产；【选项】菜单永不置灰
+  （否则进不去授权=死锁）；激活窗输对码关闭后重查状态即时解灰，不用重启。
+- **一键激活脚本**：新增 `tools/auto_activate.ps1`（UTF-8 with BOM）/`.bat`/`.py` 三件套
+  （与 AgingTestSystem 同逻辑，产品名换光阑视界 IrisVision；公式/写盘/回读校验一字不动；
+  另补 `NoPause` 双击不闪退：ps1 原声明了该开关但从未使用）；`.gitignore` 加
+  `MainSetting.ini` + 备份（运行时授权，跟机器，绝不入库）。
+- **回归锁**：`TestRunner` 新增㉑分组 62 条（Encrypt RFC1321 标准向量/公式关系/激活比对/
+  计数格/综合判定/文案/付费即恢复/ini 隔离往返）；`UiProbe` 新增⑤分组 10 条（激活窗
+  只构造不 Show：回填/只读/错码静默/未成功位）。
+
+### 为什么这么改
+
+- 现场多台工控机需要"跟机器"的轻保护（调试期防程序被随意拷贝走），AgingTestSystem
+  的 MD5 授权已跑顺（同一套《获取激活码》工具管两个产品），直接同源落地最省事，
+  不自创第二套算法（两套算法=两套工具=每次签发翻车）。
+- 语言/主题两个独立按钮 + 新增的授权入口会让标题栏挤 4 个按钮，收进"选项"菜单后
+  右侧只剩【系统设置】【选项】，操作员日常只点前者，心智负担更小。
+- 无启动闸/不拦生产是铁律：授权只管"配不配改配置"，绝不能因为没激活让产线停下来
+  （PLC 轮询/相机/扫码照跑，每小时提醒一次）。
+
+### 验证
+
+- 三路同口径实测一致（本机 CPU=178BFBFF00860F01）：C# `Encrypt` 反射调用 vs
+  `auto_activate.py --dry-run` vs `auto_activate.ps1 -DryRun`，设备码/设备ID码/
+  30天码/永久码四码一字不差。
+- 跑 `irisvision-test` skill 全绿：构建 + 回归 601/601 + UI 交互 80/80 + 两轮进程冒烟。
+
 ## V2.16.9（2026-09-17）工程彻底更名 IrisVision（此前 CommandCenter，不兼容旧名）
 
 > 仓库已更名 `IrisVision`（远端 `lq700212/IrisVision.git`），工程侧同步彻底更名：

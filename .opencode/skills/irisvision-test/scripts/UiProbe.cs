@@ -71,6 +71,7 @@ internal static class UiProbe
         TestWindowEditing();
         TestModelIndexForm();
         TestSerialDialogs();
+        TestActivationForm();
     }
 
     // ─────────── 窗口/点位与相机程序配置（WindowPointForm.dgvPrograms）───────────
@@ -627,5 +628,49 @@ internal static class UiProbe
         }
         Check("异常窗读到真码自动关闭", closed2);
         if (!f3.IsDisposed) { f3.Close(); f3.Dispose(); }
+    }
+
+    // ─────────── 软件授权窗（ActivationForm，只构造不 Show）───────────
+    private static void TestActivationForm()
+    {
+        Console.WriteLine();
+        Console.WriteLine("── ⑤ 软件授权窗：构造回填 + 错码静默 + 未成功位 ──");
+
+        var frm = new ActivationForm();
+        try
+        {
+            Check("新窗未激活成功", frm != null && !frm.ActivatedSuccessfully);
+            // RefreshStatus 公开，探针显式触发（OnShown 在 Show 时才走，这里只构造不 Show）
+            frm.RefreshStatus();
+            var fl = typeof(ActivationForm);
+            var txtId = (TextBox)fl.GetField("txtDeviceId",
+                BindingFlags.NonPublic | BindingFlags.Instance).GetValue(frm);
+            var txtCode = (TextBox)fl.GetField("txtDeviceCode",
+                BindingFlags.NonPublic | BindingFlags.Instance).GetValue(frm);
+            var txtAct = (TextBox)fl.GetField("txtActivationCode",
+                BindingFlags.NonPublic | BindingFlags.Instance).GetValue(frm);
+            var lbl = (Label)fl.GetField("lblStatus",
+                BindingFlags.NonPublic | BindingFlags.Instance).GetValue(frm);
+            string cpuId = SoftwareActivation.GetCpuSerialNumber();
+            Eq("设备ID回填本机CPU", cpuId, txtId.Text);
+            Eq("设备码回填方程值", SoftwareActivation.DeviceCode(cpuId), txtCode.Text);
+            Check("设备ID框只读", txtId.ReadOnly);
+            Check("设备码框只读", txtCode.ReadOnly);
+            Check("激活码框可输", !txtAct.ReadOnly);
+            Check("状态行非空且激活口径",
+                lbl.Text != null && lbl.Text.StartsWith("激活状态"));
+            // 错码点激活：静默无操作不抛（与 HJVision 一致；直接调 handler）
+            var actHandler = fl.GetMethod("BtnActivate_Click",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Check("激活handler存在", actHandler != null);
+            if (actHandler != null)
+            {
+                txtAct.Text = "错的激活码";
+                actHandler.Invoke(frm, new object[] { txtAct, EventArgs.Empty });
+                Check("错码不置成功位", !frm.ActivatedSuccessfully);
+            }
+            Check("激活窗全程不崩", true);
+        }
+        finally { if (!frm.IsDisposed) frm.Dispose(); }
     }
 }

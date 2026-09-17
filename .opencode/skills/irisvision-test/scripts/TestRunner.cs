@@ -24,6 +24,8 @@
 //   ⑲ 扫码串口与TCP约定（StopBits/Parity/SendTrigger三态/串口空操作）
 //   ⑳ 杂项（PlaceholderLocalizer中英互逆/ColorFromName/徽标开关/出厂账号/ScanConfig默认/
 //       MES在途上限与空URL/AppTheme剩余分支/I18n事件）
+//   ㉑ 软件授权（V2.17.0：Encrypt方程/公式关系/激活比对/计数格/判定/ini隔离往返）
+//   ㉒ 选项下拉尺寸（V2.17.1：ComputePopupItemSize下限/撑开/钳制/真实文本，纯函数）
 //
 // 【红线】禁止调用 ConfigStore.Load()/Save()——无参版本固定读写 bin\Debug\Config\
 //   appconfig.json，会覆盖开发机现有配置。配置测试只做内存序列化往返。
@@ -119,6 +121,8 @@ internal static class TestRunner
         TestScanSerial();           // ⑲ 扫码串口与TCP约定（无设备）
         TestMisc2();                // ⑳ 杂项（全纯内存/内存控件，I18n/主题状态结尾还原）
         TestAppTheme();           // ⑪ V2.16.2：深色/浅色主题（改全局主题状态，放 I18n 紧前，结尾还原浅色）
+        TestSoftActivation();     // ㉑ V2.17.0 软件授权（AgingTestSystem/HJVision 同源，ini 走隔离目录）
+        TestAboutPopupSize();       // ㉒ V2.17.1 选项下拉尺寸（纯函数，无窗口可跑）
         TestI18n();               // ⑧ 放最后（改全局语言状态）
     }
 
@@ -2101,5 +2105,163 @@ internal static class TestRunner
         I18n.Language = "en-US";
         Eq("en空回落zh", "扫码OK", I18n.T("扫码OK", ""));
         I18n.Language = "zh-CN";
+    }
+
+    // ───────────────────── ㉑ 软件授权（V2.17.0，与 AgingTestSystem/HJVision 同源）────────────────────
+    private static void TestSoftActivation()
+    {
+        Group("㉑ 软件授权 SoftwareActivation（Encrypt 方程/公式关系/激活比对/计数格/判定/ini 隔离往返）");
+        // —— Encrypt 标准向量（RFC1321：MD5("")/MD5("a") 取前 15 字节 hex，锁死算法与工具对版）——
+        Eq("Encrypt空串标准向量", "d41d8cd98f00b204e9800998ecf842", SoftwareActivation.Encrypt(""));
+        Eq("Encrypt(a)标准向量", "0cc175b9c0f1b6a831c399e2697726", SoftwareActivation.Encrypt("a"));
+        Check("Encrypt恒30字符小写hex",
+            SoftwareActivation.Encrypt("178BFBFF00860F01A").Length == 30
+            && SoftwareActivation.Encrypt("178BFBFF00860F01A").All(ch => (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f')));
+        Check("Encrypt稳定", SoftwareActivation.Encrypt("abc1") == SoftwareActivation.Encrypt("abc1"));
+        Eq("常量格总数840", 840, SoftwareActivation.TotalSlots);
+        Eq("常量有效格768", 768, SoftwareActivation.ValidSlots);
+        Eq("ini文件名", "MainSetting.ini", SoftwareActivation.IniFileName);
+        Eq("ini段名", "RunHash", SoftwareActivation.Section);
+
+        // —— 公式关系式（设备ID码/设备码/30天码/永久码/永久标记/30天起点）——
+        const string cpu = "TESTCPU123";
+        string dev = SoftwareActivation.DeviceCode(cpu);
+        Eq("设备ID码=Encrypt(cpu+A)", SoftwareActivation.Encrypt(cpu + "A"), SoftwareActivation.DeviceIdCode(cpu));
+        Eq("设备码=Encrypt(cpu+1)", SoftwareActivation.Encrypt(cpu + "1"), dev);
+        Eq("30天码=Encrypt(设备码+30)", SoftwareActivation.Encrypt(dev + "30"), SoftwareActivation.Code30(dev));
+        Eq("永久码=Encrypt(设备码+ALL)", SoftwareActivation.Encrypt(dev + "ALL"), SoftwareActivation.CodePermanent(dev));
+        Eq("永久标记=Encrypt(cpu+ALL)", SoftwareActivation.Encrypt(cpu + "ALL"), SoftwareActivation.PermanentMark(cpu));
+        Eq("30天起点=Encrypt(cpu+0)", SoftwareActivation.Encrypt(cpu + "0"), SoftwareActivation.TrialStartMark(cpu));
+
+        // —— 激活比对（先永久后30天，错码/空静默）——
+        Eq("对上永久码", SoftwareActivation.ActivationKind.Permanent,
+            SoftwareActivation.VerifyActivationCode(SoftwareActivation.CodePermanent(dev), dev));
+        Eq("对上30天码", SoftwareActivation.ActivationKind.ThirtyDays,
+            SoftwareActivation.VerifyActivationCode(SoftwareActivation.Code30(dev), dev));
+        Eq("错码=None", SoftwareActivation.ActivationKind.None,
+            SoftwareActivation.VerifyActivationCode("错的激活码", dev));
+        Eq("空码=None", SoftwareActivation.ActivationKind.None,
+            SoftwareActivation.VerifyActivationCode("", dev));
+        Eq("null码=None", SoftwareActivation.ActivationKind.None,
+            SoftwareActivation.VerifyActivationCode(null, dev));
+        Eq("空设备码=None", SoftwareActivation.ActivationKind.None,
+            SoftwareActivation.VerifyActivationCode(SoftwareActivation.CodePermanent(dev), ""));
+
+        // —— 设备绑定（对上/错位/空=新设备）——
+        Check("绑定对上", SoftwareActivation.IsDeviceBound(SoftwareActivation.DeviceIdCode(cpu), cpu));
+        Check("绑定错位", !SoftwareActivation.IsDeviceBound(SoftwareActivation.DeviceIdCode("OTHER"), cpu));
+        Check("绑定空串", !SoftwareActivation.IsDeviceBound("", cpu));
+        Check("绑定null", !SoftwareActivation.IsDeviceBound(null, cpu));
+
+        // —— 计数格（0/767/839找到，840外/乱串找不到；768分界）——
+        Eq("0格找到", 0, SoftwareActivation.FindSlot(SoftwareActivation.Encrypt(cpu + "0"), cpu));
+        Eq("767格找到", 767, SoftwareActivation.FindSlot(SoftwareActivation.Encrypt(cpu + "767"), cpu));
+        Eq("768格找到（无效格但找得到）", 768, SoftwareActivation.FindSlot(SoftwareActivation.Encrypt(cpu + "768"), cpu));
+        Eq("839格找到", 839, SoftwareActivation.FindSlot(SoftwareActivation.Encrypt(cpu + "839"), cpu));
+        Eq("840格外找不到", -1, SoftwareActivation.FindSlot(SoftwareActivation.Encrypt(cpu + "840"), cpu));
+        Eq("乱串找不到", -1, SoftwareActivation.FindSlot("zzz_not_a_slot", cpu));
+        Eq("空串找不到", -1, SoftwareActivation.FindSlot("", cpu));
+        Eq("null找不到", -1, SoftwareActivation.FindSlot(null, cpu));
+        Check("0格有效", SoftwareActivation.IsSlotValid(0));
+        Check("767格有效", SoftwareActivation.IsSlotValid(767));
+        Check("768格无效", !SoftwareActivation.IsSlotValid(768));
+        Check("-1无效", !SoftwareActivation.IsSlotValid(-1));
+        Eq("0格30天", 30, SoftwareActivation.SlotDaysLeft(0));
+        Eq("24格29天", 29, SoftwareActivation.SlotDaysLeft(24));
+
+        // —— 综合判定（新设备/永久/试用/768过期/找不到过期）+ 四档文案 + 付费即恢复 ——
+        int slot, days;
+        Eq("绑定+永久=永久", SoftwareActivation.ActivationStatus.Permanent,
+            SoftwareActivation.ComputeStatus(SoftwareActivation.DeviceIdCode(cpu),
+                SoftwareActivation.PermanentMark(cpu), cpu, out slot, out days));
+        Eq("绑定+0格=试用", SoftwareActivation.ActivationStatus.InTrial,
+            SoftwareActivation.ComputeStatus(SoftwareActivation.DeviceIdCode(cpu),
+                SoftwareActivation.Encrypt(cpu + "0"), cpu, out slot, out days));
+        Eq("试用剩余30天", 30, days);
+        Eq("绑定+767格=试用", SoftwareActivation.ActivationStatus.InTrial,
+            SoftwareActivation.ComputeStatus(SoftwareActivation.DeviceIdCode(cpu),
+                SoftwareActivation.Encrypt(cpu + "767"), cpu, out slot, out days));
+        Eq("绑定+768格=过期", SoftwareActivation.ActivationStatus.Expired,
+            SoftwareActivation.ComputeStatus(SoftwareActivation.DeviceIdCode(cpu),
+                SoftwareActivation.Encrypt(cpu + "768"), cpu, out slot, out days));
+        Eq("绑定+乱串=过期", SoftwareActivation.ActivationStatus.Expired,
+            SoftwareActivation.ComputeStatus(SoftwareActivation.DeviceIdCode(cpu),
+                "zzz", cpu, out slot, out days));
+        Eq("错位=新设备", SoftwareActivation.ActivationStatus.NewDevice,
+            SoftwareActivation.ComputeStatus("wrong", SoftwareActivation.PermanentMark(cpu), cpu, out slot, out days));
+        Eq("空=新设备", SoftwareActivation.ActivationStatus.NewDevice,
+            SoftwareActivation.ComputeStatus("", "", cpu, out slot, out days));
+        Eq("永久文案", "激活状态: 永久使用",
+            SoftwareActivation.StatusText(SoftwareActivation.ActivationStatus.Permanent, -1, 0));
+        Check("试用文案含天数",
+            SoftwareActivation.StatusText(SoftwareActivation.ActivationStatus.InTrial, 0, 30).Contains("30"));
+        Eq("新设备文案", "激活状态: 未绑定设备",
+            SoftwareActivation.StatusText(SoftwareActivation.ActivationStatus.NewDevice, -1, 0));
+        Eq("过期文案", "激活状态: 软件已过期",
+            SoftwareActivation.StatusText(SoftwareActivation.ActivationStatus.Expired, -1, 0));
+        Check("永久应恢复", SoftwareActivation.ShouldRestoreUserPermission(SoftwareActivation.ActivationStatus.Permanent));
+        Check("试用应恢复", SoftwareActivation.ShouldRestoreUserPermission(SoftwareActivation.ActivationStatus.InTrial));
+        Check("新设备不恢复", !SoftwareActivation.ShouldRestoreUserPermission(SoftwareActivation.ActivationStatus.NewDevice));
+        Check("过期不恢复", !SoftwareActivation.ShouldRestoreUserPermission(SoftwareActivation.ActivationStatus.Expired));
+
+        // —— ini 隔离往返（显式 path，不碰真实 MainSetting.ini；finally 删隔离目录）——
+        string isoDir = Path.Combine(Path.GetTempPath(), "IrisVisionAct_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(isoDir);
+        string isoIni = Path.Combine(isoDir, "MainSetting.ini");
+        try
+        {
+            Eq("缺文件读空", "", SoftwareActivation.ReadValueFrom(isoIni, SoftwareActivation.KeyDevice));
+            SoftwareActivation.EnsureIniTemplateTo(isoIni);
+            Check("缺文件建出模板", File.Exists(isoIni));
+            string t1, t2;
+            SoftwareActivation.ReadRunHashFrom(isoIni, out t1, out t2);
+            Eq("模板两键读空", "", t1 + t2);
+            SoftwareActivation.WriteValueTo(isoIni, SoftwareActivation.KeyDevice, SoftwareActivation.DeviceIdCode(cpu));
+            SoftwareActivation.WriteValueTo(isoIni, SoftwareActivation.KeyRuntime, SoftwareActivation.Encrypt(cpu + "5"));
+            SoftwareActivation.ReadRunHashFrom(isoIni, out t1, out t2);
+            Eq("双键写读往返RunHash1", SoftwareActivation.DeviceIdCode(cpu), t1);
+            Eq("推进格5找回5", 5, SoftwareActivation.FindSlot(t2, cpu));
+            SoftwareActivation.EnsureIniTemplateTo(isoIni);
+            SoftwareActivation.ReadRunHashFrom(isoIni, out t1, out t2);
+            Eq("已有不覆盖", SoftwareActivation.DeviceIdCode(cpu), t1);
+            Eq("永久组合判定", SoftwareActivation.ActivationStatus.Permanent,
+                SoftwareActivation.ComputeStatus(SoftwareActivation.DeviceIdCode(cpu),
+                    SoftwareActivation.PermanentMark(cpu), cpu, out slot, out days));
+        }
+        finally { try { Directory.Delete(isoDir, true); } catch { } }
+        Check("隔离目录已清理", !Directory.Exists(isoDir));
+    }
+
+    // ───────────────────── ㉒ 选项下拉尺寸（V2.17.1 真按钮列表＋V2.17.2 等宽收紧）────────────────────
+    private static void TestAboutPopupSize()
+    {
+        Group("㉒ 选项下拉选项格 ComputePopupItemSize（宽恒=按钮宽＋高下限＋非法钳制）");
+        // 短文本→按钮尺寸原样（选项字再短也不比按钮小，对齐风格）
+        Size a = MainForm.ComputePopupItemSize(88, 30, 50, 16);
+        Eq("短文本宽=按钮宽", 88, a.Width);
+        Eq("短文本高=按钮高", 30, a.Height);
+        // V2.17.2 等宽收紧：长文本也不撑开（与 AgingTestSystem 区别点；文本靠人工控短，
+        // harness AboutProbe 实拍验收裁字，这里只锁尺寸语义）
+        Size b = MainForm.ComputePopupItemSize(88, 30, 200, 16);
+        Eq("长文本宽仍=按钮宽", 88, b.Width);
+        Eq("长文本高仍下限", 30, b.Height);
+        // 高文本撑高：文高40＋纵边距10
+        Size c = MainForm.ComputePopupItemSize(88, 30, 50, 40);
+        Eq("高文本宽仍下限", 88, c.Width);
+        Eq("高文本撑高", 50, c.Height);
+        // 非法输入钳制（手改/异常不炸，后续布局不出现 0 宽窗）
+        Size d = MainForm.ComputePopupItemSize(0, 0, -20, -20);
+        Eq("非法钳宽≥1", 1, d.Width);
+        Eq("非法钳高≥1", 1, d.Height);
+        // 真实场景：当前最长英文项"Activation"（微软雅黑9，与按钮同字体）实测，
+        // 宽度恒=按钮宽（防回退到撑开），高度=下限（单行装得下，不换行）
+        using (var f = new Font("微软雅黑", 9F))
+        {
+            Size need = TextRenderer.MeasureText("Activation", f);
+            Size e = MainForm.ComputePopupItemSize(88, 30, need.Width, need.Height);
+            Eq("真实文本宽=按钮宽", 88, e.Width);
+            Eq("真实文本高=按钮高", 30, e.Height);
+            Check("真实文本装得下（实测+边距≤88）", need.Width + 8 <= 88);
+        }
     }
 }

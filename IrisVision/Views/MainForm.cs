@@ -16,7 +16,8 @@ namespace IrisVision.Views
     /// 控制中心主窗体。
     /// 【界面布局】
     /// ┌───────────────────────────────────────────────────────────────────┐
-    /// │ 产品型号:[cmbModel▾] 序列号:[框][人工补录] | 总数:0 | [OK] | [NG] | [系统设置][中/英][深/浅色] │
+    /// │ 产品型号:[cmbModel▾] 序列号:[框][人工补录] | 总数:0 | [OK] | [NG] | [系统设置][选项▾] │
+    /// │   （选项下拉：语言/主题/软件授权真按钮列表，V2.17.1 对齐 AgingTestSystem；   │
     /// │                                        ●PLC ●扫码枪 ●上相机 ●下相机 │
     /// │（相机灯/下拉显示配置名称：有名称显名称，无名称回退"相机N"即序号；      │
     /// │  ≤2台相机名限长10字符超出"…"截断、灯宽自适应，悬停看完整名/IP/状态；  │
@@ -73,8 +74,7 @@ namespace IrisVision.Views
         private int[] _camOverviewOrder;            // ≥3台模式下拉项排序映射：下拉项下标 i → 相机下标（掉线相机排最前，V2.15.16）
         private Panel _pnlCamOverview;              // ≥3台模式的容器：装下拉框统一垂直居中（V2.15.16 起只剩下拉框，无总标签）
         private ToolTip _camTip;                    // 相机下拉框的悬停明细提示（列出每台相机连/断）
-        private ToolTip _langTip;                   // 语言切换按钮的悬停提示（V2.15.1，惰性创建）
-        private ToolTip _themeTip;                  // 主题切换按钮的悬停提示（V2.16.2，惰性创建）
+        private ToolTip _aboutTip;                  // 选项按钮的悬停提示（V2.17.0，惰性创建）
         private ToolTip _plcTip;                    // PLC 灯悬停提示（说明三态灯当前含义，V1.12.11）
         private bool _modelComboInit;     // 型号下拉程序内初始化/刷新时防误触 SelectedIndexChanged
         private bool _modelComboWired;    // 型号下拉事件是否已挂线（构造与热更都会走 InitModelCombo，只挂一次）
@@ -103,6 +103,12 @@ namespace IrisVision.Views
 
         // 统计
         private int _total, _ok, _ng;
+
+        // 授权计时器（V2.17.0，Windows.Forms.Timer，挂 components 随窗体自动释放）：
+        // 与 AgingTestSystem 的 hashTimer 一致，1 小时一格；新设备/过期弹框 + 置灰
+        // 【系统设置】按钮（= 那边的用户权限入口），不阻断启动、不拦生产；
+        // 【选项】按钮永不置灰（置灰了就进不去软件授权=死锁）。
+        private System.Windows.Forms.Timer _licenseTimer;
 
         // 序列号"人工补录"按钮悬停提示（V2.15.0 国际化：切语言时刷新文本，故存为字段）
         private ToolTip _serialTip;
@@ -237,47 +243,19 @@ namespace IrisVision.Views
             // ③ 设置按钮事件（设计器只做外观，交互在这里挂线，只挂一次）
             btnSettings.Click += (s, e) => OpenSettings();
 
-            // ③' 语言切换按钮（V2.15.1 从设置窗体移到标题栏）：点击直接切换中/英文，
-            //    立即热生效（I18n.Language 触发 LanguageChanged → ApplyLanguage 全量刷新）并写盘持久化。
-            //    按钮文本 = 目标语言名，由 ApplyLanguage() 设置（见 btnToggleLanguage 处理）。
-            btnToggleLanguage.Click += (s, e) =>
-            {
-                _config.Language = (I18n.Language == "en-US") ? "zh-CN" : "en-US";
-                I18n.Language = _config.Language;
-                // V2.15.2：写盘失败不弹未处理异常——语言切换已即时生效（内存 + 界面），
-                // 落盘只影响"重启后是否保持"，失败仅记日志 + 双语提示，绝不中断操作。
-                // （ConfigStore.Save 内部 catch 后 throw，必须在这里兜住。）
-                try { ConfigStore.Save(_config); }
-                catch (Exception ex)
-                {
-                    LogHelper.Warn("语言切换：配置写盘失败（重启后可能恢复原语言）" + ex.Message);
-                    MessageBox.Show(
-                        I18n.T("界面语言已切换，但配置保存失败，重启后可能恢复原语言。",
-                               "Language switched, but saving config failed; it may revert after restart."),
-                        I18n.T("提示", "Notice"),
-                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-            };
+            // ③' 选项按钮（V2.17.0；V2.17.1 起下拉改真按钮列表，见 ShowAboutMenu）：
+            // 点【选项】弹下拉（语言/主题/软件授权）。此前 V2.15.1/V2.16.2 是标题栏两个
+            // 独立切换按钮，现收进下拉，标题栏更干净。切换逻辑抽成独立方法，直挂下拉项。
+            btnAbout.Click += (s, e) => ShowAboutMenu();
 
-            // ③'' 主题切换按钮（V2.16.2 深色模式，位于语言按钮右侧标题栏最右）：
-            //    点击直接切换深/浅色，立即热生效（AppTheme.Theme 触发 ThemeChanged → ApplyTheme
-            //    全量重刷）并写盘持久化。按钮文本 = 目标主题名，由 ApplyLanguage() 设置。
-            //    写盘失败处理与语言按钮同策略：已即时生效，只影响重启保持，记日志+双语提示。
-            btnToggleTheme.Click += (s, e) =>
-            {
-                _config.Theme = AppTheme.IsDark ? AppTheme.Light : AppTheme.Dark;
-                AppTheme.Theme = _config.Theme;
-                try { ConfigStore.Save(_config); }
-                catch (Exception ex)
-                {
-                    LogHelper.Warn("主题切换：配置写盘失败（重启后可能恢复原主题）" + ex.Message);
-                    MessageBox.Show(
-                        I18n.T("界面主题已切换，但配置保存失败，重启后可能恢复原主题。",
-                               "Theme switched, but saving config failed; it may revert after restart."),
-                        I18n.T("提示", "Notice"),
-                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-            };
+            // ③'' 软件授权计时器（V2.17.0，与 AgingTestSystem 的 hashTimer 一致：1 小时一格）：
+            // 先补空模板（缺文件才建，已有激活绝不覆盖），再启动。启动时不立即检查
+            // （新机启动无弹窗，1 小时后首检才提醒，与那边一致）。
+            SoftwareActivation.EnsureIniTemplate();
+            _licenseTimer = new System.Windows.Forms.Timer(this.components);
+            _licenseTimer.Interval = 3600000;
+            _licenseTimer.Tick += LicenseTimer_Tick;
+            _licenseTimer.Start();
 
             // ④ 序列号框交互（V2.14.6 恢复弹窗，替代 V1.12.19 框内直录）：lblSerial 只读展示框
             //    （扫码枪收码自动填充，OnSerialScanned 直接覆盖文本），手动补录/改 SN 用点右侧
@@ -742,9 +720,10 @@ namespace IrisVision.Views
             ApplyConfigVisibility();
 
             // 排布顺序固定：产品前缀 → 型号下拉(V2.8) → 序列号标题 → 序列号框 → 人工补录按钮(V2.14.6)
-            // → | → 总数 → OK → NG → | → 系统设置按钮 → 语言切换按钮(V2.15.1) → 主题按钮(V2.16.2，最右)
+            // → | → 总数 → OK → NG → | → 系统设置按钮 → 选项按钮(V2.17.0，最右；
+            // 此前 V2.15.1/V2.16.2 的语言/主题独立按钮已收进选项下拉菜单）
             Control[] seq = { lblProductPrefix, cmbModel, lblSerialTitle, lblSerial, btnManualSerial,
-                              lblSep1, lblTotal, lblOk, lblNg, lblSep2, btnSettings, btnToggleLanguage, btnToggleTheme };
+                              lblSep1, lblTotal, lblOk, lblNg, lblSep2, btnSettings, btnAbout };
 
             // 右侧 Dock 区（PLC 灯 + 相机聚拢容器）占用的总宽：Dock.Right 控件从右往左叠，
             // 每个控件之间留 6px 视觉间距（间距是内在间距，宽幅估算 ±几像素不影响正确性）。
@@ -1204,6 +1183,9 @@ namespace IrisVision.Views
                 // 清理服务。任何一步异常都不能中断关窗，否则程序会卡在关闭流程（进程退出不了）。
                 // 关窗顺序：先停心跳/编排，再断设备；各服务 Dispose 均已限时抢锁 + 锁外强断网，
                 // 这里再做一层兜底 catch，保证即使个别服务释放出问题，窗口也能正常关闭退出。
+                // V2.17.0：授权计时器挂 components 随窗体自动释放，这里只需停（防关窗瞬间再弹框）。
+                try { if (_licenseTimer != null) _licenseTimer.Stop(); }
+                catch (Exception ex) { LogHelper.Warn("关闭：授权计时器停止异常 " + ex.Message); }
                 try { _monitor?.Dispose(); }
                 catch (Exception ex) { LogHelper.Warn("关闭：监控器释放异常 " + ex.Message); }
                 try { _coordinator?.Dispose(); }
@@ -1673,16 +1655,13 @@ namespace IrisVision.Views
                 "Model") + ":";
             lblSerialTitle.Text = I18n.T("序列号:", "Serial:");
             btnSettings.Text = I18n.T("系统设置", "Settings");
-            // 语言切换按钮文本 = 目标语言名（点击后界面切到该语言），语言名本身不翻译、自解释：
-            // 中文界面显示 "English"（点一下变英文）、英文界面显示 "中文"（点一下变中文）。
-            btnToggleLanguage.Text = (I18n.Language == "en-US") ? "中文" : "English";
-            _langTip = _langTip ?? new ToolTip();
-            _langTip.SetToolTip(btnToggleLanguage, I18n.T("点击切换界面语言（立即生效并保存）",
-                "Click to switch UI language (applies & saves immediately)"));
-            // 主题切换按钮文本 = 目标主题名（与语言按钮同策略，自解释），见 RefreshThemeButtonText。
-            // 【V2.16.3】抽成独立方法：切语言（ApplyLanguage）与切主题（ApplyTheme）两条路径都要刷，
-            // 此前只在 ApplyLanguage 里设，切主题走 ThemeChanged→ApplyTheme 不经过这里，文本永远不变。
-            RefreshThemeButtonText();
+            // 选项按钮（V2.17.0）+ 悬停提示：下拉三项文本不在这里设——
+            // V2.17.1 起下拉是每次打开现拼的真按钮列表（见 ShowAboutMenu），切语言/切主题
+            // 都不用同步菜单文字，V2.16.3 的"两条路径都要刷"在此终结，RefreshThemeButtonText 已删。
+            btnAbout.Text = I18n.T("选项", "Options");
+            _aboutTip = _aboutTip ?? new ToolTip();
+            _aboutTip.SetToolTip(btnAbout, I18n.T("语言 / 主题 / 软件授权",
+                "Language / Theme / Software Activation"));
             btnManualSerial.Text = I18n.T("人工补录", "Manual");
             lblScannerStatus.Text = I18n.T("● 扫码枪", "● Scanner");
             // V2.16.5 品牌更名：中文界面标题"光阑视界"、英文界面"IrisVision"
@@ -1730,26 +1709,7 @@ namespace IrisVision.Views
         }
 
         /// <summary>
-        /// 刷新主题切换按钮的文本与悬停（V2.16.3 从 ApplyLanguage 抽出独立）：
-        /// 文本 = 目标主题名（与语言按钮同策略，自解释）——浅色界面显示"深色/Dark"
-        /// （点一下变深）、深色界面显示"浅色/Light"（点一下变浅）。
-        /// 【为什么必须独立】切语言（ApplyLanguage）与切主题（ApplyTheme）都会改变这个按钮
-        /// 该显示什么：切语言换中英文案、切主题换深浅目标。V2.16.2 只在 ApplyLanguage 里设，
-        /// 切主题走 ThemeChanged→ApplyTheme 不经过，文本永远停在旧值（"固定为浅色"bug 根因）。
-        /// 独立后两处都调，绝不漂移。注意 AppTheme.ApplyTo 不碰按钮文本内容（只保白字），
-        /// 所以在 ApplyTo 前后调都安全，本方法放在 ApplyTheme 末尾调用。
-        /// </summary>
-        private void RefreshThemeButtonText()
-        {
-            if (IsDisposed || btnToggleTheme == null) return;
-            btnToggleTheme.Text = AppTheme.IsDark ? I18n.T("浅色", "Light") : I18n.T("深色", "Dark");
-            _themeTip = _themeTip ?? new ToolTip();
-            _themeTip.SetToolTip(btnToggleTheme, I18n.T("点击切换深色/浅色主题（立即生效并保存）",
-                "Click to switch dark/light theme (applies & saves immediately)"));
-        }
-
-        /// <summary>
-        /// 主界面全量主题刷新（V2.16.2 深色模式；V2.16.3 补刷主题按钮文本）：按当前 AppTheme 重刷整窗配色。
+        /// 主界面全量主题刷新（V2.16.2 深色模式）：按当前 AppTheme 重刷整窗配色。
         /// 调用时机：① 构造末尾（按配置主题初始化）；② AppTheme.ThemeChanged 事件（点主题按钮实时生效）；
         /// ③ ApplyRuntimeConfig 热更末尾（重建后新控件复位）。仅 UI 线程调用。
         /// 通用上色走 AppTheme.ApplyTo（递归整树，语义色自动保留），本方法只补"层级色"：
@@ -1761,9 +1721,6 @@ namespace IrisVision.Views
         {
             if (IsDisposed) return;
             AppTheme.ApplyTo(this);
-
-            // V2.16.3：切主题后按钮文本必须同步翻转（目标主题名），否则文本永远停在旧值。
-            RefreshThemeButtonText();
 
             // 层级色恢复（浅色像素级对齐历史，通用规则覆盖不到这么细）。
             this.BackColor = AppTheme.Background;
@@ -1842,13 +1799,335 @@ namespace IrisVision.Views
         }
 
         /// <summary>
-        /// 打开系统设置：保存后写盘并热生效（V1.6.0 起免重启）。
+        /// 选项菜单：语言切换（V2.15.1 起独立按钮，V2.17.0 起收进"选项"菜单）。
+        /// 点击直接切换中/英文，立即热生效（I18n.Language 触发 LanguageChanged →
+        /// ApplyLanguage 全量刷新）并写盘持久化。
+        /// </summary>
+        private void ToggleLanguage()
+        {
+            _config.Language = (I18n.Language == "en-US") ? "zh-CN" : "en-US";
+            I18n.Language = _config.Language;
+            // V2.15.2：写盘失败不弹未处理异常——语言切换已即时生效（内存 + 界面），
+            // 落盘只影响"重启后是否保持"，失败仅记日志 + 双语提示，绝不中断操作。
+            // （ConfigStore.Save 内部 catch 后 throw，必须在这里兜住。）
+            try { ConfigStore.Save(_config); }
+            catch (Exception ex)
+            {
+                LogHelper.Warn("语言切换：配置写盘失败（重启后可能恢复原语言）" + ex.Message);
+                MessageBox.Show(
+                    I18n.T("界面语言已切换，但配置保存失败，重启后可能恢复原语言。",
+                           "Language switched, but saving config failed; it may revert after restart."),
+                    I18n.T("提示", "Notice"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        /// <summary>
+        /// 选项菜单：主题切换（V2.16.2 起独立按钮，V2.17.0 起收进"选项"菜单）。
+        /// 点击直接切换深/浅色，立即热生效（AppTheme.Theme 触发 ThemeChanged → ApplyTheme
+        /// 全量重刷）并写盘持久化。写盘失败处理与语言切换同策略。
+        /// </summary>
+        private void ToggleTheme()
+        {
+            _config.Theme = AppTheme.IsDark ? AppTheme.Light : AppTheme.Dark;
+            AppTheme.Theme = _config.Theme;
+            try { ConfigStore.Save(_config); }
+            catch (Exception ex)
+            {
+                LogHelper.Warn("主题切换：配置写盘失败（重启后可能恢复原主题）" + ex.Message);
+                MessageBox.Show(
+                    I18n.T("界面主题已切换，但配置保存失败，重启后可能恢复原主题。",
+                           "Theme switched, but saving config failed; it may revert after restart."),
+                    I18n.T("提示", "Notice"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        /// <summary>
+        /// 点【选项】按钮 → 在按钮下方弹出下拉（V2.17.0；V2.17.1 起改真按钮列表）。
+        /// 三项文本每次打开现拼——只显示"目标名"（V2.17.2 去前缀：`English`/`深色`/`软件授权`，
+        /// 点一下去哪一目了然；此前"语言：English"在 88 宽按钮里被挤成两行，harness 实拍抓获）。
+        /// 选项宽恒＝按钮宽（88），文本必须短到装得下，加长前先跑 AboutProbe harness 看裁字。
+        /// 切语言/切主题后不用同步菜单文字（对照 AgingTestSystem"关于"下拉："文字永远表示
+        /// 下一次去哪，菜单每次打开现拼"）。样式见 ShowDropdownPopup（与主按钮同款蓝底白字）。
+        /// </summary>
+        private void ShowAboutMenu()
+        {
+            if (IsDisposed || btnAbout == null) return;
+            string langText = (I18n.Language == "en-US") ? "中文" : "English";
+            string themeText = AppTheme.IsDark
+                ? I18n.T("浅色", "Light")
+                : I18n.T("深色", "Dark");
+            string licenseText = I18n.T("软件授权", "Activation");
+            // 三项直拼（文本与点击处理一一对应，顺序=显示顺序），一次调用弹出。
+            var items = new List<(string Text, EventHandler ClickHandler)>();
+            items.Add((langText, (s, e) => ToggleLanguage()));
+            items.Add((themeText, (s, e) => ToggleTheme()));
+            items.Add((licenseText, (s, e) => OpenActivation()));
+            ShowDropdownPopup(btnAbout, items.ToArray());
+        }
+
+        /// <summary>下拉选项纵向内边距（原生 Button 上下边框约 4px，余量不足字贴边即被裁）。</summary>
+        private const int PopupItemVPad = 10;
+
+        /// <summary>
+        /// 下拉选项格尺寸（纯函数，V2.17.1 对齐 AgingTestSystem `ComputePopupItemSize` 口径，
+        /// V2.17.2 收紧宽度：选项宽恒＝按钮宽）。
+        /// 用户要求选项与按钮等宽对齐（harness 实拍验收），文本再长也不撑开——与那边
+        /// "max(按钮, 文＋边距)" 的区别仅此一处：`maxTextW` 参数保留（签名与那边同源，
+        /// 将来选项字变长想回撑开时直接改回一行），当前不参与计算。
+        /// 高仍取 max（同字体下文本高不可能超按钮高，实际恒＝按钮高；留 max 防极端字体）。
+        /// 约束：选项文本必须人工控短（当前最长英文界面 "Activation" 实测约 70px，
+        /// 中文界面"软件授权"约 48px，88 宽刚好装下），加长文本前先跑 AboutProbe
+        /// harness 看裁字，不许悄悄加长。
+        /// </summary>
+        /// <param name="hostW">主按钮宽（＝选项宽，用户要求的对齐线）</param>
+        /// <param name="hostH">主按钮高（下限）</param>
+        /// <param name="maxTextW">各选项文本实测最大宽（保留未用，见上）</param>
+        /// <param name="textH">选项文本实测高（单行，各项同高取最大）</param>
+        /// <returns>选项格尺寸（宽＝hostW、高≥1；列宽＝W、行高＝H、窗高＝H×项数）</returns>
+        /// public 供回归用例直接调（纯函数，无窗口可测；对照那边 public 口径）。
+        public static Size ComputePopupItemSize(int hostW, int hostH, int maxTextW, int textH)
+        {
+            int w = hostW;
+            int h = Math.Max(hostH, textH + PopupItemVPad);
+            if (w < 1) w = 1;
+            if (h < 1) h = 1;
+            return new Size(w, h);
+        }
+
+        /// <summary>
+        /// 主按钮下方弹下拉（无边框窗体＋真 Button 列表；V2.17.1 对齐 AgingTestSystem
+        /// `ShowDropdownPopup` 口径，不用系统 ContextMenuStrip 是为了和主按钮对齐风格）：
+        /// 选项按钮蓝底白字/字体/尺寸与主按钮一致（尺寸只当下限＋文本实测撑开，
+        /// 原生按钮边框厚、等尺寸硬套会裁字）；点选项/失焦/Esc 关窗。
+        /// 适配说明（相对那边）：本项目按钮是原生 Button（非 SunnyUI），底色/字色/字体
+        /// 直接读主按钮属性，不走 ThemeManager；弹出窗无裸露底（ClientSize 精确＝按钮总和），
+        /// 仍把窗体底设成同色兜底。
+        /// </summary>
+        /// <param name="hostButton">触发下拉的主按钮：下拉显示在按钮下方（兼选项样式唯一来源）</param>
+        /// <param name="items">下拉项数组（文本＋点击处理，顺序＝显示顺序）</param>
+        private void ShowDropdownPopup(Control hostButton, (string Text, EventHandler ClickHandler)[] items)
+        {
+            // ===== 1. 创建弹出窗体（无边框） =====
+            var popup = new Form
+            {
+                FormBorderStyle = FormBorderStyle.None,  // 无边框
+                StartPosition = FormStartPosition.Manual, // 手动指定位置
+                ShowInTaskbar = false,                   // 不在任务栏显示
+                KeyPreview = true,                       // 允许接收按键（按 Esc 关闭）
+                // 禁自动缩放：下面 ClientSize/行高列宽全是运行时物理像素
+                // （hostButton.Width/Height），再跟缩一次就和主按钮对不上。
+                // 纯代码窗体＋全显式尺寸，AutoScaleMode.None 即正确值。
+                AutoScaleMode = AutoScaleMode.None,
+                // MinimumSize 破 Windows 最小跟踪宽度（min-track 136px）：
+                // 边框 None 的窗体窄于 136 会被系统钳到 136（那边 harness 二分实锤），
+                // MinimumSize=(1,1) 让 WinForms 接管 MINMAXINFO（(0,0) 不接管照样被钳），
+                // 本下拉宽 88 起步，必须加这行才能精确落地。
+                MinimumSize = new Size(1, 1),
+                BackColor = hostButton.BackColor,        // 无裸露底，仍同色兜底
+            };
+
+            // ===== 2. 计算弹出窗体尺寸 =====
+            // 选项格＝按钮宽（V2.17.2 用户要求等宽对齐）× ComputePopupItemSize 算出的行高；
+            // 文本仍实测（行高要它；列宽已恒＝按钮宽，maxTextW 暂不用、签名保留将来回撑）。
+            // 字体与主按钮同源（下面 Font = hostButton.Font），字号一处调、两处跟。
+            int maxTextW = 0;
+            int textH = 0;
+            foreach (var it in items)
+            {
+                Size need = TextRenderer.MeasureText(it.Text, hostButton.Font);
+                if (need.Width > maxTextW) maxTextW = need.Width;
+                if (need.Height > textH) textH = need.Height;
+            }
+            Size itemSize = ComputePopupItemSize(hostButton.Width, hostButton.Height, maxTextW, textH);
+            int itemWidth = itemSize.Width;
+            int itemHeight = itemSize.Height;
+            popup.ClientSize = new Size(itemWidth, itemHeight * items.Length);
+
+            // ===== 3. TableLayoutPanel 垂直排列选项按钮 =====
+            var layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = items.Length,
+                Padding = new Padding(0),
+                Margin = new Padding(0)
+            };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, itemWidth));
+            for (int i = 0; i < items.Length; i++)
+            {
+                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, itemHeight));
+            }
+
+            // ===== 4. 每个下拉项一个真按钮（样式和主按钮一致） =====
+            for (int i = 0; i < items.Length; i++)
+            {
+                var item = items[i];
+                var btn = new Button
+                {
+                    Text = item.Text,               // 下拉项文本
+                    Dock = DockStyle.Fill,          // 填满单元格
+                    Margin = new Padding(0),        // 无外边距，紧贴相邻项
+                    BackColor = hostButton.BackColor, // 继承主按钮底色（品牌蓝）
+                    ForeColor = hostButton.ForeColor, // 继承主按钮字色（白）
+                    FlatStyle = FlatStyle.Flat,     // 扁平化（与主按钮一致）
+                    Cursor = Cursors.Hand,          // 悬停手型
+                    Font = hostButton.Font          // 继承主按钮字体（只引用不 new，不泄漏）
+                };
+                btn.FlatAppearance.BorderSize = 0;  // 无边框（与主按钮一致）
+
+                // 点选项：先关弹出窗，再执行业务。循环变量先抄到局部，
+                // 避免闭包捕获同一个 i（C#5 之前 foreach 经典坑，这里顺手防住）。
+                var capturedItem = item;
+                btn.Click += (s, e) =>
+                {
+                    popup.Close();
+                    capturedItem.ClickHandler(s, e);
+                };
+                layout.Controls.Add(btn, 0, i);
+            }
+            popup.Controls.Add(layout);
+
+            // ===== 5. 弹出位置：主按钮下方左对齐 =====
+            popup.Location = hostButton.PointToScreen(new Point(0, hostButton.Height));
+
+            // ===== 6. 自动关闭：失焦关 / Esc 关 / 关窗解绑＋释放 =====
+            EventHandler deactivateHandler = null;
+            deactivateHandler = (s, e) => { popup.Close(); };
+            popup.Deactivate += deactivateHandler;
+            KeyEventHandler keyDownHandler = null;
+            keyDownHandler = (s, e) =>
+            {
+                if (e.KeyCode == Keys.Escape) popup.Close();
+            };
+            popup.KeyDown += keyDownHandler;
+            // 关窗时取消订阅（避免闭包持有 popup 引用泄漏）＋ Dispose（非模态 Close 不释放）。
+            popup.FormClosed += (s, e) =>
+            {
+                popup.Deactivate -= deactivateHandler;
+                popup.KeyDown -= keyDownHandler;
+                popup.Dispose();
+            };
+
+            // ===== 7. 非模态弹出（不阻塞主窗体；owner 传主窗，失焦关闭才可靠） =====
+            popup.Show(this);
+        }
+
+        /// <summary>
+        /// 选项菜单 → 软件授权（V2.17.0，与 AgingTestSystem【关于→软件授权】对等）。
+        /// 激活无需任何权限，人人可开（未激活被置灰的是【系统设置】，本入口永不置灰，
+        /// 否则进不去授权=死锁）。付费即恢复：弹窗里输对一次码关闭后，重读一次 ini，
+        /// 状态有效就把系统设置按钮解灰，不用重启（打开看看/输错不触发重查）。
+        /// </summary>
+        private void OpenActivation()
+        {
+            if (IsDisposed) return;
+            bool activated;
+            using (var form = new ActivationForm())
+            {
+                form.ShowDialog(this);
+                activated = form.ActivatedSuccessfully;
+            }
+            if (!activated) return;
+            RefreshActivationPermissionState();
+        }
+
+        /// <summary>
+        /// 激活成功后重查并解灰（付费即恢复的落点）。
+        /// <para>做什么：重读 RunHash 双键 + 重算状态，有效（永久/试用中）就解灰系统设置按钮。</para>
+        /// <para>为什么这么写：计时器置灰后本轮不自动恢复；这里只认重算出的状态
+        /// （不认弹窗的标记本身），新设备即使写过 RunHash2 也依然是新设备、不会被误解灰；
+        /// 过期机用 30 天码回到试用中则正常解灰。</para>
+        /// <para>怎么改：恢复规则只认 <see cref="Services.SoftwareActivation.ShouldRestoreUserPermission"/>，
+        /// 不要在这里另写一套状态判断；失败一律静默（不弹框，计时器下轮还会说话）。</para>
+        /// </summary>
+        private void RefreshActivationPermissionState()
+        {
+            try
+            {
+                if (IsDisposed || Disposing) return;
+                string runHash1;
+                string runHash2;
+                SoftwareActivation.ReadRunHash(out runHash1, out runHash2);
+                string cpuId = SoftwareActivation.GetCpuSerialNumber();
+                int slot;
+                int daysLeft;
+                SoftwareActivation.ActivationStatus status =
+                    SoftwareActivation.ComputeStatus(runHash1, runHash2, cpuId, out slot, out daysLeft);
+                if (!SoftwareActivation.ShouldRestoreUserPermission(status)) return;
+                try { btnSettings.Enabled = true; }
+                catch { }
+            }
+            catch { /* 重查永不拖垮主窗 */ }
+        }
+
+        /// <summary>
+        /// 授权计时器（V2.17.0，与 AgingTestSystem 的 HashTimer_Tick 对齐：每小时推一格）。
+        /// 先对 RunHash1（设备不对=新设备），再看 RunHash2（永久跳过，否则在
+        /// 0..839 格里找当前格：找到且小于 768 就写下一格；大于等于 768 或
+        /// 找不到=过期）。新设备/过期只弹框 + 置灰【系统设置】按钮，不阻断启动、
+        /// 不拦生产（PLC/相机/扫码照跑）；计时器内不自动恢复（与那边一致），
+        /// 付费成功由激活窗关闭后的重查即时解灰。Forms.Timer 在 UI 线程触发，
+        /// 可直接弹框/置灰，无需 Invoke。
+        /// </summary>
+        private void LicenseTimer_Tick(object sender, EventArgs e)
+        {
+            try
+            {
+                if (IsDisposed || Disposing) return;
+                string runHash1;
+                string runHash2;
+                SoftwareActivation.ReadRunHash(out runHash1, out runHash2);
+                // CPU 序列号在整个校验过程中不会变，提到循环外只查一次 WMI
+                //（那边同款优化：在循环内调用会导致 840 次 WMI 卡 UI）。
+                string cpuId = SoftwareActivation.GetCpuSerialNumber();
+                if (!SoftwareActivation.IsDeviceBound(runHash1, cpuId))
+                {
+                    try { btnSettings.Enabled = false; }
+                    catch { }
+                    LogHelper.Warn("软件授权：新设备（RunHash1 未绑定本机），系统设置入口已置灰");
+                    MessageBox.Show(
+                        I18n.T("新设备请联系厂商激活（主界面【选项】→【软件授权】）。生产检测不受影响。",
+                               "New device, please contact the vendor for activation (Options -> Activation). Production is not affected."),
+                        I18n.T("软件授权", "Software Activation"),
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                if (runHash2 == SoftwareActivation.PermanentMark(cpuId)) return;
+                int slot = SoftwareActivation.FindSlot(runHash2, cpuId);
+                if (SoftwareActivation.IsSlotValid(slot))
+                {
+                    try
+                    {
+                        SoftwareActivation.WriteRunHash2(
+                            SoftwareActivation.Encrypt(cpuId + (slot + 1).ToString()));
+                    }
+                    catch { }
+                    return;
+                }
+                try { btnSettings.Enabled = false; }
+                catch { }
+                LogHelper.Warn("软件授权：已过期，系统设置入口已置灰");
+                MessageBox.Show(
+                    I18n.T("软件已过期，请联系厂商（主界面【选项】→【软件授权】）。生产检测不受影响。",
+                           "Software expired, please contact the vendor (Options -> Activation). Production is not affected."),
+                    I18n.T("软件授权", "Software Activation"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            catch { /* 计时器永不拖垮主窗 */ }
+        }
+
+        /// <summary>
+        /// 打开系统设置：保存后写盘并热生效（V1.6.0 起免重启）。</summary>
         /// 【V1.9.0 管理员登录】每次点击先校验账号（SecurityConfig.AdminEnabled=true 时，
         /// 弹 LoginForm 登录，只有验证通过才放行），防止现场操作员随意改关键配置。
         /// 【V1.12.0 双账号分流】LoginForm 校验通过后按角色（login.Role）决定打开哪个界面：
         ///   - LoginRole.Admin → 系统设置窗体 SettingsForm（改配置，原行为）；
         ///   - LoginRole.Developer → 开发者模式窗体 DeveloperModeForm（原名 DevTestForm，相机/PLC 通讯验证 + 账号管理）。
         /// 开发者账号进入功能测试后不写盘、不改配置，且复用主窗体已建好的 PLC/相机连接。
+        /// 未激活置灰说明（V2.17.0）：新设备/过期时授权计时器会把 btnSettings 置灰
+        /// （= AgingTestSystem 置灰用户权限入口），生产检测不受影响；【选项】菜单永不置灰。
         /// </summary>
         private void OpenSettings()
         {
