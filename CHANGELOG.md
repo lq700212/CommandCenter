@@ -1,5 +1,37 @@
 # 版本改动记录
 
+## V2.16.9（2026-09-17）工程彻底更名 IrisVision（此前 CommandCenter，不兼容旧名）
+
+> 仓库已更名 `IrisVision`（远端 `lq700212/IrisVision.git`），工程侧同步彻底更名：
+> 内层工程目录 / csproj / slnx / 命名空间 / exe / 互斥名 / 配置路径 / skill / 主文档文件名
+> 统一为 `IrisVision`。项目未上线，旧名无兼容保留。
+
+### 改动范围
+
+- **文件目录**：`CommandCenter/` → `IrisVision/`、`CommandCenter.csproj` → `IrisVision.csproj`、
+  `CommandCenter.slnx` → `IrisVision.slnx`、`docs/CommandCenter.md` → `docs/IrisVision.md`、
+  `.opencode/skills/commandcenter-test/` → `.opencode/skills/irisvision-test/`（git mv，保持历史）。
+- **代码**：`RootNamespace/AssemblyName` → `IrisVision`；全部 `namespace/usings/typeof/SkipNamespace`
+  `CommandCenter.*` → `IrisVision.*`；单实例互斥 `IrisVision_SingleInstance`；
+  记住密码目录 `%LOCALAPPDATA%\IrisVision\`；`obfuscar.xml` 的 `Module/SkipNamespace` 同步。
+- **脚本与测试**：`build-obfuscated.ps1`（构建/混淆/冒烟/打包全链路 exe 与 zip 名）、
+  `tools/Create-DesktopShortcut.ps1`（自动查找三路径）、`tools/DocShot/*.cs`、
+  skill 下 `build/tests/uitests/smoke/check-branding/run-all.ps1` 与 `TestRunner.cs/UiProbe.cs`
+  全部同步新路径与新 exe 名。
+- **文档约定更新**：README/AGENTS/docs 主文档删除 V2.16.5“exe/命名空间不变”旧红线，
+  改为“统一为 IrisVision”新约定；V2.16.5 历史小节内的旧名已随批量替换统一为新名。
+
+### 为什么这么改
+
+- 仓库名与工程名不一致（仓库 `IrisVision`、工程仍 `CommandCenter`），新人开工先迷路；
+  品牌显示名 V2.16.5 已是光阑视界 IrisVision，工程名不跟进则 exe/文档/脚本三处各叫各的。
+- 项目未上线、无现场旧部署可兼容，长痛不如短痛，一次改彻底比长期双名并存更省事。
+
+### 验证
+
+- `CommandCenter/commandcenter` 全仓库 grep 零残留（新版本记录本条解释性提及除外）。
+- 跑 `irisvision-test` skill 全绿：构建 + 回归用例 + 两轮进程冒烟。
+
 ## V2.16.8（2026-09-17）培训配图与真机对版 + RealShot 真进程实拍管线
 
 > 现场反馈配图与真实软件颜色风格有差异：A/B 定位到"harness 弹窗恒为 classic 边框，
@@ -12,7 +44,7 @@
   harness 全部门窗外框恒小 10×10（classic 3px 边框），真机为主题 8px 边框。
   manifest/视觉样式 API/子系统/config/模态与否逐项对照排除，均不是根因；
   经验结论：harness 直 new 的窗不要深究，直接用真进程拍。
-- **新建 `CommandCenter/tools/DocShot/RealShot.cs`**：另起真实 exe，用 Win32 消息像用户一样
+- **新建 `IrisVision/tools/DocShot/RealShot.cs`**：另起真实 exe，用 Win32 消息像用户一样
   开全部门窗（只开窗截图 + 取消，绝不点保存/删除/启动类真动作），8 张一次拍齐；
   登录框 user/pass 按坐标排序一次填对；补录框/登录框预填演示内容再拍。
 - **管线分工固化**：静态对话框一律真进程实拍（RealShot）；无硬件演不出的动态态
@@ -71,7 +103,7 @@
   点检禁忌，大白话）/ 客户技术版（换型/点位程序配置/存图/MES 联调自助闭环/排障，
   给方法不给实现）/ 内部版（权限矩阵含开发者账号/账号全流程/工艺 8 条/技术实现篇
   职责边界-关键机制-改动红线/交付清单）。演示数据图注明"演示图片"。
-- **实拍 harness（`CommandCenter/tools/DocShot/`）**：`DocShot.cs` 独立编译直连真实窗体，
+- **实拍 harness（`IrisVision/tools/DocShot/`）**：`DocShot.cs` 独立编译直连真实窗体，
   11 张 PNG（主界面空闲/OK/NG + 8 对话框）一次跑完；主界面完成态走生产路径
   （演示 jpeg 经 `LoadThumbnailSafe` 真实解码 → `OnInspectionFinished` 真实刷图计数）；
   看门狗 + 非空校验（`distinct>=12 && dark>=15`，MetricProbe 实测校准）+
@@ -93,11 +125,11 @@
 ## V2.16.5（2026-09-17）品牌更名光阑视界 IrisVision + 全套图标替换
 
 > 软件中文名"光阑视界"、英文名"IrisVision"：exe / 桌面快捷方式 / 任务栏 / 标题栏图标统一替换，
-> 窗口标题与程序集显示名同步更名（exe 文件名 `CommandCenter.exe`、命名空间、单实例互斥名一律不变）。
+> 窗口标题与程序集显示名同步更名（exe 文件名 `IrisVision.exe`、命名空间、单实例互斥名一律不变）。
 
 ### 改动范围
 
-- **图标单一来源（`CommandCenter/Resources/`，位置不变、只接线）**：`app.png`（1600px 源图）重制
+- **图标单一来源（`IrisVision/Resources/`，位置不变、只接线）**：`app.png`（1600px 源图）重制
   `app.ico`（16/24/32/48/64/128/256 共 7 层，小图标独立层、标题栏/任务栏不糊）；csproj 新增
   `<ApplicationIcon>Resources\app.ico</ApplicationIcon>`——exe 文件图标 / 资源管理器 /
   桌面快捷方式 / 任务栏（运行中 + 固定）四处自动取它，无需逐处配图。
@@ -109,10 +141,10 @@
 - **品牌更名（只改显示名）**：`AssemblyTitle/FileDescription`="光阑视界 IrisVision"、
   `AssemblyProduct`="IrisVision"；主窗体标题 `I18n.T("光阑视界", "IrisVision")`
   （中文界面显中文名、英文界面显英文名）；已有部署/脚本/文档里的 exe 引用零改动。
-- **桌面快捷方式一键脚本（新增 `CommandCenter/tools/Create-DesktopShortcut.ps1`）**：桌面建
+- **桌面快捷方式一键脚本（新增 `IrisVision/tools/Create-DesktopShortcut.ps1`）**：桌面建
   "光阑视界 IrisVision.lnk"（目标按 混淆版→Release→Debug 自动找，可 `-ExePath` 显式指定，
   `IconLocation=exe,0` 取内嵌图标，UTF-8 with BOM）。
-- **测试沉淀（`.opencode/skills/commandcenter-test/`）**：新增 `scripts/check-branding.ps1`
+- **测试沉淀（`.opencode/skills/irisvision-test/`）**：新增 `scripts/check-branding.ps1`
   （ico 七层齐全 + csproj 接线 + exe 产品名/中文说明 + 内嵌图标可提取），由 `build.ps1`
   在产出 exe 后自动调用，断裂即 BUILD-FAIL；另用一次性 harness 验证真实 `new MainForm()`
   的 `Icon` 非空且标题为光阑视界（[BRAND-PROBE-OK]，脚本已删）。
@@ -153,7 +185,7 @@
   手改 json 把 `stopBits` 写成 `" 2 "`（带空格）时旧实现按"非法值"静默回落 One，与
   `ParityFromName` 的容忍风格不对齐——串口枪帧格式对错位后收码乱码/收不到且零日志，
   极易误判成硬件故障。先 Trim 再匹配；非法值仍回落 One（旧配置兼容）。用例⑲组期望已翻转。
-- **测试沉淀（`.opencode/skills/commandcenter-test/`，137 → 538 + 70 条）**：
+- **测试沉淀（`.opencode/skills/irisvision-test/`，137 → 538 + 70 条）**：
   - `TestRunner.cs` 新增 ⑫~⑳ 组（纯逻辑/服务层，无需设备）：⑫ 相机判定 `ParseResult`
     全分支（详细任一 NG 即 NG/标准逐位/`OkChar` 定制/触发计数）；⑬ 指令校验无设备防御
     （`SetOutputFormat` 形状/`SwitchProgram`/`ReadProgramNo`/`SendTrigger`/`TriggerAndRead`）；
@@ -222,7 +254,7 @@
 
 ### 改动范围
 
-- **新增 `CommandCenter/Utils/AppTheme.cs`（主题管理器，与 `I18n` 对等）**：
+- **新增 `IrisVision/Utils/AppTheme.cs`（主题管理器，与 `I18n` 对等）**：
   `Theme`（"Light"/"Dark"，默认浅色，setter 触发 `ThemeChanged`）+ `Normalize`
   （非法值回落浅色）+ `IsDark` + 配色常量（浅色=历史外观像素级保留，深色=VS 深色系）+
   `ApplyTo/ApplyOne`（递归整树上色）+ `ApplyGridTheme`（表格全套）+
@@ -271,8 +303,8 @@
 
 - 删除 `.opencode/skills/winforms-ui-debug/`（Maximized 禁缩放专项、点击双击判定、
   ComboBox 选中高亮已合并进全局技能 `winforms-ui-debug` §六〜§八）；
-  `commandcenter-test/SKILL.md` 中的分工引用改指全局版本。
-- **为什么这么改**：四项目 UI 调试 skill 合并为同一个全局版本，防分叉；CommandCenter
+  `irisvision-test/SKILL.md` 中的分工引用改指全局版本。
+- **为什么这么改**：四项目 UI 调试 skill 合并为同一个全局版本，防分叉；IrisVision
   的构建命令与对照窗体已收录进全局 skill 附录 A 项目档案。
 
 ### 优化点
@@ -287,17 +319,17 @@
 
 ### 改动范围
 
-- **CommandCenter/build-obfuscated.ps1**（由三步升级为四步）：
+- **IrisVision/build-obfuscated.ps1**（由三步升级为四步）：
   - 前三步不变：Release 构建 → Obfuscar 混淆 → 补 dll/config + 启动保活冒烟；
   - **新增第 4 步【打包上传 zip】**：版本号取最近 git tag（`git describe --tags`，去 v 前缀，
     非 git 目录取不到就用日期兜底），文件名纯 ASCII
-    `bin\CommandCenter_{版本号}_obfuscated.zip`（防中文文件名跨机器/网盘/上传控件乱码）；
-  - 只打包固定 5 个发布文件（CommandCenter.exe / .exe.config / Newtonsoft.Json.dll / NModbus.dll /
+    `bin\IrisVision_{版本号}_obfuscated.zip`（防中文文件名跨机器/网盘/上传控件乱码）；
+  - 只打包固定 5 个发布文件（IrisVision.exe / .exe.config / Newtonsoft.Json.dll / NModbus.dll /
     Mapping.txt），**打包前自动删除冒烟产生的 Logs**，运行时日志/数据永不进包；
   - 逐个校验待打包文件存在，缺失即抛错中止，不产出残缺包。
 - **AGENTS.md"混淆发布命令"节**：新增触发词约定——用户说"发布/出发布版/混淆版/打包上传/生成可部署
   软件"等，直接跑脚本并把上传包路径报给用户，**禁止再驱动用户一步步教流程**；产物说明补上传包路径。
-- **docs/CommandCenter.md 第八部分**：V2.14.31 混淆记录下文新增 V2.16.0 记录（结构、版本号来源、
+- **docs/IrisVision.md 第八部分**：V2.14.31 混淆记录下文新增 V2.16.0 记录（结构、版本号来源、
   打包范围、Logs 排除）。
 
 ### 为什么这么改
@@ -331,7 +363,7 @@ V2.14.30 的"首次 ERROR 立即写 2"策略过于激进——扫码枪第一次
     重试耗尽才置失败标志；
   - `StepScanChannel` step 0：`_serialErrorSeen` 分支注释更新（重试耗尽才触发，不再"首次 ERROR 立即写 2"）；
 - **测试验证**：自动化测试 179 个用例 + 21 个 UI 交互回归 + 两轮冒烟全部通过
-- **文档同步**：AGENTS.md、docs/CommandCenter.md 扫码枪章节同步更新
+- **文档同步**：AGENTS.md、docs/IrisVision.md 扫码枪章节同步更新
 
 ## V2.15.23（2026-08-31）ComboBox 编辑态高亮修复 + 颜色对齐
 
@@ -405,7 +437,7 @@ DataGridViewComboBoxColumn 的单元格使用 ComboBox 渲染引擎画背景，�
   只有 0~127 且解析成功才赋值，其余一律 -1。
 - **Designer（用户诉求①）**：dgvPrograms 改 `FullRowSelect` + `MultiSelect=false` + 显式选中色
   （蓝底 0,120,215 / 白字），选中行整行高亮，删除选中行不再歧义。
-- **测试沉淀（commandcenter-test skill 新增 UI 交互回归层，第 3 层）**：
+- **测试沉淀（irisvision-test skill 新增 UI 交互回归层，第 3 层）**：
   - `scripts/UiProbe.cs`（新）+ `scripts/uitests.ps1`（新）+ `run-all.ps1` 挂上 `-SkipUi` 开关：
     拉起【真实 WindowPointForm】（放屏幕外）模拟用户操作，断言整行高亮、改程序号/改点位不回退、
     切型号保号、老配置异常值（点位9/程序200）原样显示、点确定写回值、全程 DataError=0，
@@ -413,7 +445,7 @@ DataGridViewComboBoxColumn 的单元格使用 ComboBox 渲染引擎画背景，�
   - `scripts/TestRunner.cs` 新增**第⑩组**（11 条）：`NumText`/`CellText`/`EnsureCandidate`
     三个纯函数反射直测（int→文本、null/空/int 兼容、候选按文本去重补值）；
   - `scripts/tests.ps1` 补 `/r:System.Windows.Forms.dll /r:System.Drawing.dll`（第⑩组用到 DataGridView）。
-- **文档**：`docs/CommandCenter.md` §设置页"相机程序映射"补"候选与值全字符串（防回退红线）"
+- **文档**：`docs/IrisVision.md` §设置页"相机程序映射"补"候选与值全字符串（防回退红线）"
   段落（机制 + 三件套 + 测试锚点索引）。
 - **上相机默认"点位→程序号"映射更新（现场最新定稿）**：`Models/AppConfig.cs` `DefaultCameras()`
   上相机两张型号表整体替换——**U171 由点位 1~20 缩为 1~17**（17 条：1→0、2→1、3~6→2、7→3、
@@ -423,14 +455,14 @@ DataGridViewComboBoxColumn 的单元格使用 ComboBox 渲染引擎画背景，�
   Z121=上18+下3=21 窗（原 24/29 窗）——`WindowCountFor`/`ResolveLayout` 自动按点位表重算，
   无代码改动。同步：`bin\Debug\Config\appconfig.json` 上相机两张表（现场已有配置必须一并更新，
   否则运行时读旧表）；`TestRunner.cs` 第⑤⑥组断言（24→21 窗、20→17 条、点位14→11）；
-  文档/注释里的旧窗口数与旧映射描述（AGENTS.md、README、docs/CommandCenter.md §2.3/§7）。
+  文档/注释里的旧窗口数与旧映射描述（AGENTS.md、README、docs/IrisVision.md §2.3/§7）。
 
 ### 验证
 
 - 全量源码离线编译通过（0 error，含 Program.cs 全部 38 个 .cs）；
 - **UiProbe 19/19 全绿**（真实 exe）；TestRunner 159+11 条用例除第④组外全过——第④组 10 条失败
   经最小复现定位为**本次临时验证环境（dotnet SDK10 编译器把无 BOM UTF-8 中文字面量按 GBK 误读）
-  的假象**：用真实 MSBuild 产出的 CommandCenter.exe 直测 `IsIgnoredScanText` 全部正确（真实
+  的假象**：用真实 MSBuild 产出的 IrisVision.exe 直测 `IsIgnoredScanText` 全部正确（真实
   工具链 = VS MSBuild + tests.ps1 的 `/codepage:65001`，不受影响），产品代码无改动、无需处理。
 - **映射更新复验（本次）**：映射探针 40 条逐条核对新表全 PASS；TestRunner **179/179 全绿**
   （第⑤⑥组断言已同步到新映射：U171=21 窗/17 条/点位14→11、Z121=21 窗）；UiProbe 扩到
@@ -479,7 +511,7 @@ DataGridViewComboBoxColumn 的单元格使用 ComboBox 渲染引擎画背景，�
 
 ### 文档同步
 
-- 本文件 V2.15.20 小节；README 可配置项改二选一默认 Mes；docs/CommandCenter.md
+- 本文件 V2.15.20 小节；README 可配置项改二选一默认 Mes；docs/IrisVision.md
   §5.5 SN 去向规则、第一部分删设置页操作说明、第八部分版本；AGENTS.md SN 去向段更新；
   新增 docs/MES对接说明.md。
 
@@ -536,14 +568,14 @@ DataGridViewComboBoxColumn 的单元格使用 ComboBox 渲染引擎画背景，�
 ### 文档同步
 
 - 本文件 V2.15.19 小节；README 可配置项补 `sn.target/mesUrl/mesTimeoutMs`；
-  docs/CommandCenter.md §5.5 补 SN 去向规则、第一部分补设置页操作说明、第八部分版本；
+  docs/IrisVision.md §5.5 补 SN 去向规则、第一部分补设置页操作说明、第八部分版本；
   AGENTS.md PLC 握手协议段落补 SN 去向约定。
 
-## V2.15.18（2026-08-25）自动化测试 skill（commandcenter-test）+ 修复扫码过滤前缀通配失效
+## V2.15.18（2026-08-25）自动化测试 skill（irisvision-test）+ 修复扫码过滤前缀通配失效
 
 > 需求：软件要求"绝对稳定"，为此建立可复用的全面验证设施——① 对 V2.15.17 改动做全面冒烟；
 > ② 编写面面俱到的回归测试用例（测出 bug 即修）；③ 把冒烟与用例沉淀成脚本、封装为项目专属
-> skill `.opencode/skills/commandcenter-test/`，后续一键复用；④ 沉淀铁律进 AGENTS.md：
+> skill `.opencode/skills/irisvision-test/`，后续一键复用；④ 沉淀铁律进 AGENTS.md：
 > **以后凡有新测试用例/新冒烟检查项，做完必须同步沉淀进该 skill，不许等提醒**。
 
 ### 修复的产品 bug（测试用例测出）
@@ -557,7 +589,7 @@ DataGridViewComboBoxColumn 的单元格使用 ComboBox 渲染引擎画背景，�
 ### 新增：自动化测试 skill（三层验证一条命令）
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\scripts\run-all.ps1"
+powershell -ExecutionPolicy Bypass -File ".opencode\skills\irisvision-test\scripts\run-all.ps1"
 ```
 
 - **构建层** `build.ps1`：MSBuild Debug 零 error 且产出 exe。
@@ -579,12 +611,12 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 - skill 下 `.ps1` 含中文必须存 **UTF-8 with BOM**：Windows PowerShell 5.1 对无 BOM 文件按 GBK
   解析，中文注释直接把语法搅碎（本轮实测：脚本内容被当文本回显）；
-- 脚本内仓库根 = `$PSScriptRoot` 向上四级（scripts→commandcenter-test→skills→.opencode→根）。
+- 脚本内仓库根 = `$PSScriptRoot` 向上四级（scripts→irisvision-test→skills→.opencode→根）。
 
 ### 文档同步
 
 - `AGENTS.md`：新增"自动化测试 skill"节（用法/三层设计/沉淀铁律/编码红线）+ 关键文件导航表加一行；
-- `docs/CommandCenter.md` 第八部分版本记录同步本条；
+- `docs/IrisVision.md` 第八部分版本记录同步本条；
 - `README.md` 构建/验证说明补充 skill 入口。
 
 ## V2.15.17（2026-08-25）扫码 SN 序列号写进 PLC 寄存器（SN 区 40013~40024）
@@ -638,7 +670,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 ### 文档同步
 
-- `docs/CommandCenter.md`：§5.2（字段清单/寄存器表/"SN 不进寄存器"旧说明反转为进寄存器）、
+- `docs/IrisVision.md`：§5.2（字段清单/寄存器表/"SN 不进寄存器"旧说明反转为进寄存器）、
   §5.3（死等补录段）、§5.4（通道①流程）、§5.5 全节（总表/速查/布局图/扩展说明/SN 编码说明/
   功能码/时序图/PLC 配置要求/读 SN 示例）、第八部分版本记录；
 - `docs/上位机PLC通信接口定义文档.md`（交付 PLC 工程师）：版本头、总表、分类速查、布局示意图、
@@ -705,7 +737,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   ToolTip（含"已连接/断连"文案）同步刷新。
 - **悬停补全（同分支）**：文本截断后名字可能不全，给每台相机灯挂 ToolTip 显示
   "完整名字 + IP + 已连接/断连"，弥补截断丢失的信息（≥3 台下拉明细同款文案风格）。
-- **文档同步**：`docs/CommandCenter.md` 第八部分补 V2.15.15 记录。
+- **文档同步**：`docs/IrisVision.md` 第八部分补 V2.15.15 记录。
 
 ### 优化点
 
@@ -732,7 +764,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   按语言渲染（英文 `Windows N`），与顶部编号一致。
 - **提示文字同步**：`HintDefaultText`（中/英）与 `WindowPointForm.Designer.cs` 的 `lblHint`
   默认文案注明"窗口编号随界面语言显示"；类头 ASCII 布局图格子示意标注"编号随语言中/英"。
-- **文档同步**：`docs/CommandCenter.md` 第八部分补 V2.15.14 记录。
+- **文档同步**：`docs/IrisVision.md` 第八部分补 V2.15.14 记录。
 
 ### 优化点
 
@@ -756,7 +788,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   旧日期目录照常被识别清理，不误删、不失效。
 - **界面示例同步**：`DirTreeEditForm` 占位符 ToolTip 的 `{年月日}` 示例改为 `2026.08.20`
   （中/英文，Designer 静态文案 + ApplyLanguage 双语）。
-- **文档同步**：`docs/CommandCenter.md`（第一部分存图目录结构 + ⑨存图定期清理 + 第八部分 V2.15.13
+- **文档同步**：`docs/IrisVision.md`（第一部分存图目录结构 + ⑨存图定期清理 + 第八部分 V2.15.13
   记录）、`README.md`（目录树示例）、`docs/上位机操作说明书.md`/`_EN.md`（第七章查图目录示例）、
   `AGENTS.md`（存图定期清理约定）同步点分隔说明。
 
@@ -791,7 +823,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 - **SettingsForm**：`txtFileNameTpl` 载入经 `ToDisplay` 显示英文占位符、保存前 `ToStorage` 还原；
   "配置目录结构…"按钮的目录结构 ToolTip（`RefreshDirPreview`）同步显示英文占位符；英文 ToolTip
   占位符写法同步英文。
-- **文档同步**：`docs/CommandCenter.md`（第一部分存图目录说明补英文占位符段落 + 第八部分 V2.15.12
+- **文档同步**：`docs/IrisVision.md`（第一部分存图目录说明补英文占位符段落 + 第八部分 V2.15.12
   版本记录）。
 
 ### 优化点
@@ -826,7 +858,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 - 连接灯颜色语义收敛为两色 + PLC 一个黄中间态：**绿=连上、红=断开、黄=PLC 等待主站**；
   相机/扫码枪灯不再出现"没连也没断"的灰色模糊状态，无启用扫码枪时灯直接消失。
 - 全程删除 `Color.FromArgb(150,150,150)` 共 6 处（相机≤2台、聚合标签、扫码枪分支、设计器三灯）。
-- **文档同步**：`docs/CommandCenter.md`（第一部分标题栏说明 + 第八部分 V2.15.11 版本 + V1.12.6
+- **文档同步**：`docs/IrisVision.md`（第一部分标题栏说明 + 第八部分 V2.15.11 版本 + V1.12.6
   历史补注）、`docs/上位机操作说明书.md`/`_EN.md`（第八节新增"颜色速认"说明块）、
   **`docs/使用说明/` 下 4 份 docx**（中文/英文《用户使用说明（操作员手册）》第八节插入"颜色速认/
   Reading the colors"说明；中文/英文《系统设置使用说明》标题栏"连接指示灯"描述改为无灰语义 +
@@ -854,7 +886,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   "开发者模式"/"Developer Mode"。角色分流（Admin→SettingsForm、Developer→DeveloperModeForm）、
   复用主窗体连接不新建、关闭不 Dispose、`csproj` Compile/EmbeddedResource 引用全部同步改名。
   涉及：`Views/DeveloperModeForm.cs`、`Views/MainForm.cs`（`OpenSettings` 分流 + 传 `_config`）、
-  `CommandCenter.csproj`。
+  `IrisVision.csproj`。
 - **账号管理区（防错机制）**：窗体顶部新增 `grpAccount` 账号管理区——`dgvAccounts` 表格
   （账号/角色/启用/密码四列，密码只显示掩码"●●●●●●"或"未设置"，**绝不放明文/哈希**）列出
   `SecurityConfig` 全部账号（admin + dev，行 Tag 存角色键定位哈希字段）；选中行后底部输入新密码
@@ -1226,7 +1258,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 > 这是 V2.14.45"读后复位"缺掉的另一半：结果侧"读后复位"做了，请求侧却没保持，
 > 握手在第一拍（上位机收不到请求）就断了。
 
-### 改动内容（仅 `docs/CommandCenter.md` + `CHANGELOG.md` + `AGENTS.md`）
+### 改动内容（仅 `docs/IrisVision.md` + `CHANGELOG.md` + `AGENTS.md`）
 
 - **§5.3** 新增"请求寄存器必须保持、禁止写入即清零（V2.14.46 红线）"段（含所有权澄清 + PLC 对照 + 检验方法）；
 - **§5.5.6 第 7 条** 改写为"请求保持 + 结果读后复位"两条首要约定；
@@ -1257,7 +1289,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 > 在读到结果≠0 之后"**，上位机任何清 0 都必然晚于 PLC 读取 → PLC 无论怎么改扫描/推进时序，本拍
 > 1/2/3 都能读到，且 V2.14.42 要治的"残留窗口倒灌"也一并根除（PLC 推进下一拍前必已读走上一拍残留）。
 
-### 改动内容（仅 `docs/CommandCenter.md`）
+### 改动内容（仅 `docs/IrisVision.md`）
 
 - **§5.3** 新增"PLC 侧读后复位协议要求（V2.14.45 建议）"：硬不变量 + 证明 + 四条 PLC 工程师对照要求；
 - **§5.5.6 PLC 侧配置要求** 增加第 7 条"读后复位"首要约定；
@@ -1444,7 +1476,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 ### 同步
 
-- `docs/CommandCenter.md`：§5.3 三拍握手补"复位确认边沿记忆"说明、§5.4 相机通道步骤2 更新、第八部分版本；
+- `docs/IrisVision.md`：§5.3 三拍握手补"复位确认边沿记忆"说明、§5.4 相机通道步骤2 更新、第八部分版本；
 - 构建通过 + 冒烟 exe 存活。
 
 ---
@@ -1818,21 +1850,21 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 ### 改动范围
 
-- **新增 `CommandCenter/tools/Obfuscar/Obfuscar.Console.exe`**：免费开源混淆器本体（离线版，
+- **新增 `IrisVision/tools/Obfuscar/Obfuscar.Console.exe`**：免费开源混淆器本体（离线版，
   直接拷入项目，不依赖 NuGet——与"第三方库拷 libs 离线引用"同一依赖策略）。
-- **新增 `CommandCenter/obfuscar.xml`** 混淆配置：
+- **新增 `IrisVision/obfuscar.xml`** 混淆配置：
   - `KeepPublicApi=false`：公开/私有类型、方法、字段、属性、事件**全部重命名**成 A.a/A.b 类乱码名；
   - `HideStrings=true`：所有字符串字面量加密（运行时解密），反编译看不到设备 IP、PLC 寄存器地址、
     相机指令、密码逻辑等明文；
-  - **`SkipNamespace name="CommandCenter.Models*"`**：配置模型命名空间**整体跳过**（含全部成员）——
+  - **`SkipNamespace name="IrisVision.Models*"`**：配置模型命名空间**整体跳过**（含全部成员）——
     原因：`ConfigStore.Save` 用小驼峰（CamelCasePropertyNamesContractResolver）把 AppConfig 序列化为
     `appconfig.json`，**属性名 = json 字段名**；若混淆属性名，新程序写出的 json 字段名与现场既有配置
     对不上、旧配置读不回、再保存格式错乱。这是混淆**唯一必须豁免**的业务命名空间（铁律）;
   - 只混淆主程序集 exe，第三方 dll（Newtonsoft.Json/NModbus）不列入不混淆。
-- **新增 `CommandCenter/build-obfuscated.ps1`** 一键发布脚本（UTF-8 BOM，PowerShell 5.1 中文安全）：
+- **新增 `IrisVision/build-obfuscated.ps1`** 一键发布脚本（UTF-8 BOM，PowerShell 5.1 中文安全）：
   ① MSBuild Release 构建 → ② 跑 Obfuscar 混淆 → ③ 把第三方 dll + exe.config 拷进发布目录 →
   ④ 启动混淆版 exe 做 6 秒"进程存活"冒烟。产物：`bin\Obfuscated\`（含混淆后
-  CommandCenter.exe + Newtonsoft.Json.dll + NModbus.dll + CommandCenter.exe.config + Mapping.txt）。
+  IrisVision.exe + Newtonsoft.Json.dll + NModbus.dll + IrisVision.exe.config + Mapping.txt）。
   日常 Debug 构建**不受影响**（照旧直接出 bin\Debug）。
 - **`Views/MainForm.cs`**（`SendMessage`）：`[DllImport("user32.dll")]` 补显式
   `EntryPoint = "SendMessage"`——P/Invoke 默认按【C# 方法名】找 user32 导出函数，混淆把方法名改成
@@ -1851,7 +1883,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 ### 验证
 
 - Release 构建通过（两次）；Obfuscar 混淆产物生成成功（类型名 95 个全变 A.a 乱码，`Program` 已被重命名，
-  `CommandCenter.Models.AppConfig` 及其属性名 `Cameras/Plc/ProductModel/...` 原样保留）。
+  `IrisVision.Models.AppConfig` 及其属性名 `Cameras/Plc/ProductModel/...` 原样保留）。
 - 冒烟：混淆版 exe 启动 6 秒存活 + 日志正常（BuildServices 建 2 台相机、扫码头 TCP 连接、PLC 从站建站
   全部走通）。
 - **配置兼容性端到端验证**：准备一份含独特 IP `10.1.1.99:8500` 的 `appconfig.json`，分别用未混淆版与
@@ -1862,7 +1894,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 ### 文档同步
 
-- `docs/CommandCenter.md`：第八部分版本记录新增 V2.14.31；README.md 增混淆章节；
+- `docs/IrisVision.md`：第八部分版本记录新增 V2.14.31；README.md 增混淆章节；
 - `AGENTS.md`：构建命令补混淆发布脚本、依赖策略补 tools/Obfuscar、新增"混淆豁免 Models 命名空间"红线；
 - `CHANGELOG.md`：本版本（V2.14.31）。
 
@@ -1921,7 +1953,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 ### 文档同步
 
-- `docs/CommandCenter.md`：第三部分（3.1 配置示例 / 3.2 过滤说明 / 3.4 校准清单新增校验项）、
+- `docs/IrisVision.md`：第三部分（3.1 配置示例 / 3.2 过滤说明 / 3.4 校准清单新增校验项）、
   第一部分（3.2 序列号新增"读码失败自动识别"）、第八部分"换场地怎么改"+ 版本记录（V2.14.30）；
 - `README.md`：可配置项"扫码枪"两表各补 `ignoreScanTexts` 行；
 - `AGENTS.md`：扫码枪通讯约定追加"读码失败文本过滤"红线段；
@@ -1968,7 +2000,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 ### 文档同步
 
-- `docs/CommandCenter.md` 第一部分（产品型号配置弹窗：新增按钮 + Delete 键共用删除逻辑）；
+- `docs/IrisVision.md` 第一部分（产品型号配置弹窗：新增按钮 + Delete 键共用删除逻辑）；
 - `AGENTS.md` 文件导航表（ModelIndexEditForm 描述更新）；
 - `CHANGELOG.md`：本版本（V2.14.29）。
 
@@ -1995,14 +2027,14 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 ### 验证
 
-- MSBuild Debug/AnyCPU 构建通过（`CommandCenter -> ...\bin\Debug\CommandCenter.exe`）。
+- MSBuild Debug/AnyCPU 构建通过（`IrisVision -> ...\bin\Debug\IrisVision.exe`）。
 - 冒烟逻辑：收到 PLC 扫码请求 → 窗口图片被清空、计数归零 → 相机判定返回后	从 0 开始逐点累计。
 
 ---
 
 ## V2.14.27（2026-08-15）新增 CommonLib 通用设备通讯库（PLC/相机/扫码枪/图片存储抽取封装）
 
-> 需求：把 CommandCenter 里四类底层通讯/存储服务（汇川 PLC Modbus TCP 从站、基恩士 IV4 相机、
+> 需求：把 IrisVision 里四类底层通讯/存储服务（汇川 PLC Modbus TCP 从站、基恩士 IV4 相机、
 > 基恩士 SR 扫码枪、图片 FTP 归档与定期清理）抽取成独立类库 `CommonLib/`，目标是——
 > **换新客户、做新界面时底层服务一行不改，只写 UI 和业务编排**；且所有通讯必须支持热更
 > （与当前项目一致，改配置免重启）。
@@ -2022,7 +2054,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   `new DeviceHub(config)` → `Start()` → `ApplyConfig(newCfg)`（热更）→ `Dispose()`；
   对外只暴露聚合事件（`SerialNumberScanned`/`DeviceConnectionChanged`/`FtpFileArrived`/
   `ServicesRebuilt`）与各服务实例（`Plc`/`Cameras`/`Scanners`/`ImageStore`）。
-- **抽取过程中的适配**（原代码只读，不动 CommandCenter）：
+- **抽取过程中的适配**（原代码只读，不动 IrisVision）：
   - `IScanner` 接口新增 `Name` 属性（串口返回串口名、TCP 返回 IP:端口，供连接指示灯/日志标识）；
   - `CameraConfig` 补 `DefaultCameras()` 静态方法（现场默认两台相机，改现场 IP 只改这一处）；
   - 命名空间统一为 `CommonLib.Models`/`CommonLib.Services`/`CommonLib.Utils`。
@@ -2042,7 +2074,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 ### 为什么这么改
 
-- CommandCenter 的设备编排（`BuildServices`/`ApplyRuntimeConfig`/`FormClosing` 释放、扫码枪按
+- IrisVision 的设备编排（`BuildServices`/`ApplyRuntimeConfig`/`FormClosing` 释放、扫码枪按
   `Mode` 选实现、每相机 FTP 目录监听、存图定期清理等）全部手写在 `MainForm` 里，新客户接新界面
   就得重新抄一遍、还容易漏掉红线（UI 禁 IO、热更顺序、ImageStore 释放归属等）。DeviceHub 把
   "设备活着"这件事彻底封装，业务项目只写"业务流程 + UI"，底层通讯行为与坑（超时/重连/热更/并发
@@ -2053,7 +2085,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 ### 验证
 
 - MSBuild Debug/AnyCPU 构建 CommonLib 通过（`CommonLib -> ...\bin\Debug\CommonLib.dll`）。
-- 原 CommandCenter 工程未改动，仍按原样构建（两工程独立）。
+- 原 IrisVision 工程未改动，仍按原样构建（两工程独立）。
 
 ### 文档同步
 
@@ -2061,7 +2093,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 - `CommonLib/使用说明.md`：新建（完整接入手册，README 的详细版）。
 - `CommonLib/AGENTS.md`：新建（库级维护约定，含注释详实红线 + 跨 .NET 版本兼容性评估）。
 - `CommonLib/Demo/README.md`：新建（Demo 使用说明/验证清单/配置说明）。
-- `CommandCenter/AGENTS.md`：关键文件导航表补 `CommonLib/` 说明。
+- `IrisVision/AGENTS.md`：关键文件导航表补 `CommonLib/` 说明。
 - `CHANGELOG.md`：本版本（V2.14.27）。
 
 ## V2.14.26（2026-08-14）窗口徽标显隐还原：只随开关走（保留 V2.14.24 的默认开启）
@@ -2091,7 +2123,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 ### 文档同步
 
-- `docs/CommandCenter.md`：第一部分窗口徽标开关描述改"只随开关走"；第八部分 V2.14.24 条目补
+- `docs/IrisVision.md`：第一部分窗口徽标开关描述改"只随开关走"；第八部分 V2.14.24 条目补
   ⚠️ V2.14.26 已还原说明。
 - `AGENTS.md`：关键文件导航 CameraDisplayControl 行改回"徽标显隐只随开关走"约定。
 - `README.md`：可配置项 `windowOkNgVisible` 描述同步。
@@ -2128,7 +2160,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 ### 文档同步
 
-- `docs/CommandCenter.md`：产品型号映射弹窗描述补"删除按钮/选中列/全居中"。
+- `docs/IrisVision.md`：产品型号映射弹窗描述补"删除按钮/选中列/全居中"。
 - `AGENTS.md`：关键文件导航 ModelIndexEditForm 行补一句删除交互说明。
 - `README.md`：产品型号一节补"弹窗内可直接勾选批量删除"。
 
@@ -2169,7 +2201,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 ### 文档同步
 
-- `docs/CommandCenter.md`：§3.1 切型号入口、§5 PLC 产品型号/型号→序号映射描述、第二部分窗口徽标
+- `docs/IrisVision.md`：§3.1 切型号入口、§5 PLC 产品型号/型号→序号映射描述、第二部分窗口徽标
   开关描述，第八部分版本记录追加 V2.14.24。
 - `docs/上位机PLC通信接口定义文档.md`：§2.4 型号来源描述入口唯一化。
 - `AGENTS.md`：PLC 握手协议段"型号入口唯一化 + 型号集合双向对齐"约定、相机/徽标相关说明更新。
@@ -2177,7 +2209,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 - **README 整体重写（同日）**：从"演进史罗列式"改为"通俗读物式"——新增软件架构分层图、
   生产流程时序图、现场网络拓扑图、三拍握手时序图，可配置项按业务分组改表格（字段/默认值/
   白话说明），相机对上/下、窗口矩阵与存图目录各配 ASCII 图示意；版本号刺与历史细节移交
-  `docs/CommandCenter.md` 与 `CHANGELOG.md`，README 只留操作性结论。
+  `docs/IrisVision.md` 与 `CHANGELOG.md`，README 只留操作性结论。
 
 ## V2.14.23（2026-08-14）热更/保存后 PLC 收不到请求修复：从站重建必须释放旧 master 连接
 
@@ -2211,7 +2243,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 ### 文档同步
 
 - `README.md`：无结构变化，跳过。
-- `docs/CommandCenter.md`：§5 PLC 从站章节补充"热更重建必须 Dispose 旧从站网络"说明，
+- `docs/IrisVision.md`：§5 PLC 从站章节补充"热更重建必须 Dispose 旧从站网络"说明，
   第八部分版本记录追加 V2.14.23。
 - `AGENTS.md`：PLC 从站段落补充"热更重建旧 master 连接释放"红线。
 
@@ -2249,7 +2281,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 ### 文档同步
 
 - `README.md`：无结构变化，跳过。
-- `docs/CommandCenter.md`：第一部分"存图目录结构"说明补充"每级只能是一层名字、不能粘贴完整路径"，
+- `docs/IrisVision.md`：第一部分"存图目录结构"说明补充"每级只能是一层名字、不能粘贴完整路径"，
   第八部分版本记录追加 V2.14.22。
 - `AGENTS.md`：`DirTreeEditForm` 相关约定补充"层级禁止含 `\`/`/`"。
 
@@ -2291,7 +2323,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 ### 文档同步
 
-- `docs/CommandCenter.md`：第一部分新增"格子高亮配色"说明 + 第八部分版本演进新增 V2.14.21。
+- `docs/IrisVision.md`：第一部分新增"格子高亮配色"说明 + 第八部分版本演进新增 V2.14.21。
 - `AGENTS.md`：窗口/点位配置约定段已含"禁用跟随点位迁移"，本次高亮配色属 UI 视觉约定、
   已在代码/文档/类头注释中写明（类头注释补充 V2.14.21 高亮配色说明）。
 
@@ -2323,7 +2355,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 ### 文档同步
 
-- `docs/CommandCenter.md`：第八部分版本演进新增 V2.14.20（本节略述交换跟随语义）。
+- `docs/IrisVision.md`：第八部分版本演进新增 V2.14.20（本节略述交换跟随语义）。
 - `AGENTS.md`：窗口/点位配置约定段补"交换/编辑互换时禁用状态跟随点位迁移"语义说明。
 
 ## V2.14.19（2026-08-14）拍照节拍优化：PW 同程序号跳过 + PLC 请求轮询 200ms→100ms
@@ -2359,7 +2391,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 ### 文档同步
 
-- `docs/CommandCenter.md`：§4.2 第 5 点（PW 指令）补 V2.14.19 缓存跳过说明；§5.3 触发前指令顺序补
+- `docs/IrisVision.md`：§4.2 第 5 点（PW 指令）补 V2.14.19 缓存跳过说明；§5.3 触发前指令顺序补
   两处优化；第八部分版本演进新增 V2.14.19。
 - `AGENTS.md`：相机段新增"PW 同程序号跳过"约定（含重连重置缓存红线）。
 
@@ -2446,7 +2478,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   P010/P011/P012 错位）。
 - **注释同步**：`AppConfig.cs` 型号点位范围注释、`ProductionCoordinator.cs`（2 处）、`ConfigStore.cs`
   、`WindowPointForm.cs`（U171=上20+下4=24 窗）点位示例统一为"上相机 1~20"。
-- **文档同步**：`docs/CommandCenter.md` §2.3 预置映射、字段表 `modelStationPrograms`、版本历史新增
+- **文档同步**：`docs/IrisVision.md` §2.3 预置映射、字段表 `modelStationPrograms`、版本历史新增
   V2.14.16；项目未上线、无需旧配置迁移。
 
 ## V2.14.15（2026-08-14）窗口矩阵铺满/滚动判定统一 + 非自适应列数上限与自适应一致
@@ -2514,7 +2546,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
     位置=旧型号序号处），点击打开 ModelIndexEditForm（传 `_cfg.Plc.ModelIndexes` 引用）；
     OnSave 中删掉原"当前型号序号写回映射"段（映射统一由弹窗维护，ConfigStore.EnsureModelIndexes
     仍兜底补齐候选型号缺失项）。头注释 ASCII 布局图同步。
-  - `CommandCenter.csproj`：登记 ModelIndexEditForm.cs + Designer 分部文件。
+  - `IrisVision.csproj`：登记 ModelIndexEditForm.cs + Designer 分部文件。
 - **DevTestForm**：写产品型号按钮已兼容新格式（40007=序号 + 40008~40012=字符串），无需改动。
 
 ### 为什么这么改
@@ -2736,7 +2768,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   删除全部手工 `new` 控件代码，只保留业务交互——构造调 `InitializeComponent()` 后
   预填当前 SN + `SelectAll()` + `Focus()`、`AcceptButton/CancelButton` 回车/Esc、
   【确定】空输入拦截（非空才 `DialogResult.OK`）。`SerialNumber` 属性不变。
-- **`CommandCenter.csproj`**：登记 `SerialInputForm.Designer.cs`（`<DependentUpon>` 挂到
+- **`IrisVision.csproj`**：登记 `SerialInputForm.Designer.cs`（`<DependentUpon>` 挂到
   SerialInputForm.cs）。
 - 文档同步：`AGENTS.md` 文件导航改为"外观改到 Designer 分部文件（V2.14.7）"；`CHANGELOG.md`。
 
@@ -2768,7 +2800,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   - `SetupSerialEditor`：删除 `txtSerial.ReadOnly = true`（Label 天然只读不可聚焦，无需该行）、
     删除双击订阅与 `tip.SetToolTip(txtSerial, …)`；仅保留按钮点击弹窗 + 按钮 ToolTip；
   - `PromptManualSerial`/类注释/`InitTitleBarFields`/`ApplyConfigVisibility`/`RelayoutTitleBar` 同步。
-- 文档同步：`docs/CommandCenter.md` §3.2 与"第五部分 扫码通道"措辞（Label 只读框、
+- 文档同步：`docs/IrisVision.md` §3.2 与"第五部分 扫码通道"措辞（Label 只读框、
   仅按钮入口、无气泡提示）；`AGENTS.md` 文件导航描述更新；`CHANGELOG.md`。
 
 ### 为什么这么改
@@ -2810,8 +2842,8 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
     Button 分支宽度=Width+12、`(barHeight - c.Height)/2` 垂直居中，同行控件整体右移）；
   - `ApplyConfigVisibility`：btnManualSerial 可见性跟随 txtSerial（ShowSerialNumber 开关）；
   - 类注释、ASCII 布局图同步"只读展示 + 人工补录按钮/双击弹窗"（V2.14.6）。
-- **`CommandCenter.csproj`**：登记新窗体 `Views\SerialInputForm.cs`。
-- 文档同步：`docs/CommandCenter.md` §3.2 手动输入改"按钮/双击弹窗"、"第一部分 主界面速览"、
+- **`IrisVision.csproj`**：登记新窗体 `Views\SerialInputForm.cs`。
+- 文档同步：`docs/IrisVision.md` §3.2 手动输入改"按钮/双击弹窗"、"第一部分 主界面速览"、
   "第五部分 扫码通道"措辞；`README.md` 序列号说明；`CHANGELOG.md`。
 
 ### 为什么这么改
@@ -2827,7 +2859,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 - 空输入拦截保留原 SN：防误清空导致本件图片归档进"无 SN"目录而错乱。
 
 ### 验证
-- Debug 构建通过（无 error，MSBuild 输出 `CommandCenter.exe`）；冒烟启动进程存活、无崩溃；
+- Debug 构建通过（无 error，MSBuild 输出 `IrisVision.exe`）；冒烟启动进程存活、无崩溃；
   SetupSerialEditor 仅构造时订阅一次（InitTitleBarRuntime 只构造调用，热更不重复订阅）。
 
 > 用户要求：程序映射区"相机↔型号"原先是双向过滤（选型号会反过来过滤相机、甚至把相机跳走），体验乱；
@@ -3248,7 +3280,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 - **`Views/DevTestForm.cs`**：相机下拉/存图目录名/删除日志的无名称回退同步优先 `cameraId`。
 - **`Views/WindowPointForm.cs`**：点位矩阵/相机下拉等 5 处无名称回退同步优先 `cameraId`。
 - **`Services/ProductionCoordinator.cs`**：`CameraLabel` 与存图目录名兜底优先 `cameraId`；日志去冗余编号。
-- **文档同步**：`docs/CommandCenter.md`（§1 设置页相机表说明、§4.4 默认相机说明、§4.5 字段表补
+- **文档同步**：`docs/IrisVision.md`（§1 设置页相机表说明、§4.4 默认相机说明、§4.5 字段表补
   `cameraId`、§7 配置示例、§8 版本）、`CHANGELOG.md`、`AGENTS.md`（相机 ID 约定）。
 
 ### 为什么这么改
@@ -3276,7 +3308,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   下相机→`D:\IV存图\1`），注释同步"上/下相机取图目录与安装位置相反配对"及 V2.13.3 修正说明。
 - **`Views/SettingsForm.cs`**：默认相机模板行/添加行注释同步新目录（实际取值来自 `DefaultCameras()`，
   自动跟随修正）。
-- **文档同步**：`AGENTS.md`、`README.md`、`docs/CommandCenter.md`（§1 FTP 说明、§2.3 设备清单、
+- **文档同步**：`AGENTS.md`、`README.md`、`docs/IrisVision.md`（§1 FTP 说明、§2.3 设备清单、
   §4.4 多相机配置、§4.6 校准清单、§7 配置示例/核对事项、§8 版本）全部把"上→\1/下→\2"更正为
   "上→\2/下→\1"并注明与安装位置相反配对。
 
@@ -3313,7 +3345,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 - **`Views/MainForm.cs`**：`OnInspectionFinished` 三层处理——`UpdateCountsTitle`（计数/标题轻量更新，
   立即回 UI，不拖慢 PLC 握手）＋ 有 `PreviewImage` 直接转交 UI（最快路径，零磁盘 IO）＋ 无预览图则
   `Task.Factory.StartNew` 后台读盘/解码/降采样后小图回 UI；窗口重建/关窗竞态原地 Dispose 防泄漏。
-- **文档同步**：`CHANGELOG.md` / `docs/CommandCenter.md`（§8） / `AGENTS.md`（红线补"显示不等归档"）。
+- **文档同步**：`CHANGELOG.md` / `docs/IrisVision.md`（§8） / `AGENTS.md`（红线补"显示不等归档"）。
 
 ### 为什么这么改
 - "显示慢"的根子是"显示等归档"：窗口只需要 jpeg，却等 iv4p 复制完才出图。把提前加载的 jpeg 预览图
@@ -3343,7 +3375,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   与提示文本的"交换位置同相机内互换两窗口"更新为"任意两窗口互换（含跨相机，改窗口↔点位对应、
   不改相机点位/程序表）"。
 - **文档**：`AGENTS.md`（统一模型段"交换仅同相机内"约定修正为跨相机放开）、`README.md`（可配置项
-  说明）、`docs/CommandCenter.md`（§1 显示段点位交换操作说明、§4.4 存图点位旧描述顺带修正为
+  说明）、`docs/IrisVision.md`（§1 显示段点位交换操作说明、§4.4 存图点位旧描述顺带修正为
   V2.12.1 起的相机点位号模型、§8 版本新增 V2.13.1 条）、`CHANGELOG.md`。
 
 ### 为什么这么改
@@ -3421,7 +3453,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 - **`Views/SettingsForm.cs` / `SettingsForm.Designer.cs`**：`WindowPointForm` 构造调用补传
   `_cfg.Display.WindowPointMaps`；`UpdateAutoFitUi` 与三处 ToolTip/提示文案更新——
   "自适应只影响行列形状、不影响点位编辑"，去掉"编辑点位/交换/恢复已锁定"的过时说明。
-- **文档**：`docs/CommandCenter.md`（§1 点位配置操作说明、§8 版本 V2.13 条目）、`AGENTS.md`
+- **文档**：`docs/IrisVision.md`（§1 点位配置操作说明、§8 版本 V2.13 条目）、`AGENTS.md`
   （窗口矩阵统一模型段更新 V2.13 恢复编辑）、`CHANGELOG.md`。
 
 ### 为什么这么改
@@ -3473,7 +3505,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   （相机/TCP扫码枪/串口扫码枪）宽 680→900、存图根目录/文件名模板输入框 570→790、底部保存/取消
   按钮移至右缘（750/850），相机表长列名（FTP目录、PLC请求/结果索引）两行放得下，底部按钮随
   窗体加宽保持贴右。
-- **文档**：`docs/CommandCenter.md`（§5.1/§5.2/§5.3/§5.4/§5.5 全部相机通道描述、§1 功能测试
+- **文档**：`docs/IrisVision.md`（§5.1/§5.2/§5.3/§5.4/§5.5 全部相机通道描述、§1 功能测试
   说明、§7 相机配置示例、第八部分 V2.12.6 条目；**修正 §5.5 相机结果取值范围补 3=跳过**）、
   `AGENTS.md`（PLC 握手协议地址约定段更新）、`CHANGELOG.md`。
 
@@ -3503,7 +3535,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
     （上相机通道(1)→下标 0、下相机通道(2)→下标 1），并加"曾踩坑"注释说明两套编号；
   - 通道常量 `ChCamUp/ChCamDown` 注释修正为"通道号 ≠ 相机下标"的两套编号说明（原注释写
     "（相机下标 0）"与常量值 1 自相矛盾，正是误导来源）。
-- **`docs/CommandCenter.md`**：
+- **`docs/IrisVision.md`**：
   - §5.3 末尾新增技术总结"为什么必须是 PLC 复位请求→上位机才复位结果 / 不复位会怎样 / PLC 梯形图
     应对任一结果值（含 3）读到≠0 即复位请求"（三拍复位设计思想成文，供现场与 PLC 工程师对照）；
   - 第八部分版本演进新增 V2.12.5 条目说明根因与修复。
@@ -3538,7 +3570,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   - `_programEdits` 编辑副本不再建 `""` 默认槽；**`OnOk` 不再写回 `StationPrograms`**（默认表保留原值
     不动，防旧配置升级后一点确定误清空成空表，仍作型号没配表时的运行时回退）；
   - 矩阵重建 `matrixModel` 直接取选中型号（原"选默认回到 `_productModel`"分支随默认项一起删除）。
-- **文档**：`docs/CommandCenter.md`（§6 窗口点位配置章节）、`AGENTS.md`（WindowPointForm 型号双下拉
+- **文档**：`docs/IrisVision.md`（§6 窗口点位配置章节）、`AGENTS.md`（WindowPointForm 型号双下拉
   约定改为 V2.12.4 定稿）、`CHANGELOG.md`。
 
 ### 为什么这么改
@@ -3578,7 +3610,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 - **存图目录顺序（问题③）**：`ImageConfig.SubDirs` 默认改为 `{年月日}/{SN}/{相机}/{OKNG}`；
   `ConfigStore.EnsureCameraSubDir` 旧配置缺 `{相机}` 时**插到 {OKNG} 之前**（无 {OKNG} 才追加末尾），
   不再一律末尾追加。
-- **文档**：`README.md`、`docs/CommandCenter.md`（§5.1/§5.2/第六部分存图目录/第八部分版本）、
+- **文档**：`README.md`、`docs/IrisVision.md`（§5.1/§5.2/第六部分存图目录/第八部分版本）、
   `AGENTS.md`（地址约定改为 V2.12.3 定稿 + 默认型号说明）、`CHANGELOG.md`。
 
 ### 为什么这么改
@@ -3627,7 +3659,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 - **`Views/SettingsForm.cs`**：`UpdateAutoFitUi` 与 ToolTip 文案统一（点位编辑恒锁定、自适应只影响
   行列置灰）；btnEditPoints 注释更新。
 - **`Views/DevTestForm.cs` / `Views/DirTreeEditForm.cs`**：存图调用/参数化示例补相机名。
-- **文档**：`README.md`、`docs/CommandCenter.md`（第一/第四/第八部分）、`AGENTS.md`、`CHANGELOG.md`。
+- **文档**：`README.md`、`docs/IrisVision.md`（第一/第四/第八部分）、`AGENTS.md`、`CHANGELOG.md`。
 
 ### 为什么这么改
 - 窗口数是"各相机点位之和"，它天然跟着型号走；手填行列本质是"人工重复计算"。统一后无论是否
@@ -3668,7 +3700,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   相机点位表铺排、格子下方显示 **"相机名·点位号"**（如上相机·点位3），**【编辑点位/交换位置/
   恢复默认】锁定置灰**（按钮禁用 + 方法内双保险），仅保留"禁用/启用"与相机程序映射区；
   打开时默认选中当前型号的映射表；确定时不再写回 WindowStationMap（自适应存图走 windowIndex，不依赖它）。
-- **文档**：`README.md`、`docs/CommandCenter.md`、`AGENTS.md`、`CHANGELOG.md`。
+- **文档**：`README.md`、`docs/IrisVision.md`、`AGENTS.md`、`CHANGELOG.md`。
 
 ### 为什么这么改
 - 窗口数是"两台相机点位之和"——它天然跟着型号走，手填行列本质上是"人工重复计算"，错了
@@ -3703,7 +3735,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 - **`Views/SettingsForm.Designer.cs` / `SettingsForm.cs`**：新增 `chkWindowToolTip`
   （"悬停提示"），位于 `chkWindowIndex` 右侧（x=402、y=219，与整行垂直居中对齐）；
   `LoadFromConfig`/`OnSave` 读写，两处 ASCII 布局图与 ToolTip 同步更新。
-- **文档**：`README.md`（可配置项-显示）、`docs/CommandCenter.md`（第一部分"显示"段 +
+- **文档**：`README.md`（可配置项-显示）、`docs/IrisVision.md`（第一部分"显示"段 +
   第八部分版本）补充 `windowToolTipVisible`；`CHANGELOG.md` 记录。
 
 ### 为什么这么改
@@ -3725,7 +3757,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   **真实命中双击的同一批子控件**（`_pictureBox` 占满整窗、`_windowIndexLabel` 覆盖
   左上角）上，与 `MouseDoubleClick` 订阅同批——悬停到任意位置都必有提示，不依赖
   父控件冒泡；`Dispose` 时释放气泡组件。提示文案："双击放大（全屏查看）；再双击还原"。
-- **文档**：`docs/CommandCenter.md`（第一部分双击说明）+ `CHANGELOG.md` 记录。
+- **文档**：`docs/IrisVision.md`（第一部分双击说明）+ `CHANGELOG.md` 记录。
 
 ### 为什么这么改
 - 悬停提示应跟随"真正能触发双击的控件"：双击逻辑只挂在 `PictureBox`/编号标签上，
@@ -3753,7 +3785,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 - **`Views/SettingsForm.Designer.cs` / `SettingsForm.cs`**：新增 `chkWindowIndex`
   （"显示窗口编号"），置于"窗口/点位配置..."按钮右侧（x=290、y=219，与按钮垂直居中对齐）；
   `LoadFromConfig` 读入、`OnSave` 回写；两处 ASCII 布局图与 ToolTip 同步更新。
-- **文档**：`README.md`（可配置项-显示）、`docs/CommandCenter.md`（第一部分"显示"段 +
+- **文档**：`README.md`（可配置项-显示）、`docs/IrisVision.md`（第一部分"显示"段 +
   第八部分版本）补充 `windowIndexVisible` 字段名/默认值/用途；`CHANGELOG.md` 记录。
 
 ### 为什么这么改
@@ -3787,7 +3819,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   自动踢掉死会话，下一轮轮询 Masters Count 归零 → 三态灯转红，主站恢复再转绿。
 - **`Services/ScannerTcpService.cs`**：V2.10.4 的私有 `ConfigureKeepAlive` 实现
   收敛为调用 `TcpKeepAlive`，行为不变、去掉重复代码。
-- **`CommandCenter.csproj`**：新增 `Utils\TcpKeepAlive.cs` 编译项。
+- **`IrisVision.csproj`**：新增 `Utils\TcpKeepAlive.cs` 编译项。
 
 ### 为什么这么改
 - 三处 TCP 设备（扫码枪/相机/PLC 主站会话）是同一类"静默断连检测不到"的坑，一条
@@ -3847,7 +3879,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 - **`Views/SettingsForm*.cs`**：OK/NG 显示行新增 **`chkWindowOkNg`（"窗口徽标"）**，
   与"标题栏高亮"同一行、右侧、垂直居中对齐；`LoadFromConfig`/`OnSave` 读写新配置；
   ASCII 布局图与 ToolTip 同步。
-- **文档**：`README.md`（可配置项）、`docs/CommandCenter.md`（第一部分"显示"段）补充
+- **文档**：`README.md`（可配置项）、`docs/IrisVision.md`（第一部分"显示"段）补充
   `WindowOkNgVisible` 字段名/默认值/用途；`CHANGELOG.md` 记录。
 
 ### 为什么这么改
@@ -3875,7 +3907,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 - **`Views/WindowPointForm.Designer.cs`**：`lblProgHint` 固定高度 + `TextAlign=MiddleLeft`，
   与同行 cmbCamera/cmbModel 垂直居中对齐，说明文字不再贴顶。
 - **`Models/AppConfig.cs`**：`WindowStationMap` 注释补 V2.10.1"交换时禁用状态跟点位一起交换"。
-- **`docs/CommandCenter.md`**：第一部分"显示"段补充窗口禁用/交换/空表提示的 V2.10.1 行为。
+- **`docs/IrisVision.md`**：第一部分"显示"段补充窗口禁用/交换/空表提示的 V2.10.1 行为。
 
 ### 为什么这么改
 - "禁用/启用"现场实际指的是**这个点位别检测**，交换窗口点位后自然希望禁用跟着点位走；
@@ -3911,21 +3943,21 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 > docs 下原有多份文档（`使用说明.md` 操作手册 / `通讯接入.md` 通讯对接 /
 > `上位机PLC通信接口定义文档.md` 对外协议 / `现场设备IP清单.md` IP 速查），内容高度重叠
 > （寄存器表重复出现 3 次、相机/扫码枪 IP 提了 N 遍），维护一处要改多份、容易失同步。
-> 本次合并为**一份 `docs/CommandCenter.md`**，统一结构、读者指引分章。
+> 本次合并为**一份 `docs/IrisVision.md`**，统一结构、读者指引分章。
 
 ### 改动范围
-- **`docs/CommandCenter.md`（新增，合并版）**：八个部分——
+- **`docs/IrisVision.md`（新增，合并版）**：八个部分——
   ① 用户使用说明（操作员手册）② 系统总览与设备清单 ③ 扫码枪对接 ④ 相机对接
   ⑤ PLC 通讯对接与对外协议定义（5.5 保留原"对外交付 PLC"完整协议）⑥ 计数与结果流转
   ⑦ IP 与参数速查 ⑧ 版本演进。合并过程去除跨文档重复（如寄存器表只保留一份完整版）。
 - **删除** `docs/使用说明.md`、`docs/通讯接入.md`、`docs/上位机PLC通信接口定义文档.md`、
-  `docs/现场设备IP清单.md`（内容全部并入 CommandCenter.md）。
+  `docs/现场设备IP清单.md`（内容全部并入 IrisVision.md）。
 - **`docs/上位机通讯封装范式.md`**：**独立保留不合并**——它是跨项目可复用的通讯架构技能
   （连接/心跳/重连/UI 解耦范式，带 frontmatter 被 opencode 当 skill 读取），不属于本项目
   操作/协议文档，并入反而污染通用资产。
 - **引用同步**：代码注释（`AppConfig.cs`/`PlcService.cs`/`ProductionCoordinator.cs`/
   `KeyenceIV4Camera.cs` 共 8 处）、`README.md`、`AGENTS.md`（关键文件导航 + 文档同步铁律）、
-  `.opencode/skills/winforms-ui-debug/SKILL.md` 全部改为指向 `docs/CommandCenter.md` 对应章节。
+  `.opencode/skills/winforms-ui-debug/SKILL.md` 全部改为指向 `docs/IrisVision.md` 对应章节。
 
 ### 为什么这么改
 - 多份文档读者重叠、信息重复，易失同步；合并成一份带目录锚点的综合文档，按读者分章，
@@ -3950,7 +3982,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   `ProductModelPrefix` 注释去掉"可含当前配方名"。
 - **`Services/PlcService.cs`**：类头注释的旧协议历史段改为"配方概念已删除（V2.9，配方由 PLC
   侧按产品型号切换，上位机只传型号）"。
-- **`CommandCenter.csproj`**：删除配方文件引用，MainForm Designer 分部文件注释去掉"配方下拉框"。
+- **`IrisVision.csproj`**：删除配方文件引用，MainForm Designer 分部文件注释去掉"配方下拉框"。
 
 ### 为什么这么改
 - 配方与型号概念重复，且配方不存在 PLC 下发路径，属于历史遗留的冗余功能；
@@ -4413,7 +4445,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 - **`Views/SerialInputForm.cs`（新增）**：手动输入序列号对话框（纯代码构造，无 Designer）。
 - **`Views/MainForm.cs`**：序列号框 `lblSerial.MouseDoubleClick` → `PromptManualSerial()` 弹框，
   确定后调 `SetManualSerial` 并刷新标题栏；类注释补手动输入说明。
-- **`CommandCenter.csproj`**：登记新窗体 `SerialInputForm.cs`。
+- **`IrisVision.csproj`**：登记新窗体 `SerialInputForm.cs`。
 - **`docs/通讯接入.md`**：① 相机 2.2b 新增"相机联调配置字段速查表"（原 `docs/联调清单.md` 精华）；
   ② 2.2/2.3 FTP 描述更正为"上位机零配置，FTP 由基恩士工程师在相机软件里配置、无需另装 FTP 服务器"。
 - **`docs/使用说明.md`（新增）**：用户操作手册（启动/主界面/日常操作/账号/系统设置/功能测试/排查表）；
@@ -4463,7 +4495,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   避免地址定了再改代码判断逻辑。
 
 ### 验证
-- Debug 构建通过（`CommandCenter.exe` 正常生成、无 error）；冒烟启动进程存活、无崩溃。
+- Debug 构建通过（`IrisVision.exe` 正常生成、无 error）；冒烟启动进程存活、无崩溃。
 
 ## V1.12.15（2026-08-12）PLC 状态文案对齐从站语义 + 显示窗口双击放大/还原
 
@@ -4708,11 +4740,11 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 ## V1.12.7（2026-08-12）主界面标题改名"上位机控制中心"
 
-> 现场客户对主窗体标题命名有要求。原标题"CommandCenter - 相机/PLC 命令中心"改为"上位机控制中心"，
+> 现场客户对主窗体标题命名有要求。原标题"IrisVision - 相机/PLC 命令中心"改为"上位机控制中心"，
 > 更贴合本软件"现场上位机统一控制"的定位。
 
 ### 改动范围
-- **`Views/MainForm.Designer.cs`**：主窗体标题 `Text` 由 `CommandCenter - 相机/PLC 命令中心`
+- **`Views/MainForm.Designer.cs`**：主窗体标题 `Text` 由 `IrisVision - 相机/PLC 命令中心`
   改为 `上位机控制中心`（任务栏/窗口标题栏显示）。
 - **`Views/MainForm.cs`**：类注释"命令中心主窗体。"同步为"控制中心主窗体。"
 
@@ -4929,7 +4961,7 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   Admin → 系统设置 SettingsForm（原行为）；Developer → 功能测试 DevTestForm，
   测试窗体关闭不触发保存/热更（测试不产生配置改动）。DevTestForm 构造追加传入
   `_scanners` 与 `_config.Scanners`（扫码枪服务实例 + 配置，测试窗体复用与打标签用）。
-- **`CommandCenter.csproj`**：注册 DevTestForm 两个文件。
+- **`IrisVision.csproj`**：注册 DevTestForm 两个文件。
 
 ### 为什么这么改
 - 联调期用管理员账号登录风险高（进的是改配置窗体，误点保存会改坏现场配置）；
@@ -5207,9 +5239,9 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
   （传整个 _config，改密码可直接写盘），登录失败/取消直接 return，不进入系统设置——
   **每次点都校验**，无"记住登录状态"可钻空子。
 - **`Utils/ConfigStore.cs`**：`Load` 对 `Security` 空段兜底 `new SecurityConfig()`。
-- **记住密码（DPAPI 加密，`CommandCenter.csproj` 引用 `System.Security`）**：
+- **记住密码（DPAPI 加密，`IrisVision.csproj` 引用 `System.Security`）**：
   - 勾选"记住密码"登录成功后，把"用户名+密码"用 Windows **DPAPI**（`ProtectedData`）
-    加密存到 `%LOCALAPPDATA%\CommandCenter\remembered_login.dat`（绑定当前 Windows 用户，
+    加密存到 `%LOCALAPPDATA%\IrisVision\remembered_login.dat`（绑定当前 Windows 用户，
     换机器/换用户解不开，拷走文件也无效）；下次打开登录框自动回填，用户仍可看到圆点密码、
     点登录即可；
   - 取消勾选登录成功时删除旧记录；改密码保存后若勾选则把记住文件同步成新密码，

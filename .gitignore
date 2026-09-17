@@ -21,7 +21,7 @@ Config/*.json
 !.opencode/skills/
 !.opencode/skills/**
 
-# NuGet 包缓存目录（项目依赖已拷入 CommandCenter/libs/ 直接引用，不靠 restore）
+# NuGet 包缓存目录（项目依赖已拷入 IrisVision/libs/ 直接引用，不靠 restore）
 packages/
 
 # WorkBuddy 项目本地数据（会话记忆/日志等，不入库）

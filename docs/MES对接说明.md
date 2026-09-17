@@ -1,4 +1,4 @@
-# CommandCenter MES 对接说明（SN 上传）
+# IrisVision MES 对接说明（SN 上传）
 
 > 版本：V2.15.20（2026-08-30）
 > 适用对象：后续负责 MES 对接的开发/调试人员。本文档说明"扫码 SN 传 MES"的**配置方法、当前报文格式、运行行为**，以及**客户 MES 协议定稿后代码要改哪里**。
@@ -82,9 +82,9 @@ MES 协议**尚未定稿**，当前为通用 HTTP 上报：
 
 | 改什么 | 文件/位置 | 说明 |
 |--------|-----------|------|
-| **报文字段/格式** | `CommandCenter/Services/MesService.cs` → `BuildPayload()` | 当前把 `{sn, model, time}` 匿名对象用 Newtonsoft 序列化成 JSON。按客户接口文档改字段名/嵌套结构/时间格式即可；静态方法、有测试用例覆盖（TestRunner 第⑨组） |
-| **发送方式** | `CommandCenter/Services/MesService.cs` → `SendSerialAsync()` 内 `Task.Run` 块 | 客户若要求鉴权头（Token/AppKey）、PUT 方式、表单/XML 格式，改这里的 `StringContent` 与 `http.PostAsync` 调用；需要签名的在此处加 |
-| **新增报文字段** | `CommandCenter/Models/AppConfig.cs` → `SnRouteConfig` | 客户若要求随 SN 带工位号/设备编号/批次等**可配置字段**，在 `SnRouteConfig` 加属性（小驼峰即 JSON 字段名），并在 BuildPayload 里引用 |
+| **报文字段/格式** | `IrisVision/Services/MesService.cs` → `BuildPayload()` | 当前把 `{sn, model, time}` 匿名对象用 Newtonsoft 序列化成 JSON。按客户接口文档改字段名/嵌套结构/时间格式即可；静态方法、有测试用例覆盖（TestRunner 第⑨组） |
+| **发送方式** | `IrisVision/Services/MesService.cs` → `SendSerialAsync()` 内 `Task.Run` 块 | 客户若要求鉴权头（Token/AppKey）、PUT 方式、表单/XML 格式，改这里的 `StringContent` 与 `http.PostAsync` 调用；需要签名的在此处加 |
+| **新增报文字段** | `IrisVision/Models/AppConfig.cs` → `SnRouteConfig` | 客户若要求随 SN 带工位号/设备编号/批次等**可配置字段**，在 `SnRouteConfig` 加属性（小驼峰即 JSON 字段名），并在 BuildPayload 里引用 |
 | **回执判定/重试**（按需） | `MesService.SendSerialAsync` | 若客户要求"MES 返回成功才算数"，在 `resp.IsSuccessStatusCode` 分支里按客户返回体判定；要重试就在此实现（注意保持后台线程、别阻塞协调器） |
 
 ### 5.3 一般不用动的位置
@@ -94,14 +94,14 @@ MES 协议**尚未定稿**，当前为通用 HTTP 上报：
 | `Services/ProductionCoordinator.cs` → `DeliverSerialNumber()` | 分流收口已定稿：target 判定走 `SerialNumberTargets`，协议改动与它无关 |
 | `Models/AppConfig.cs` → `SerialNumberTargets` | 二选一常量与判定，配置结构不变就不用动 |
 | `Utils/ConfigStore.cs`（ApplyDefaults 的 sn 段兜底） | 只做空段/脏值归一，与报文无关 |
-| PLC 握手、寄存器协议（docs/CommandCenter.md §5） | SN 去向与 PLC 结果握手完全解耦 |
+| PLC 握手、寄存器协议（docs/IrisVision.md §5） | SN 去向与 PLC 结果握手完全解耦 |
 | `Views/SettingsForm.*` | 设置页已无 SN 去向相关控件（V2.15.20 删除），纯配置变量控制 |
 
 ### 5.4 注意事项（红线）
 
 1. **异步红线**：MES 上传必须在后台线程（现有 `Task.Run` 结构别改成同步），绝不能拖慢"SN 先于结果 40004=1 落地"与 PLC 握手节拍。
-2. **混淆红线**：`CommandCenter.Models` 命名空间在 obfuscar.xml 里是豁免区（属性名=JSON 字段名）——往 `SnRouteConfig` 加字段没问题；但**别把报文模型类放到 Models 之外还指望属性名不被混淆**，或直接在 `BuildPayload` 里用匿名对象（当前做法，最稳）。
-3. **改完必须跑测试**：`powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\scripts\run-all.ps1"`；改了 `BuildPayload` 就同步改 TestRunner 第⑨组的报文断言。
+2. **混淆红线**：`IrisVision.Models` 命名空间在 obfuscar.xml 里是豁免区（属性名=JSON 字段名）——往 `SnRouteConfig` 加字段没问题；但**别把报文模型类放到 Models 之外还指望属性名不被混淆**，或直接在 `BuildPayload` 里用匿名对象（当前做法，最稳）。
+3. **改完必须跑测试**：`powershell -ExecutionPolicy Bypass -File ".opencode\skills\irisvision-test\scripts\run-all.ps1"`；改了 `BuildPayload` 就同步改 TestRunner 第⑨组的报文断言。
 4. **日志是中文**，保持现状；`OK/NG/SN/MES/HTTP` 等专有名词不翻译。
 
 ## 六、调试与验证方法
@@ -118,8 +118,8 @@ MES 协议**尚未定稿**，当前为通用 HTTP 上报：
 
 | 文件 | 职责 |
 |------|------|
-| `CommandCenter/Services/MesService.cs` | MES 上传服务（HTTP POST、报文组装、防堆积）——**协议适配主要改这里** |
-| `CommandCenter/Models/AppConfig.cs` | `SnRouteConfig`（sn 段配置模型）+ `SerialNumberTargets`（二选一常量与判定） |
-| `CommandCenter/Services/ProductionCoordinator.cs` | `DeliverSerialNumber()`：SN 分流唯一收口（4 处调用点：扫码 OK/读码失败/超时/人工补录） |
-| `CommandCenter/Views/MainForm.cs` | MesService 生命周期（BuildServices 创建、热更/关窗 Dispose） |
-| `.opencode/skills/commandcenter-test/scripts/TestRunner.cs` | 第⑨组用例：路由判定/配置往返/报文格式断言 |
+| `IrisVision/Services/MesService.cs` | MES 上传服务（HTTP POST、报文组装、防堆积）——**协议适配主要改这里** |
+| `IrisVision/Models/AppConfig.cs` | `SnRouteConfig`（sn 段配置模型）+ `SerialNumberTargets`（二选一常量与判定） |
+| `IrisVision/Services/ProductionCoordinator.cs` | `DeliverSerialNumber()`：SN 分流唯一收口（4 处调用点：扫码 OK/读码失败/超时/人工补录） |
+| `IrisVision/Views/MainForm.cs` | MesService 生命周期（BuildServices 创建、热更/关窗 Dispose） |
+| `.opencode/skills/irisvision-test/scripts/TestRunner.cs` | 第⑨组用例：路由判定/配置往返/报文格式断言 |

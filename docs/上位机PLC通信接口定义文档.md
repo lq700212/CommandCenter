@@ -110,7 +110,7 @@
   而是三时机写：① **每次扫码推进时写**（原行为）；② **从站建站成功即写**（`PlcService.SetCurrentModel`
   缓存型号，`EnsureConnected` 建站成功即写，覆盖上电/断线重建/热更重建，PLC 不触发扫码也读得到）；
   ③ **主界面切型号立即下发**（`SwitchModel` 更新并重写）。PLC 随时能读到当前型号。
-  **型号同时决定相机程序映射**（`modelStationPrograms`，见 `docs/CommandCenter.md` §4）：切型号即切换
+  **型号同时决定相机程序映射**（`modelStationPrograms`，见 `docs/IrisVision.md` §4）：切型号即切换
    对应的"点位→相机程序号"表，触发相机时按新型号发 `PW,nnn` 切程序。
 
 ### 2.5 扫码 SN 序列号编码说明（V2.15.17）

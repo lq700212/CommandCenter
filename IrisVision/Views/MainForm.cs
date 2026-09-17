@@ -1,0 +1,1894 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using IrisVision.Controls;
+using IrisVision.Models;
+using IrisVision.Services;
+using IrisVision.Utils;
+
+namespace IrisVision.Views
+{
+    /// <summary>
+    /// 控制中心主窗体。
+    /// 【界面布局】
+    /// ┌───────────────────────────────────────────────────────────────────┐
+    /// │ 产品型号:[cmbModel▾] 序列号:[框][人工补录] | 总数:0 | [OK] | [NG] | [系统设置][中/英][深/浅色] │
+    /// │                                        ●PLC ●扫码枪 ●上相机 ●下相机 │
+    /// │（相机灯/下拉显示配置名称：有名称显名称，无名称回退"相机N"即序号；      │
+    /// │  ≤2台相机名限长10字符超出"…"截断、灯宽自适应，悬停看完整名/IP/状态；  │
+    /// │  ≥3台聚拢成"总标签+下拉"）                                           │
+    /// ├───────────────────────────────────────────────────────────────────┤
+    /// │  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐                  │
+    /// │  │ W1   │ │ W2   │ │ W3   │ │ W4   │ │ W5   │                   │
+    /// │  │ [OK] │ │ [NG] │ │ [OK] │ │ ...  │ │ [NG] │                   │
+    /// │  └──────┘ └──────┘ └──────┘ └──────┘ └──────┘                  │
+    /// │  （Rows × Columns 个窗口，逐次环形刷新；外层 pnlWindowScroll      │
+    /// │   AutoScroll=true，行多超高时右侧出滚动条、滚轮下滑）              │
+    /// ├───────────────────────────────────────────────────────────────────┤
+    /// │ 状态:等待PLC主站到位…（左下角；型号切换成功时变绿显示"型号切换完成"）     │
+    /// └───────────────────────────────────────────────────────────────────┘
+    /// 窗口放大/还原（V1.12.15）：鼠标左键双击任一显示窗口 → 该窗口全屏放大（整屏含任务栏），
+    ///   再次双击 / 按 Esc → 还原回窗口矩阵原位置；全屏时画面仍随检测实时刷新（移动的是同一控件）。
+    /// 序列号手动输入（V1.12.17 弹窗 / V1.12.19 框内直录 / V2.14.6 恢复弹窗）：标题栏"序列号"框
+    ///   （lblSerial，V2.14.7 由 TextBox 换回历史 Label 只读框）为**只读展示 + 弹窗录入**交互——
+    ///   扫码枪收码自动覆盖框内文本；
+    ///   需要手动补录（无扫码枪 / 扫码枪没读到码 / SN 修改）时，点序列号框右侧**【人工补录】按钮**
+    ///   （btnManualSerial，V2.14.7 起唯一入口，**双击框弹窗已取消、框上无 ToolTip**），
+    ///   弹 SerialInputForm 录入对话框：预填当前 SN、点【确定】（非空才提交）/【取消】关闭。
+    ///   确定后调 SetManualSerial（与扫码枪收码等效，可推进"等 SN"阶段）并刷新标题栏。
+    ///   为什么恢复弹窗：框内直录时 txtSerial 本身可编辑，与扫码枪自动收码"抢"同一个输入框，
+    ///   扫码枪一推码就把人工输入顶掉，且"无确认按钮"让现场不清楚什么时候生效——两条通道
+    ///   应彻底隔离（扫码=自动覆盖只读框；手动=独立弹窗+确认按钮）。
+/// 标题栏：左起信息字段（按配置开关）→ 产品型号下拉（V2.8，可直接切型号）→ 系统设置按钮
+/// → 连接指示灯；
+    ///   - 连接指示灯从右到左：●相机N..●相机1 → ●扫码枪 → ●PLC（Dock.Right 先 Add 靠左）。
+    ///     扫码枪灯显示"扫码枪：已连接/未连接"，绿=已连接、红=未连接（V1.12.6，聚合刷新）；
+    ///     PLC 灯三态（V1.12.11 从站模式）：绿=主站已连入 / 黄=监听就绪等待主站 / 红=监听失败
+    ///     （悬停 ToolTip 给出状态含义与排查方向，见 UpdatePlcStatus）。
+    ///   - OK/NG 计数默认"实心彩色色块 + 白字"高亮（绿底=OK、红底=NG），关闭
+    ///     DisplayConfig.TitleOkNgHighlight 则回退普通彩色文字；
+    /// 底部栏：仅状态文本，固定在左下角。
+    /// 职责：只做界面呈现 + 事件绑定，业务编排在 ProductionCoordinator。
+    /// 静态布局控件（标题栏字段/设置按钮/PLC灯/扫码枪灯/状态栏/窗口矩阵容器）在
+    /// MainForm.Designer.cs 中由设计器维护；动态控件（相机灯/窗口矩阵内容）在此运行时生成。
+    /// 系统设置保存后不重启：ApplyRuntimeConfig 停旧服务层、按新配置全量重建服务与界面
+    /// （V1.6.0，连接惰性 + 后台心跳自动按新 IP 重连，等效"断开重连"）。
+    /// </summary>
+    public partial class MainForm : Form
+    {
+        private AppConfig _config;
+        private PlcService _plc;
+        private List<KeyenceIV4Camera> _cameras;   // 多台相机各一个服务实例（V1.1.0）
+        private ImageStore _imageStore;
+        private ProductionCoordinator _coordinator;
+        private ConnectionMonitor _monitor;
+        private MesService _mes;                    // MES 上传服务（V2.15.19）：sn.target=Mes 时扫码 SN 经它后台 HTTP 上传；归主窗体所有
+        private List<IScanner> _scanners = new List<IScanner>();   // 扫码枪列表（多台各一个实例，V1.8.1 起支持多台；串口/基恩士 TCP 无协议按各自 Mode 二选一）
+        private Label[] _lblCamStatuses;            // 每台相机一个连接指示灯（≤2台模式，按相机下标对齐）
+        private ComboBox _cmbCamOverview;           // 相机下拉列表（≥3台模式）：下拉查看每台名字+状态圆点
+        private int[] _camOverviewOrder;            // ≥3台模式下拉项排序映射：下拉项下标 i → 相机下标（掉线相机排最前，V2.15.16）
+        private Panel _pnlCamOverview;              // ≥3台模式的容器：装下拉框统一垂直居中（V2.15.16 起只剩下拉框，无总标签）
+        private ToolTip _camTip;                    // 相机下拉框的悬停明细提示（列出每台相机连/断）
+        private ToolTip _langTip;                   // 语言切换按钮的悬停提示（V2.15.1，惰性创建）
+        private ToolTip _themeTip;                  // 主题切换按钮的悬停提示（V2.16.2，惰性创建）
+        private ToolTip _plcTip;                    // PLC 灯悬停提示（说明三态灯当前含义，V1.12.11）
+        private bool _modelComboInit;     // 型号下拉程序内初始化/刷新时防误触 SelectedIndexChanged
+        private bool _modelComboWired;    // 型号下拉事件是否已挂线（构造与热更都会走 InitModelCombo，只挂一次）
+
+        // 扫码枪异常弹窗节流（V2.14.32）：避免扫码枪持续报 ERROR 时弹窗轰炸操作员。
+        // 记录上次弹窗的时间点，两次真实弹窗间隔必须 ≥ 该窗口，中间再次失败只进日志不再弹窗。
+        private static readonly TimeSpan ScannerFailPromptThrottle = TimeSpan.FromSeconds(30);
+        private DateTime _lastScannerFailPromptUtc = DateTime.MinValue;
+
+        // 扫码枪异常弹窗"今日不再提醒"（V2.14.32 增强）：操作员在 ScannerFailForm 勾选后，
+        // 记录当天日期，当日后续扫码枪失败一律不弹窗（业务 NG 判定照旧、日志照记），次日自动恢复。
+        private DateTime _scannerFailMuteDate = DateTime.MinValue;
+
+        /// <summary>
+        /// 显示窗口集合（V1.12.28 起按"窗口编号"索引，不再用数组下标）：
+        /// 禁用的窗口（DisplayConfig.WindowEnabled=false）不在矩阵显示、不建控件，
+        /// 因此窗口编号与格子位置不再是 1:1 连续——用字典按编号存取，OnInspectionFinished
+        /// 拿到窗口编号即可找到对应控件刷新。键=窗口编号（1 起），值=该窗口的显示控件。
+        /// </summary>
+        private readonly Dictionary<int, CameraDisplayControl> _windowControls = new Dictionary<int, CameraDisplayControl>();
+
+        // 窗口双击放大/还原全屏（V1.12.15）：双击任一显示窗口 → 全屏显示，再双击/Esc → 还原。
+        private Form _fullScreenForm;                  // 全屏承载窗体（无边框、置顶、覆盖全屏）
+        private CameraDisplayControl _fullScreenWindow;// 当前被放大的窗口（从 grid 移入全屏窗体）
+        private TableLayoutPanelCellPosition? _fullScreenCell; // 该窗口在 grid 里的原单元格（还原时放回）
+
+        // 统计
+        private int _total, _ok, _ng;
+
+        // 序列号"人工补录"按钮悬停提示（V2.15.0 国际化：切语言时刷新文本，故存为字段）
+        private ToolTip _serialTip;
+
+        public MainForm()
+        {
+            InitializeComponent();   // 先解析设计器里的静态控件（否则后续代码引用会拿到 null）
+
+            // V2.16.5 品牌图标：标题栏/任务栏用 exe 内嵌主图标（光阑视界 IrisVision，
+            // 与桌面快捷方式/资源管理器图标同一来源，见 Utils\AppIcon 类注释）。
+            var appIcon = Utils.AppIcon.Get();
+            if (appIcon != null) this.Icon = appIcon;
+
+            _config = ConfigStore.Load();
+
+            // V2.15.3 修复"重启语言不保持"：把配置里持久化的语言（language 字段）同步给全局
+            // I18n.Language，否则它永远停留在默认"zh-CN"，启动后界面恒中文（关闭前切到英文、
+            // 重启又变回中文）。放在这里（Load 后、一切界面文本初始化之前）同步：
+            // 后续 BuildServices/InitTitleBarRuntime/ApplyLanguage 里的 I18n.T 全都按配置语言取值；
+            // setter 触发的 LanguageChanged 此刻尚无订阅者（SubscribeEvents 在后面），安全。
+            I18n.Language = _config.Language;
+
+            // V2.16.2 深色模式：把配置里持久化的主题同步给全局 AppTheme（与上面语言同步同理，
+            // 放在一切界面上色之前；setter 触发的 ThemeChanged 此刻尚无订阅者，安全）。
+            AppTheme.Theme = _config.Theme;
+
+            BuildServices();         // PLC/多相机/图像/协调器 就绪（相机灯数量依赖 _cameras）
+            InitTitleBarRuntime();   // 按配置补全标题栏：文案/可见性/型号下拉/动态相机灯/紧凑重排
+            BuildWindowGrid();       // 窗口矩阵（用设计器的 gridCameraWindows 容器，动态重建行列）
+            SubscribeEvents();
+            _coordinator.Start();
+            ApplyLanguage();   // V2.15.0 国际化：构造末尾统一按配置语言刷新界面文本
+            ApplyTheme();      // V2.16.2 深色模式：构造末尾按当前主题全量上色（含动态窗口）
+        }
+
+        /// <summary>组装底层服务（PLC/多相机/图像/协调器）。</summary>
+        private void BuildServices()
+        {
+            _plc = new PlcService(_config.Plc);
+            // V2.14.14：把初始型号交给 PLC 服务——从站建站成功后立即写进型号区（40007=序号+
+            // 40008~40012=字符串），PLC 不触发扫码也能读到当前型号（见 PlcService.SetCurrentModel）。
+            _plc.SetCurrentModel(_config.ProductModel);
+
+            // 多相机：配置列几台就建几个相机服务实例，各自独立连接/触发/存图
+            _cameras = new List<KeyenceIV4Camera>();
+            var cams = _config.Cameras ?? new List<CameraConfig>();
+            // 空配置兜底两台默认相机（V1.9.8：现场相机 IP 已写死，见 CameraConfig.DefaultCameras）。
+            // 注意 cams 是 _config.Cameras 的引用，AddRange 修改会直接生效到配置；仅空列表兜底，
+            // 不影响"用户在设置里配了几台就用几台"的既有行为。
+            if (cams.Count == 0) cams.AddRange(CameraConfig.DefaultCameras());
+            foreach (var c in cams)
+                _cameras.Add(new KeyenceIV4Camera(c));
+            // V2.13.8：把各相机结果寄存器地址注册给 PLC 服务——从站就绪时统一清 0
+            // （上电/断电重启后结果寄存器不残留旧值，见 PlcService.ResetResultRegisters）
+            _plc.SetCameraResultAddresses(cams);
+            LogHelper.Info($"BuildServices：共创建 {_cameras.Count} 台相机：{string.Join(" / ", _cameras.ConvertAll(x => x.IpLabel))}");
+
+            _imageStore = new ImageStore(_config.Image);
+            // V2.13.6：为每台相机启动其 FTP 取图目录的 FileSystemWatcher（AddMonitor 幂等去重，
+            // 目录不存在自动建）。相机一推图事件就置位协调器里的信号，等图流程立即唤醒（信号加速）。
+            // 目录取相机配置 FtpUploadDir，留空回退全局 FtpRootDir（与协调器 FtpDirFor 同规则）；
+            // 监听线程只发事件，不做取图/归档（那些在协调器后台 Task 里），不违反"UI 禁 IO"红线。
+            for (int ci = 0; ci < cams.Count; ci++)
+            {
+                string dir = string.IsNullOrWhiteSpace(cams[ci]?.FtpUploadDir)
+                    ? _imageStore.DefaultFtpDir
+                    : cams[ci].FtpUploadDir.Trim();
+                _imageStore.AddMonitor(dir, ci);
+            }
+
+            // V2.14.12：启动"存图目录定期清理"后台任务（默认保留 30 天，每天在后台线程清理
+            // 过期日期目录；启动后 30 秒跑第一次、之后每 24 小时一次，见 ImageStore.StartPeriodicCleanup）。
+            // 热更/关窗时旧 ImageStore Dispose 会自行停掉定时器，这里只对当前新实例启动。
+            _imageStore.StartPeriodicCleanup();
+            // V2.15.19：MES 上传服务（sn 段配置）——协调器扫码 OK/人工补录拿到 SN 后按
+            // sn.target（V2.15.20 二选一：Mes=默认传 MES / Plc=写寄存器）决定经它后台 HTTP 上传。
+            // 与 PlcService 同级归主窗体所有：热更/关窗 Dispose（见 FormClosing/ApplyRuntimeConfig），
+            // 切型号只重建协调器、本服务复用同一实例。
+            _mes = new MesService(_config.Sn);
+            // 协调器构造尾部两个新参数：SN 去向配置 + MES 服务（分流收口见 DeliverSerialNumber）
+            _coordinator = new ProductionCoordinator(_plc, _cameras, cams, _imageStore,
+                _config.Display.WindowEnabled, _config.ProductModel, _config.Display.WindowPointMaps,
+                WindowCount(), _config.Sn, _mes);
+
+            // 连接健康监控：后台心跳 + 断连自动重连 + 边沿日志（不影响任何 UI 刷新）
+            _monitor = new ConnectionMonitor(_plc, _cameras);
+
+            // 扫码枪（V1.8.1 起支持多台）：每台按各自的 ScanConfig.Mode 选实现——
+            // "Tcp"=基恩士 SR 以太网无协议，其余按串口兜底。扫码枪断连自愈由实现类内部完成，
+            // 不占 ConnectionMonitor。列表为空则不留任何扫码枪（序列号走手动输入/模拟）。
+            _scanners = new List<IScanner>();
+            foreach (var sc in _config.Scanners ?? new List<ScanConfig>())
+                _scanners.Add(BuildScanner(sc));
+
+            // V1.12.16 两阶段流程：把扫码枪注入协调器，供"扫码到位→触发扫码→等SN"阶段使用
+            // （协调器在 BuildServices 里比扫码枪先创建，故用方法注入而非构造参数）。
+            _coordinator.AttachScanners(_scanners);
+        }
+
+        /// <summary>
+        /// 按配置创建一台扫码枪实例。
+        /// "Tcp" → ScannerTcpService（基恩士 SR 系列 TCP/IP 无协议，上位机作客户端收条码行）；
+        /// 其余 → ScannerService（串口 RS-232）。两者实现同一 IScanner 接口。
+        /// </summary>
+        private static IScanner BuildScanner(ScanConfig scan)
+        {
+            // 空安全比较：Mode 为 null/空时一律走串口分支（ScannerService），不按旧配置兜底，
+            // 只是防止配置里 mode 被手写成 null 导致 .Trim() 空引用崩溃。
+            if (scan.Mode?.Trim().Equals("Tcp", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return new ScannerTcpService(scan);
+            }
+            return new ScannerService(scan);
+        }
+
+        /// <summary>
+        /// 标题栏"运行时"初始化（仅构造调用一次）：
+        ///   ① 字段/可见性/OK-NG 色块/相机灯 → InitTitleBarFields（可重入，热更时再调）；
+        ///   ② 产品型号下拉填充（只一次）；
+        ///   ③ 设置按钮事件挂线（只一次）。
+        /// 设计器负责"控件长什么样"，此处负责"数据与动态部分"。
+        /// </summary>
+        private void InitTitleBarRuntime()
+        {
+            // ① 标题栏字段 + 动态相机灯（构造与"设置保存热更"都会调用，可重入）
+            InitTitleBarFields();
+
+            // ② 产品型号下拉（V2.8）：填充预置三型号候选并选中当前型号（期间屏蔽事件）。
+            //    热更（ApplyRuntimeConfig）也会调用，重新按新配置候选刷新。
+            InitModelCombo();
+
+            // ③ 设置按钮事件（设计器只做外观，交互在这里挂线，只挂一次）
+            btnSettings.Click += (s, e) => OpenSettings();
+
+            // ③' 语言切换按钮（V2.15.1 从设置窗体移到标题栏）：点击直接切换中/英文，
+            //    立即热生效（I18n.Language 触发 LanguageChanged → ApplyLanguage 全量刷新）并写盘持久化。
+            //    按钮文本 = 目标语言名，由 ApplyLanguage() 设置（见 btnToggleLanguage 处理）。
+            btnToggleLanguage.Click += (s, e) =>
+            {
+                _config.Language = (I18n.Language == "en-US") ? "zh-CN" : "en-US";
+                I18n.Language = _config.Language;
+                // V2.15.2：写盘失败不弹未处理异常——语言切换已即时生效（内存 + 界面），
+                // 落盘只影响"重启后是否保持"，失败仅记日志 + 双语提示，绝不中断操作。
+                // （ConfigStore.Save 内部 catch 后 throw，必须在这里兜住。）
+                try { ConfigStore.Save(_config); }
+                catch (Exception ex)
+                {
+                    LogHelper.Warn("语言切换：配置写盘失败（重启后可能恢复原语言）" + ex.Message);
+                    MessageBox.Show(
+                        I18n.T("界面语言已切换，但配置保存失败，重启后可能恢复原语言。",
+                               "Language switched, but saving config failed; it may revert after restart."),
+                        I18n.T("提示", "Notice"),
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            };
+
+            // ③'' 主题切换按钮（V2.16.2 深色模式，位于语言按钮右侧标题栏最右）：
+            //    点击直接切换深/浅色，立即热生效（AppTheme.Theme 触发 ThemeChanged → ApplyTheme
+            //    全量重刷）并写盘持久化。按钮文本 = 目标主题名，由 ApplyLanguage() 设置。
+            //    写盘失败处理与语言按钮同策略：已即时生效，只影响重启保持，记日志+双语提示。
+            btnToggleTheme.Click += (s, e) =>
+            {
+                _config.Theme = AppTheme.IsDark ? AppTheme.Light : AppTheme.Dark;
+                AppTheme.Theme = _config.Theme;
+                try { ConfigStore.Save(_config); }
+                catch (Exception ex)
+                {
+                    LogHelper.Warn("主题切换：配置写盘失败（重启后可能恢复原主题）" + ex.Message);
+                    MessageBox.Show(
+                        I18n.T("界面主题已切换，但配置保存失败，重启后可能恢复原主题。",
+                               "Theme switched, but saving config failed; it may revert after restart."),
+                        I18n.T("提示", "Notice"),
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            };
+
+            // ④ 序列号框交互（V2.14.6 恢复弹窗，替代 V1.12.19 框内直录）：lblSerial 只读展示框
+            //    （扫码枪收码自动填充，OnSerialScanned 直接覆盖文本），手动补录/改 SN 用点右侧
+            //    【人工补录】按钮（btnManualSerial，V2.14.7 起取消双击框弹窗）弹 SerialInputForm
+            //    录入对话框，点【确定】（非空才提交）/【取消】关闭。
+            //    交互全部在 SetupSerialEditor 里接线一次（构造时仅调用一次，热更不重复订阅）。
+            SetupSerialEditor();
+        }
+
+        /// <summary>
+        /// 序列号框交互接线（V2.14.6 恢复"弹窗录入"，替代 V1.12.19 的"框内直录"）。
+        /// lblSerial（V2.14.7 由 TextBox 换回历史 Label 只读框）平时是**只读展示框**
+        /// （白底+单线边框，外观不变）：
+        ///   - 扫码枪收码路径不冲突：OnSerialScanned（MainForm）直接覆盖 lblSerial.Text，Label
+        ///     不会获得焦点、不可编辑，操作员也不用担心打字内容被扫码枪顶掉；
+        ///   - 手动补录：点右侧**【人工补录】按钮**（btnManualSerial，V2.14.6）→
+        ///     弹 SerialInputForm（预填当前 SN）→【确定】非空时调 SetManualSerial
+        ///     （与扫码枪收码等效：推进"等 SN"阶段）并刷新标题栏；
+        ///     【取消】/直接关闭不生效，保留原 SN。
+        ///   - V2.14.7：取消 lblSerial **双击弹窗**功能（现场误双击也会弹窗、容易误改 SN），
+        ///     只保留按钮入口；同时移除 lblSerial 的 ToolTip 提示，避免鼠标悬停弹字干扰操作。
+        /// 为什么恢复弹窗而不是框内直录：直录版 txtSerial（TextBox）本身可编辑，与扫码枪自动收码
+        /// "抢"同一个输入框，扫码枪一推码就把人工输入顶掉；弹窗用独立模态对话框接收输入，
+        /// 两条通道彻底隔离，且"明确点确定才生效"消除现场对"输入完没有确认按钮"的疑问
+        /// （历史 V1.12.17 即为弹窗交互）。
+        /// </summary>
+        private void SetupSerialEditor()
+        {
+            // Label 天然只读、不可聚焦，无需再设 ReadOnly（TextBox 时代才需要）。
+            btnManualSerial.Click += (s, e) => PromptManualSerial();        // 人工补录按钮：手动录 SN 唯一入口
+            _serialTip = _serialTip ?? new ToolTip();
+            _serialTip.SetToolTip(btnManualSerial, I18n.T("手动输入/修改当前序列号", "Enter / modify current serial number"));
+        }
+
+        /// <summary>点【人工补录】按钮 → 弹手动录入对话框；确定且非空则写协调器并刷新标题栏（V2.14.6 恢复）。</summary>
+        private void PromptManualSerial()
+        {
+            if (IsDisposed) return;
+            using (var dlg = new SerialInputForm(_coordinator.LatestSerialNumber, _scanners))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;   // 取消/关闭：不生效，保留原 SN
+                string code = dlg.SerialNumber.Trim();
+                if (string.IsNullOrEmpty(code)) return;                // 弹窗本身已拦截空输入，双保险
+                _coordinator.SetManualSerial(code);
+                if (lblSerial != null) lblSerial.Text = code;
+                LogHelper.Info($"手动输入序列号：{code}");
+            }
+        }
+
+        /// <summary>
+        /// 标题栏"字段与动态部分"按配置初始化（构造与"设置保存热更"都会调用，可重入）：
+        ///   ① 产品型号前缀文案（ProductModelPrefix）与各信息字段的可见性（ShowXxx 开关）；
+        ///   ② 标题栏 OK/NG 计数色块高亮（StyleCountBadge，配色跟随配置）；
+        ///   ③ 每台相机一个连接指示灯（_lblCamStatuses，按相机下标对齐）——相机台数运行时才知道，
+        ///      所以这类"动态控件"不进设计器，在这里循环生成，Dock.Right 排在 PLC 灯右侧；
+        /// 说明：紧凑重排（RelayoutTitleBar）在 OnShown / 热更末尾执行，不在此处。
+        /// </summary>
+        private void InitTitleBarFields()
+        {
+            ApplyConfigVisibility();
+
+            // 产品型号前缀文案（V1.1.2 现场业务对应）：前缀文案走配置，开关控制整段显示
+            lblProductPrefix.Text = _config.Display.ProductModelPrefix + ":";
+            // 序列号：标题"序列号:"在显示框外（lblSerialTitle），框内只放值（lblSerial，Label 只读框、
+            // 弹窗录入，V2.14.6；V2.14.7 由 TextBox 换回 Label）；有值显示值，没有则框内留空
+            // （不写"待扫码"），标题+框整体由开关控制显隐
+            lblSerialTitle.Text = I18n.T("序列号:", "Serial:");
+            lblSerial.Text = _coordinator.LatestSerialNumber;
+
+            // ② 标题栏 OK/NG 计数高亮（V1.5.0 现场反馈"彩色数字不够醒目"）：
+            // 默认把 OK/NG 做成"实心彩色色块 + 白字"（绿底=OK、红底=NG，配色走 DisplayConfig），
+            // 关闭 TitleOkNgHighlight 配置时回退为普通彩色文字。
+            if (_config.Display.TitleOkNgHighlight)
+            {
+                StyleCountBadge(lblOk, _config.Display.OkColor);
+                StyleCountBadge(lblNg, _config.Display.NgColor);
+            }
+
+            // ③ 动态相机连接指示灯：先 Add 的 Dock.Right 靠左，后 Add 的靠右。
+            BuildCameraStatusLights();
+        }
+
+        /// <summary>
+        /// 按配置开关设置标题栏各字段/按钮的可见性（V1.9.9 从 InitTitleBarFields 抽出复用）。
+        /// 为什么抽出来：InitTitleBarFields（热更）与 RelayoutTitleBar（重排）都依赖同一份
+        /// "哪些字段该显示"的判定，共用此方法避免两处漂移。
+        /// </summary>
+        private void ApplyConfigVisibility()
+        {
+            lblProductPrefix.Visible = _config.Display.ShowProductModel;
+            cmbModel.Visible = _config.Display.ShowProductModel; // 型号下拉与"产品型号"标签同开关（V2.8）
+            lblSerialTitle.Visible = _config.Display.ShowSerialNumber;
+            lblSerial.Visible = _config.Display.ShowSerialNumber;
+            btnManualSerial.Visible = _config.Display.ShowSerialNumber;   // 人工补录按钮随序列号区整体显隐（V2.14.6）
+            lblTotal.Visible = _config.Display.ShowTotalCount;
+            lblOk.Visible = _config.Display.ShowOkCount;
+            lblNg.Visible = _config.Display.ShowNgCount;
+            // 系统设置按钮显隐（V1.8.4）：按配置隐藏后标题栏自动紧凑重排，隐藏期间配置只读
+            btnSettings.Visible = _config.Display.ShowSettingsButton;
+        }
+
+        /// <summary>
+        /// 重建标题栏相机连接状态区（构造与热更都会调用）。按相机台数分两种模式（V1.10.0）：
+        ///
+        /// 【≤2 台】每台相机一个独立指示灯"● 相机名"，直接显示在标题栏，与 PLC/扫码枪灯一起
+        /// 从右往左排成一排（绿=已连接、红=断连）。先移除旧的（热更后相机台数可能变化，
+        /// 必须整套重建），再按当前台数正序 Add：Dock.Right 布局是"先 Add 的靠左、后 Add 的靠右"，
+        /// 正序循环得到 相机1..相机N 依次排在 PLC 灯右侧。
+        /// 【V2.15.15 自适应 + 限长】灯宽不再固定 96px，按"● + 名字"整段文本实测宽度自适应
+        /// （名字短灯窄、名字长灯宽）；相机名（只有它能自定义，PLC/扫码枪名固定）限长 10 字符、
+        /// 超出截断加 "..."（TruncateIndicatorText），悬停 ToolTip 补全完整名字+IP+连/断状态。
+        ///
+        /// 【≥3 台】聚拢成单个控件（现场相机多时 96px/台 的灯阵会占满标题栏）：
+        ///   - _cmbCamOverview（下拉列表）：每项自绘"状态圆点 + 相机名 + IP"（绿=连接、红=断连），
+        ///     默认收起只显示一个入口（SelectedIndex=0），点开看每台相机状态。
+        ///   - 排序约定（V2.15.16）：有掉线相机时掉线的排在【最前】（连接中的按默认顺序跟后），
+        ///     全部连接时按默认顺序排列——这样收起时下拉框显示的即是第一台（有掉线即显示掉线那台）。
+        ///   - V2.15.16 起删掉原"● 相机"总状态标签（_lblCamAggregate），只留下拉框一个控件。
+        /// 下拉框装进 _pnlCamOverview（Dock.Right）统一垂直居中（ComboBox 直接 Dock.Right
+        /// 会被拉满 48px 高、文字偏上，与左侧"● PLC"标签不对齐）；字体与 PLC 标签一致
+        /// （微软雅黑 10F Bold）。RelayoutTitleBar 统计右侧 Dock 区时把容器按整体宽度计入。
+        /// lblCamPlaceholder 是设计器视觉提示，隐藏后 Dock 空间让给运行时生成的控件。
+        /// </summary>
+        private void BuildCameraStatusLights()
+        {
+            if (_lblCamStatuses != null)
+                foreach (var lbl in _lblCamStatuses)
+                    if (lbl != null) pnlTitleBar.Controls.Remove(lbl);
+
+            if (_cmbCamOverview != null)
+            {
+                pnlTitleBar.Controls.Remove(_cmbCamOverview);
+                _cmbCamOverview.Dispose();
+                _cmbCamOverview = null;
+            }
+            if (_pnlCamOverview != null)
+            {
+                // 容器里的子控件先移除再释放，避免残留
+                _pnlCamOverview.Controls.Clear();
+                pnlTitleBar.Controls.Remove(_pnlCamOverview);
+                _pnlCamOverview.Dispose();
+                _pnlCamOverview = null;
+            }
+            _camOverviewOrder = null;
+
+            lblCamPlaceholder.Visible = false;
+
+            if (_cameras.Count <= 2)
+            {
+                // 小台数模式：每台一个独立指示灯（与历史行为一致）。
+                // V2.15.15：宽度自适应 + 相机名限长——只有相机名能自定义（PLC/扫码枪名固定），
+                // 现场自定义名（尤其英文）可能很长，固定 96px 的灯阵会占满标题栏。现在按
+                // "● + 截断后名字"整段文本实测宽度自适应（TextRenderer.MeasureText），
+                // 相机名超过 10 字符截断加 "..."（TruncateIndicatorText，名字本身 ≤10）；
+                // 悬停 ToolTip 补全完整名字 + IP + 连/断状态，弥补截断丢失的信息。
+                _lblCamStatuses = new Label[_cameras.Count];
+                var camFont = new Font("Microsoft YaHei", 10F, FontStyle.Bold);
+                for (int i = 0; i < _cameras.Count; i++)
+                {
+                    string name = TruncateIndicatorText(CamDisplayName(i), 10); // 相机名限长 10（只限名字，圆点前缀不算）
+                    string text = $"● {name}";
+                    var lbl = new Label
+                    {
+                        Dock = DockStyle.Right,
+                        Width = TextRenderer.MeasureText(text, camFont).Width + 8, // 按文本实测宽 + 左右各 4px 留白
+                        TextAlign = ContentAlignment.MiddleRight,
+                        Text = text,
+                        Font = camFont
+                    };
+                    pnlTitleBar.Controls.Add(lbl);
+                    _lblCamStatuses[i] = lbl;
+                    // 创建后立即按当前真实连接状态上色（绿=已连、红=未连），没有灰色占位：
+                    // _cameras 已由 BuildServices 建好，可直接读 IsConnected 出第一手颜色，
+                    // 后续 ConnectionChanged 事件继续刷新，行为不变。
+                    UpdateDeviceStatus(lbl, _cameras[i].IsConnected);
+                    // 悬停补全：文本截断后名字可能不全，ToolTip 显示完整名+IP+连/断
+                    if (_camTip == null) _camTip = new ToolTip();
+                    _camTip.SetToolTip(lbl, CamLightTipText(i));
+                }
+            }
+            else
+            {
+                // 大台数模式：只保留相机下拉列表（V2.15.16 起不再有"● 相机"总状态标签）。
+                // 下拉项顺序不在此处固定，由 RefreshCameraAggregateStatus 按当前连接状态排序
+                // （掉线相机排最前、连接相机按默认顺序在后），这里只建空下拉框+容器。
+                var camFont = new Font("微软雅黑", 10F, FontStyle.Bold);
+                _cmbCamOverview = new ComboBox
+                {
+                    DropDownStyle = ComboBoxStyle.DropDownList, // 只能选不能输，防止误改
+                    Font = camFont,
+                    DrawMode = DrawMode.OwnerDrawFixed,          // 自绘：每项画"状态圆点+相机名"
+                    ItemHeight = 24
+                };
+                _cmbCamOverview.DrawItem += CmbCamOverview_DrawItem;
+
+                // 容器：Dock.Right，宽度=下拉框宽度，其余由 pnlTitleBar 高度决定
+                _pnlCamOverview = new Panel
+                {
+                    Dock = DockStyle.Right,
+                    BackColor = pnlTitleBar.BackColor // 与标题栏同色，视觉上"隐形"
+                };
+
+                // 垂直居中：标题栏高 48，控件 y = (48 - 控件高)/2
+                int barH = pnlTitleBar.ClientSize.Height;
+                int cmbY = (barH - _cmbCamOverview.Height) / 2;
+                _cmbCamOverview.Location = new Point(4, cmbY);
+                _cmbCamOverview.Width = 160; // 临时宽，RefreshCameraAggregateStatus 填充后按最长项重算
+                _pnlCamOverview.Width = _cmbCamOverview.Width + 8;
+                _pnlCamOverview.Controls.Add(_cmbCamOverview);
+
+                _camTip = _camTip ?? new ToolTip();
+
+                pnlTitleBar.Controls.Add(_pnlCamOverview);
+
+                RefreshCameraAggregateStatus(); // 初始填充（按连接状态排序）+ 悬停明细 + 宽度自适应
+            }
+        }
+
+        /// <summary>
+        /// 指示灯文本限长截断（V2.15.15）：文本总长超过 maxLen 时，保留前 maxLen-3 个字符 + "..."，
+        /// 保证最终长度 ≤ maxLen。用于相机名限长（只有相机名能自定义，PLC/扫码枪名固定不截断），
+        /// 默认 10 字符、不超过 10；空/空串原样返回（防御配置被手改成 null 名字时崩溃）。
+        /// </summary>
+        private static string TruncateIndicatorText(string text, int maxLen = 10)
+        {
+            if (string.IsNullOrEmpty(text)) return text ?? "";
+            if (text.Length <= maxLen) return text;
+            if (maxLen <= 3) return text.Substring(0, maxLen);
+            return text.Substring(0, maxLen - 3) + "...";
+        }
+
+        /// <summary>
+        /// 第 i 台相机的显示名（V1.12.23）：有配置名称（上相机/下相机/…）用名称，
+        /// 无名称回退"相机N"（V2.13.4 起优先 CameraConfig.CameraId 真编号，其次行序 i+1）。
+        /// 所有主界面展示相机的文案（相机灯/悬停/下拉）都应走这里，保证"编号"唯一对应。
+        /// </summary>
+        private string CamDisplayName(int i)
+        {
+            if (i < 0 || i >= _cameras.Count) return I18n.T("相机", "Cam");
+            string name = _cameras[i].DisplayName;
+            if (!string.IsNullOrWhiteSpace(name)) return name;
+            // 无名称时优先用相机真编号（CameraId>0），没有才退回行序 i+1（与设置页第一列一致）
+            int camId = 0;
+            var cfgList = _config.Cameras;
+            if (cfgList != null && i < cfgList.Count && cfgList[i] != null)
+                camId = cfgList[i].CameraId;
+            string camWord = I18n.T("相机", "Cam");
+            return camId > 0 ? camWord + camId : camWord + (i + 1);
+        }
+
+        /// <summary>
+        /// 第 i 台相机灯/下拉项的悬停明细文案（V2.15.15 抽出共用）：完整名 + IP + 连/断状态。
+        /// 文本截断限长只作用于"灯/下拉项显示的文本"，悬停明细保留完整名（辅助信息不截断）；
+        /// 含 I18n 状态文案，切语言后由 ApplyLanguage 重新调用刷新。构建/热更/语言刷新三处共用。
+        /// </summary>
+        private string CamLightTipText(int i)
+        {
+            if (i < 0 || i >= _cameras.Count) return "";
+            return $"{CamDisplayName(i)} {_cameras[i].IpAddressOnly}：" +
+                   (_cameras[i].IsConnected ? I18n.T("已连接", "Connected") : I18n.T("断连", "Disconnected"));
+        }
+
+        /// <summary>
+        /// 生成下拉列表第 i 台相机的显示文案："上相机  19.87.6.213"（V1.12.22 起带名称）。
+        /// 名称来自 CameraConfig.Name（配置缺省为空则退回 "相机N  IP"），状态用圆点表。
+        /// 【V2.15.15 名字限长】与 ≤2 台独立灯一致：相机名超 10 字符截断加 "..."（IP 保留，
+        /// 悬停/明细里仍显示完整名）——长英文名不把下拉框撑得太宽。
+        /// </summary>
+        private string CamOverviewLabel(int i)
+        {
+            if (i < 0 || i >= _cameras.Count) return "";
+            return $"{TruncateIndicatorText(CamDisplayName(i), 10)}  {_cameras[i].IpAddressOnly}";
+        }
+
+        /// <summary>
+        /// 相机下拉列表的项绘制（OwnerDraw）：
+        /// 每项左边画一个"状态圆点"（绿=已连接、红=断连），圆点右侧画相机名+IP。
+        /// 高亮行用系统选中色背景，圆点颜色保持语义不变。
+        /// 下标经 _camOverviewOrder 排序映射换算成相机下标（V2.15.16 起列表可能被排序，
+        /// 项下标 ≠ 相机下标，必须查映射表，否则圆点/文案会张冠李戴）。
+        /// </summary>
+        private void CmbCamOverview_DrawItem(object sender, DrawItemEventArgs e)
+        {
+            if (_camOverviewOrder == null || e.Index < 0 || e.Index >= _camOverviewOrder.Length) return;
+            int camIdx = _camOverviewOrder[e.Index];
+            bool connected = _cameras[camIdx].IsConnected;
+            Color dotColor = connected ? Color.FromArgb(46, 158, 107)  // 绿=OK
+                                       : Color.FromArgb(229, 72, 77);   // 红=断连
+            e.DrawBackground();
+
+            // 圆点：垂直居中，半径约 5px
+            int dotSize = 10;
+            int dotX = e.Bounds.Left + 6;
+            int dotY = e.Bounds.Top + (e.Bounds.Height - dotSize) / 2;
+            using (var b = new SolidBrush(dotColor))
+                e.Graphics.FillEllipse(b, dotX, dotY, dotSize, dotSize);
+
+            // 相机名+IP 文本，用系统前景色（选中行高亮时可读）
+            TextRenderer.DrawText(e.Graphics, CamOverviewLabel(camIdx), e.Font,
+                new Point(dotX + dotSize + 8, e.Bounds.Top + (e.Bounds.Height - e.Font.Height) / 2),
+                e.ForeColor);
+            e.DrawFocusRectangle();
+        }
+
+        /// <summary>
+        /// 刷新相机下拉列表（≥3台模式，后台线程事件触发，BeginInvoke 切回 UI 线程）：
+        /// ① 按当前连接状态重排下拉项顺序——掉线相机排最前（掉线内部按默认顺序）、
+        ///    连接相机按默认顺序跟后，收起时 SelectedIndex=0 即显示第一台（有掉线则显示掉线那台）；
+        /// ② 重建下拉项文本 + 按最长项重算下拉框/容器宽度；
+        /// ③ 更新悬停明细（每台相机名 + 连/断），并让下拉框重绘状态圆点。
+        /// ≤2台模式时 _cmbCamOverview 为 null，内部直接返回（不影响独立灯模式）。
+        /// </summary>
+        private void RefreshCameraAggregateStatus()
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(RefreshCameraAggregateStatus));
+                return;
+            }
+            if (_cmbCamOverview == null || _pnlCamOverview == null) return;
+
+            // ① 重排：掉线相机优先（OrderBy IsConnected=false 排前、true 排后），
+            //    同状态按默认顺序（ThenBy 相机下标）——稳定排序，天然满足需求。
+            _camOverviewOrder = Enumerable.Range(0, _cameras.Count)
+                .OrderBy(i => _cameras[i].IsConnected)
+                .ThenBy(i => i)
+                .ToArray();
+
+            // ② 重建下拉项（文本=名字+IP，圆点颜色在 DrawItem 里按排序映射查状态）
+            _cmbCamOverview.Items.Clear();
+            for (int i = 0; i < _cameras.Count; i++)
+                _cmbCamOverview.Items.Add(CamOverviewLabel(_camOverviewOrder[i]));
+            if (_cmbCamOverview.Items.Count > 0) _cmbCamOverview.SelectedIndex = 0;
+
+            // ③ 宽度自适应：按下拉框所有项中最长文本定宽（语言/名字变化后同样重算）。
+            //    旧实现只取"最后一项"宽度，排序后最后一项未必最长，统一遍历取最大。
+            int maxW = 160;
+            foreach (var it in _cmbCamOverview.Items)
+                maxW = Math.Max(maxW, TextRenderer.MeasureText((string)it, _cmbCamOverview.Font).Width + 40);
+            _cmbCamOverview.Width = maxW;
+            _pnlCamOverview.Width = maxW + 8;
+
+            // ④ 悬停明细：列出每台"名字+状态"，方便现场快速定位是哪台断了（只显示 IP，不带端口）
+            var lines = _cameras.Select((c, i) => $"{CamDisplayName(i)} {c.IpAddressOnly}：" + (c.IsConnected ? I18n.T("已连接", "Connected") : I18n.T("断连", "Disconnected")));
+            if (_camTip != null) _camTip.SetToolTip(_cmbCamOverview, string.Join("\n", lines));
+        }
+
+        /// <summary>
+        /// 窗体首次显示完成（自动缩放已应用）：执行标题栏紧凑重排。
+        /// 若在构造函数里重排，AutoScaleMode.Font 会在后续布局中按设计器基准缩放
+        /// 控件（覆盖我们赋的 Location），表现为"字段仍停在设计器写死坐标"。
+        /// 启动全屏由 Designer 的 WindowState=Maximized 保证（保留边框与关闭按钮，
+        /// V1.11.1：客户要能正常关软件，不做无边框铺屏）。
+        /// </summary>
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+
+            // 铺满窗体所在屏幕的工作区（保留任务栏），等效全屏。
+            // 为什么手动铺满而不是 WindowState.Maximized（V1.11.0 关键）：
+            // Maximized 状态会被 Windows 强制切换成"可调整边框"，边缘拖拽缩放照常开放；
+            // 而 Normal + FixedSingle 的边框是真正固定、没有可调热区的，配合 WndProc
+            // 拦截双保险，按钮缩放、拖拽缩放、最大化窗口边缘缩放全部失效。
+            var work = Screen.FromControl(this).WorkingArea;
+            Bounds = new Rectangle(work.Location, work.Size);
+
+            RelayoutTitleBar();
+
+            // V2.14：铺满到真实屏幕后"窗口显示区高度"才正确，用真实高度重算一次矩阵的
+            // 铺满/滚动形态（构造期 BuildWindowGrid 用的是设计器默认高度，可能偏小）。
+            // 重建只动窗口控件（Dispose 旧的、按新行列新建），不影响已 Start 的协调器
+            // （刷新窗口改走 _windowControls 字典，重建后字典照常可用）。
+            BuildWindowGrid();
+        }
+
+        /// <summary>
+        /// 拦截鼠标命中测试（WM_NCHITTEST），禁止窗口边缘拖拽缩放（V1.11.0）。
+        /// 背景：仅设 FormBorderStyle=FixedSingle + MaximizeBox=false 不够——Windows 10/11
+        /// 对"最大化窗口"有系统级特性，即使固定边框，鼠标移到窗口边缘/四角仍会出现
+        /// 双箭头光标并允许拖拽调整大小，客户照样能拉出小窗。
+        /// 做法：把系统返回的"调整大小热区"（左/右/上/下/四角，HTLEFT..HTBOTTOMRIGHT）
+        /// 全部改写为 HTCLIENT（客户区），Windows 就不会进入 resize 拖拽流程；
+        /// 最小化/关闭按钮（HTMINBUTTON/HTCLOSE）与标题栏拖动（HTCAPTION）不受影响。
+        /// 另拦 WM_MOUSEWHEEL（V2.14）：光标在窗口矩阵滚动宿主内时把滚轮转发给宿主滚动，
+        /// 见下方"为什么"注释。
+        /// </summary>
+        protected override void WndProc(ref Message m)
+        {
+            // V2.14 滚动宿主滚轮转发：
+            // 【为什么】WinForms 的 WM_MOUSEWHEEL 只发给"聚焦控件"，并沿 聚焦控件→父链 冒泡到某个
+            // ScrollableControl。若用户还没点击过任何窗口（焦点停在窗体本身）、或焦点落在标题栏的
+            // TextBox/ComboBox 上（它们自己消费滚轮、不冒泡），滚轮就不会到达 pnlWindowScroll——
+            // 表现为"鼠标在窗口矩阵上滚轮没反应"。这里用消息自带的鼠标屏幕坐标（lParam）判断光标
+            // 是否落在滚动宿主内，命中就把消息原样转发给宿主（其 WndProc 按坐标判定后自行滚动）。
+            // 光标在标题栏/状态栏等宿主外时保持默认行为，不干扰其它区域。
+            const int WM_MOUSEWHEEL = 0x020A;
+            if (m.Msg == WM_MOUSEWHEEL &&
+                pnlWindowScroll != null && !pnlWindowScroll.IsDisposed &&
+                pnlWindowScroll.VerticalScroll.Visible)
+            {
+                long lp = m.LParam.ToInt64();
+                int sx = (short)(lp & 0xFFFF);          // 低16位 X 屏幕坐标（可能为负，转 short）
+                int sy = (short)((lp >> 16) & 0xFFFF);  // 高16位 Y 屏幕坐标
+                if (pnlWindowScroll.RectangleToScreen(pnlWindowScroll.ClientRectangle)
+                        .Contains(sx, sy))
+                {
+                    SendMessage(pnlWindowScroll.Handle, m.Msg, m.WParam, m.LParam);
+                    return;                             // 已交给宿主滚动，主窗体不再处理
+                }
+            }
+
+            const int WM_NCHITTEST = 0x0084;
+            if (m.Msg == WM_NCHITTEST)
+            {
+                base.WndProc(ref m);
+                int hit = m.Result.ToInt32();
+                // 这些命中码 = 窗口边缘/四角的调整大小热区，一律当作客户区处理
+                if (hit >= 10 && hit <= 17) // HTLEFT(10) HTRIGHT(11) HTTOP(12) HTTOPLEFT(13)
+                {                           // HTTOPRIGHT(14) HTBOTTOM(15) HTBOTTOMLEFT(16) HTBOTTOMRIGHT(17)
+                    m.Result = new IntPtr(1); // HTCLIENT：当作点击客户区，不进入缩放
+                }
+                return;
+            }
+            base.WndProc(ref m);
+        }
+
+        /// <summary>发送 WM_* 消息给指定窗口（V2.14 滚动转发用；user32 原生 API）。
+        /// 【混淆兼容】显式指定 EntryPoint="SendMessage"，与 C# 方法名解耦——
+        /// 代码混淆器会重命名方法名，若不显式写 EntryPoint，P/Invoke 默认按方法名
+        /// 找 user32 导出函数就会"找不到入口点"直接抛 DllNotFoundException。</summary>
+        [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SendMessage")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        /// <summary>
+        /// 标题栏紧凑重排：按固定顺序把"可见"的字段从左往右 x 进位摆放，
+        /// 隐藏的字段（ShowXxx=false）跳过不占位，避免中间空缺或重叠。
+        /// 所有控件垂直居中：标题栏高 48，y = (48 - 控件高度)/2，视觉上全部居中对齐。
+        /// 设计器里的坐标只作为"全部可见"时的初始参照，最终以这里算出的为准。
+        ///
+        /// 【V1.9.9：防止右侧灯区压住字段的根因修复】
+        /// 标题栏里有两套互不知情的布局：左侧字段是"绝对坐标从左往右排"，右侧
+        /// PLC 灯 + 每台相机灯是"Dock.Right 从右往左排"。原来 RelayoutTitleBar 只算
+        /// 自己这一半——相机灯多（每台占 96px，Dock.Right）时右侧总体宽度变大，
+        /// 挤占了画面，把"系统设置"按钮等最右侧字段推进灯区并被盖住。
+        /// 修复：先统计右侧所有 Dock.Right 控件的总宽 rightDockWidth，把左侧字段的
+        /// 最大 X 限制为 标题栏宽 - 右内边距 - rightDockWidth。
+        ///
+        /// 【V1.10.0：去掉"空间不足隐藏字段让位"逻辑】
+        /// 早期版本在放不下时会按 hidePriority（产品型号→序列号→计数→分隔线）逐个
+        /// 隐藏低价值字段再重排，保证按钮可见。但相机台数多时会把前边的信息字段直接
+        /// 藏掉，现场"字段显示不出来"即由此而来。V1.10.0 相机区已
+        /// 聚拢成"总标签+下拉框"固定宽度容器，右侧不再随台数膨胀，无需再隐藏任何字段。
+        /// 现在所有可见字段一律完整排布，宽度超出右侧灯区边界时停止排布（不隐藏）。
+        /// 注意：这里只负责排布，不改 ShowXxx 配置；字段可见性由 ApplyConfigVisibility 决定。
+        /// </summary>
+        private void RelayoutTitleBar()
+        {
+            const int barHeight = 48; // 标题栏固定高度（见 Designer 的 pnlTitleBar.Size）
+
+            // 按配置开关恢复字段可见性（配置说该显示的字段必须显示，不再被压缩隐藏）。
+            ApplyConfigVisibility();
+
+            // 排布顺序固定：产品前缀 → 型号下拉(V2.8) → 序列号标题 → 序列号框 → 人工补录按钮(V2.14.6)
+            // → | → 总数 → OK → NG → | → 系统设置按钮 → 语言切换按钮(V2.15.1) → 主题按钮(V2.16.2，最右)
+            Control[] seq = { lblProductPrefix, cmbModel, lblSerialTitle, lblSerial, btnManualSerial,
+                              lblSep1, lblTotal, lblOk, lblNg, lblSep2, btnSettings, btnToggleLanguage, btnToggleTheme };
+
+            // 右侧 Dock 区（PLC 灯 + 相机聚拢容器）占用的总宽：Dock.Right 控件从右往左叠，
+            // 每个控件之间留 6px 视觉间距（间距是内在间距，宽幅估算 ±几像素不影响正确性）。
+            int rightDockWidth = 0;
+            foreach (Control c in pnlTitleBar.Controls)
+                if (c.Dock == DockStyle.Right && c.Visible)
+                    rightDockWidth += c.Width + 6;
+            // 左侧字段可用的最大 X（标题栏宽 - 右内边距 - 右侧 Dock 区宽）。
+            int maxX = pnlTitleBar.ClientSize.Width - 12 - rightDockWidth;
+
+            // 单次从左往右排布：所有可见字段都摆放，放不下（越过右边界）就停，不隐藏任何字段。
+            int x = 12; // 与设计器 Padding(12,0,12,0) 左内边距保持一致
+            foreach (var c in seq)
+            {
+                if (!c.Visible) continue;
+                int w = 0;
+                if (c is Button)         w = c.Width + 12;
+                else if (c is ComboBox)  w = c.Width + 12;
+                else if (c == lblSerial) w = c.Width + 18;      // 序列号框固定宽度（Label），尊重设计宽度
+                else if (c is Label)     w = ((Label)c).PreferredWidth + 18;
+                if (x + w > maxX) break;                          // 越过右边界：停止排布，不隐藏
+                int y = (barHeight - c.Height) / 2;               // 垂直居中
+                c.Location = new Point(x, y);
+                x += w;
+            }
+        }
+
+        /// <summary>
+        /// 把标题栏计数标签做成"实心彩色色块 + 白色加粗字"（现场要求 OK/NG 高亮醒目）。
+        /// BackColor 用配置色（绿=OK、红=NG），ForeColor 白色，字号 11F→12F，
+        /// 四周留 padding 让色块饱满；AutoSize 保持 true，色块宽度随数字自动伸缩，
+        /// RelayoutTitleBar 的 PreferredWidth 布局照常工作、垂直居中公式不变。
+        /// 【V1.9.2】客户反馈色块不够醒目，左右 padding 由 6→14、上下 2→3，整体加宽放大；
+        /// 【V1.9.3】客户仍嫌不够醒目，左右 padding 再 14→22、上下 3→5，继续加宽放大。
+        /// </summary>
+        /// <param name="lbl">要样式化的标题栏计数标签（lblOk / lblNg）</param>
+        /// <param name="color">色块底色（DisplayConfig.OkColor / NgColor）</param>
+        private void StyleCountBadge(Label lbl, Color color)
+        {
+            lbl.BackColor = color;
+            lbl.ForeColor = Color.White;
+            lbl.Font = new Font("微软雅黑", 12F, FontStyle.Bold);
+            lbl.Padding = new Padding(22, 5, 22, 5);
+            lbl.TextAlign = ContentAlignment.MiddleCenter;
+        }
+
+        // ────────────── 产品型号下拉（V2.8）──────────────
+        /// <summary>
+        /// 填充"产品型号"下拉（V2.8，可重入：构造与设置保存热更都会调用）。
+        /// 候选 = 预置型号（AppConfig.DefaultProductModels）∪ 配置已有型号（_config.ProductModels），
+        /// 去重、忽略空白、当前配置型号不在候选时补进去——保证 appconfig 缺 productModels 字段/
+        /// 为空时标题栏也直接能下拉选 U171/Z121（现场型号写死预置，无需依赖配置文件）。
+        /// DropDownStyle=DropDownList 只能从清单选（型号只认候选，不乱输）。
+        /// 【防误触】填充/选中期间置 _modelComboInit=true，屏蔽 SelectedIndexChanged，
+        /// 只有"用户真实选择"才进入 SwitchModel。
+        /// 事件只挂线一次（_modelComboWired 标记，热更重复调用只刷新候选、不重复挂事件）。
+        /// </summary>
+        private void InitModelCombo()
+        {
+            _modelComboInit = true;
+            try
+            {
+                cmbModel.Items.Clear();
+                var candidates = new List<string>();
+                // ① 预置三型号优先（用户要求"直接预置"）：即便配置为空也恒可下拉选到
+                foreach (var m in AppConfig.DefaultProductModels())
+                    if (!string.IsNullOrWhiteSpace(m)) candidates.Add(m);
+                // ② 配置里追加的型号（设置页手输保存自动加入的）合进来
+                foreach (var m in _config.ProductModels ?? new List<string>())
+                    if (!string.IsNullOrWhiteSpace(m) && !candidates.Contains(m)) candidates.Add(m);
+                // ③ 当前配置型号（_config.ProductModel）不在候选时补上，防下拉空白
+                string cur = (_config.ProductModel ?? "").Trim();
+                if (cur.Length > 0 && !candidates.Contains(cur)) candidates.Add(cur);
+                foreach (var m in candidates) cmbModel.Items.Add(m);
+                if (cur.Length > 0 && cmbModel.Items.Contains(cur)) cmbModel.SelectedItem = cur;
+                else if (cmbModel.Items.Count > 0) cmbModel.SelectedIndex = 0;
+            }
+            finally
+            {
+                _modelComboInit = false;
+            }
+
+            if (_modelComboWired) return;
+            _modelComboWired = true;
+            cmbModel.SelectedIndexChanged += (s, e) =>
+            {
+                if (_modelComboInit) return;                       // 程序内初始化/刷新，非用户操作
+                string model = cmbModel.SelectedItem?.ToString();
+                if (string.IsNullOrWhiteSpace(model)) return;
+                if (model == _config.ProductModel) return;         // 选中的就是当前型号，忽略
+                SwitchModel(model);
+            };
+        }
+
+        /// <summary>
+        /// 主界面直接切换产品型号（V2.8，操作员生产日常操作）：
+        ///   ① 更新配置 _config.ProductModel 并写盘（重启后保持当前型号；写盘失败只告警不阻断）；
+        ///   ② 重建协调器——_productModel 是构造时快照，型号决定"点位→相机程序号"查哪张表
+        ///      （ModelStationPrograms）与每次扫码写入 PLC 40007~40011 的型号值，换型号必须重建
+        ///      coordinator 才生效。只重建协调器：PLC/相机/扫码枪连接参数与型号无关，全部复用，
+        ///      比 ApplyRuntimeConfig 全量重建轻量（设备不断连，流程无缝）。
+        ///   ③ 保留当前 SN 状态、重挂协调器事件、启动流程，标题栏提示"型号切换完成"（绿字）。
+        /// 说明：PLC 型号区（40007=型号序号+40008~40012=字符串）在从站建站成功时已写当前型号
+        /// （V2.14.14，见 PlcService.SetCurrentModel）；这里切换后立即再写一次新型号，PLC 不用等
+        /// 下一拍扫码就能读到切完的型号。
+        /// </summary>
+        private void SwitchModel(string model)
+        {
+            _config.ProductModel = model;
+            // V2.14.14：更新 PLC 服务的当前型号并立即写入型号区（切型号即写）。
+            // 背景：PLC 梯形图可能在"请求扫码之前"主动读型号区，若等扫码才写，切换后型号要等一拍
+            // 才下发；现切换即写，PLC 马上读到新型号。型号为空（配置异常）时 SetCurrentModel 吞掉。
+            _plc?.SetCurrentModel(model);
+            _plc?.WriteProductModel(model);
+
+            // ① 写盘持久化（try-catch：写盘失败不阻断切换，配置以内存为准）
+            try { ConfigStore.Save(_config); }
+            catch (Exception ex) { LogHelper.Warn("型号切换：配置写盘失败 " + ex.Message); }
+
+            // ② 重建协调器（复用既有 PLC/相机/扫码枪/图像服务实例）
+            string serial = _coordinator?.LatestSerialNumber ?? "";
+            try { _coordinator?.Dispose(); }
+            catch (Exception ex) { LogHelper.Warn("型号切换：协调器释放异常 " + ex.Message); }
+
+            _coordinator = new ProductionCoordinator(_plc, _cameras,
+                _config.Cameras ?? new List<CameraConfig>(), _imageStore,
+                _config.Display.WindowEnabled, _config.ProductModel, _config.Display.WindowPointMaps,
+                WindowCount(), _config.Sn, _mes);   // V2.15.19：切型号只重建协调器，_mes 复用同一实例
+            _coordinator.AttachScanners(_scanners);
+            _coordinator.LatestSerialNumber = serial;
+            SubscribeCoordinatorEvents();
+            _coordinator.Start();
+
+            // ③ 窗口矩阵跟随型号重建（V2.12.1）：窗口总数 = 各相机按新型号点位表条目和，
+            // 换型号可能增删窗口，必须在标题栏切型号后就地重建矩阵（自适应/非自适应都一样）。
+            BuildWindowGrid();
+
+            // ④ 提示 + 日志（成功绿字，遵循现场 OK=绿 习惯）
+            lblStatus.ForeColor = Color.FromArgb(46, 158, 107);
+            lblStatus.Text = I18n.T("型号切换完成", "Model switched") + ": " + model;
+            LogHelper.Info($"产品型号切换：{model}（已生效并写盘，PLC 型号区已立即下发）");
+        }
+
+        /// <summary>
+        /// 显示窗口矩阵：按"当前型号 + 相机点位表"在【设计器容器 gridCameraWindows】里动态重建
+        /// （V2.14.18 起窗口总数=布局窗口数 windowCount：自适应=点位和、非自适=行列乘积含空窗口，
+        ///  见 DisplayConfig.ResolveLayout。自适应行列形状"优先增加列、最后一行缺失最少"，见注释）。
+        /// 设计器只负责"容器长什么样"（Dock=Fill 铺满 pnlWindowScroll 滚动宿主、淡蓝白底），
+        /// 具体行列数量与每格的 CameraDisplayControl 全部以这里为准重建，保证改行列/切型号/
+        /// 保存配置即生效；行数放不下时滚动宿主自动出滚动条（见 ApplyGridScrollLayout）。
+        ///
+        /// 【空窗口（V2.14.18）】非自适下 windowCount=行列乘积 > 点位数时，多出的格子照样建
+        /// CameraDisplayControl 当作【空窗口】占位（无相机点位、一直空态），显示区被填满；
+        /// 空窗口要不要显示点位由"窗口/点位配置"里的映射决定（用户可把点位换到空窗口）。
+        /// 协调器只对有映射的窗口 SetImage，空窗口不接图。
+        ///
+        /// 【V1.12.28 窗口禁用重排】DisplayConfig.WindowEnabled=false 的窗口【不创建控件】：
+        /// 从矩阵中"完全移除"该格子，剩余启用窗口按原窗口编号顺序【紧凑排列】（编号保留原值，
+        /// 不重新编号），尾部多出的格子留空。窗口编号与格子位置不再一一对应，
+        /// 刷新窗口改走 _windowControls[窗口编号] 字典（见 OnInspectionFinished）。
+        /// 为什么保留原编号：窗口编号绑定"相机点位表条目"（前上相机后下相机分组）与 WindowEnabled、
+        /// StationPrograms（点位→相机程序）等配置，重新编号会打乱既有配置，宁可让格子位置空出。
+        /// </summary>
+        /// <summary>当前配置下主界面要创建的窗口控件总数（V2.14.18）：统一走 ResolveLayout.windowCount
+        /// （自适应=点位数；非自适=行列乘积、含空窗口）。协调器构造 / 窗口矩阵 / 配置对齐复用同一套
+        /// 计算，禁止各处再单独写一遍 windowCount。</summary>
+        private int WindowCount()
+        {
+            return DisplayConfig.ResolveLayout(
+                _config.Cameras, _config.ProductModel,
+                _config.Display.AutoFit, _config.Display.Rows, _config.Display.Columns).windowCount;
+        }
+
+        private void BuildWindowGrid()
+        {
+            // V2.14.18 统一布局：窗口总数 = ResolveLayout.windowCount（自适应=点位数、非自适=行列
+            // 乘积含空窗口）；行列形状：自适应自动算，非自适列用手填、行不足自动补齐（见注释）。
+            // 当产品型号在各相机点位表里查不到任何点位时 windowCount≥1，矩阵至少保留一个窗口。
+            var layout = DisplayConfig.ResolveLayout(
+                _config.Cameras,
+                _config.ProductModel,
+                _config.Display.AutoFit,
+                _config.Display.Rows,
+                _config.Display.Columns);
+            int rows = layout.rows, cols = layout.cols, total = layout.windowCount;
+            int gridCells = rows * cols; // 矩阵总格子数；自适下 ≥ 窗口总数（尾行空余格子留空），
+            // 非自适下 == 窗口总数（全部格子都建窗口，点位不够多出=空窗口）
+
+            // 重置容器：先释放旧窗口（热更时旧窗口 PictureBox 持有图片句柄，必须 Dispose 防泄漏），
+            // 再清掉设计器默认的 1×1 行列与可能残留的子控件。
+            // 注意：释放必须针对"上一轮"的 _windowControls，所以要在重建之前做。
+            // 热更前若有窗口正被全屏放大（挂在全屏窗体上），先移回 grid 一并释放，避免孤儿句柄泄漏。
+            RestoreFullScreenWindow();
+            var grid = gridCameraWindows;
+            foreach (var w in _windowControls.Values)
+                try { w?.Dispose(); } catch { }
+            _windowControls.Clear();
+            grid.Controls.Clear();
+            grid.ColumnCount = cols;
+            grid.RowCount = rows;
+            grid.ColumnStyles.Clear();
+            grid.RowStyles.Clear();
+
+            // 所有行列按百分比等分 → 每格尺寸严格一致并铺满主区域，改行列数无需调像素
+            for (int c = 0; c < cols; c++)
+                grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / cols));
+            for (int r = 0; r < rows; r++)
+                grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100f / rows));
+
+            // V2.14：铺满 vs 滚动。行少 → grid 占满滚动宿主（窗口尽量大、占满整个显示区域）；
+            // V2.14.15：每行最小高度按显示区高度动态算（显示区高/10），行数≤10 恒铺满平分显示区，
+            // 只有行数 >10 才由 pnlWindowScroll（AutoScroll）出竖直滚动条（见 ApplyGridScrollLayout）。
+            ApplyGridScrollLayout(grid, rows);
+
+            // 逐窗口编号创建：禁用的窗口不建控件（从矩阵移除），启用的按顺序紧凑填格子。
+            var enabled = _config.Display.WindowEnabled ?? new List<bool>();
+            int cellIdx = 0;
+            for (int w = 1; w <= total; w++)
+            {
+                bool on = enabled.Count < w || enabled[w - 1]; // 越界按启用（新窗口默认开）
+                if (!on) continue;                             // 禁用窗口：不显示、不占格子
+                if (cellIdx >= gridCells) break;               // 格子已填满（理论上不会）
+                int r = cellIdx / cols, c = cellIdx % cols;
+                cellIdx++;
+
+                var win = new CameraDisplayControl
+                {
+                    Margin = new Padding(3),
+                    Dock = DockStyle.Fill
+                };
+                win.SetWindowIndex(w); // 显示"窗口编号"（编号=相机点位表条目序号，前上相机后下相机分组）
+                // V2.10.4：按配置控制左上角窗口编号显隐（默认显示；关掉画面更干净）
+                win.SetWindowIndexVisible(_config.Display.WindowIndexVisible);
+                // V2.10.8：按配置控制悬停气泡提示显隐（默认显示；勾掉画面更干净）
+                win.SetToolTipVisible(_config.Display.WindowToolTipVisible);
+                // V2.10.3：按配置控制右下角 OK/NG 徽标显隐与颜色（默认关；BuildWindowGrid 在
+                // 构造与热更都会调用，改配置保存后即时生效）
+                win.SetOkNgVisible(_config.Display.WindowOkNgVisible);
+                win.SetOkNgColors(_config.Display.OkColor, _config.Display.NgColor);
+                win.ApplyTheme(); // V2.16.2：新窗口按当前主题上色（切型号/热更重建时深色不回浅）
+                // 双击放大/还原（V1.12.15）：每格订阅双击事件，由 OnWindowDoubleClicked 统一处理。
+                win.WindowDoubleClicked += OnWindowDoubleClicked;
+                _windowControls[w] = win;
+                grid.Controls.Add(win, c, r);
+            }
+            // Dock 布局按 z-order 自底向上处理，Fill 最后处理才会给 Top/Bottom 让位。
+            // 此刻标题栏/底部栏都已存在，把矩阵放在 z-order 最顶（最后布局），
+            // 否则 Top 的标题栏会叠加覆盖矩阵第一排（"第一排窗口显示不全"的根源）。
+            grid.BringToFront();
+
+            // V2.14：矩阵重建后把滚动宿主滚回顶部。否则切型号/热更重建时若上次滚到过中下部，
+            // AutoScrollPosition 会残留 → 用户看到新矩阵"从中间开始"，第一排窗口被滚出视口。
+            // 铺满模式（无滚动条）时置 0 无害。先 PerformLayout 让滚动范围随新行列算好再归零。
+            if (pnlWindowScroll != null)
+            {
+                pnlWindowScroll.PerformLayout();
+                pnlWindowScroll.AutoScrollPosition = new Point(0, 0);
+            }
+        }
+
+        /// <summary>
+        /// 窗口矩阵"每行最小高度下限"（V2.14 固定 160；V2.14.15 起改为按显示区高度动态算，
+        /// 本常量只作下限，见 ApplyGridScrollLayout）：当 行数×每行最小高度 超过滚动宿主可视高度时，
+        /// 窗口不再被继续压缩，而是切换成"滚动模式"——每行固定本高度、超出部分由外侧滚动条翻看。
+        /// 取 60：极端行数（如手填列太少自动补行）滚动兜底时，画面缩到本下限仍勉强可辨识；
+        /// 常规行数（≤10）下由动态阈值保证铺满平分显示区，根本到不了本下限。
+        /// </summary>
+        private const int MinWindowRowHeight = 60;
+
+        /// <summary>
+        /// 切换窗口矩阵的"铺满 / 滚动"两种形态（V2.14；V2.14.15 阈值改动态）：
+        ///   - 铺满（grid.Dock=Fill）：行样式百分比等分、矩阵占满整个窗口显示区——1 个窗口即最大
+        ///     尺寸占满，2 个即左右平分，4 个即 2×2 等分，符合"不要多余空白"的自适应预期；
+        ///   - 滚动（grid.Dock=Top + 定高）：行数×每行最小高度 超过宿主可视高度时，
+        ///     矩阵按最小行高定高变长，pnlWindowScroll（AutoScroll=true）自动出右侧竖直滚动条，
+        ///     鼠标滚轮 / 滑块翻看，标题栏与状态栏不随滚动。
+        /// 【V2.14.15 每行最小高度动态化 = 显示区高/10（下限 MinWindowRowHeight=60）】：
+        ///   设置窗体"行数"输入框上限就是 10，而 10 ×（显示区高/10）= 显示区高，故行数 ≤10 时
+        ///   矩阵高度恒 ≤ 显示区 → 一律走【铺满】——"设置几行就几行平分显示区高度"，行高 = 显示区高/
+        ///   行数，与自适应的铺满效果完全一致（自适应行数通常更少，铺满本来就是它的默认形态）；
+        ///   只有行数 >10（如非自适手填列数太少导致自动补行、或极端窗口数）才切【滚动】兜底，
+        ///   每行高度 = 显示区高/10，超出部分靠滚动条翻看。
+        /// 【为什么改（V2.14.15 现场反馈）】此前每行最小高度固定 160：非自适设 7 行 → 7×160=1120
+        ///   超过显示区可视高（约 950~1000）→ 误触发滚动，行高被固定 160、后面几行要滚着看，
+        ///   与"设置行数后窗口高度应平分显示区"的预期不符；自适应效果好正是行数少、总是铺满。
+        /// 【为什么以像素高度判定而不看行数】窗体 FixedSingle 全屏铺满（高度≈屏幕工作区），
+        /// 用"行数×最小行高 > 可视高"能精确做到"放得下就占满、放不下才滚动"，与分辨率无关。
+        /// 构造期宿主高度还没跟上（设计器默认值），先保守铺满；OnShown 铺到实际工作区后
+        /// 会再调一次 BuildWindowGrid 重算，保证最终形态基于真实屏幕高度。
+        /// </summary>
+        private void ApplyGridScrollLayout(TableLayoutPanel grid, int rows)
+        {
+            var host = pnlWindowScroll;
+            if (host == null || host.ClientSize.Height <= 0)
+            {
+                grid.Dock = DockStyle.Fill;   // 宿主尺寸未知（构造期）→ 保守铺满，OnShown 会重算
+                return;
+            }
+            // 矩阵可用高度 = 宿主可视高 − 矩阵内边距（Padding 上下各 6）。用可用高而非原始高，
+            // 保证 10 行铺满时不会因 12px 内边距多出而误判成"放不下"去滚动。
+            int avail = host.ClientSize.Height - grid.Padding.Vertical;
+            // 每行最小高度（滚动阈值）= 显示区高/10（下限 60）：10 行 × 高/10 = 显示区高，
+            // 因此用户手填行数（≤10）恒能铺满平分显示区；只有行数 >10 才滚动。
+            int minRowHeight = Math.Max(MinWindowRowHeight, avail / 10);
+            bool scroll = rows * minRowHeight > avail;                    // 放不下才出滚动条
+            if (scroll)
+            {
+                grid.Dock = DockStyle.Top;      // Top：宽随宿主、高用自定值 → 超出后宿主出竖直滚动条
+                grid.Height = rows * minRowHeight + grid.Padding.Vertical;
+                grid.AutoScroll = false;        // grid 自身不滚，滚动交给外层宿主
+            }
+            else
+            {
+                grid.Dock = DockStyle.Fill;     // 铺满整个显示区，窗口按行百分比等分占满
+            }
+        }
+
+        /// <summary>
+        /// 双击任一显示窗口的入口（V1.12.15，UI 线程）：
+        ///   - 当前无全屏窗口 → 把双击的窗口放大到全屏（EnterFullScreenWindow）；
+        ///   - 当前已有全屏窗口 → 先还原（移到 grid），若双击的正是全屏窗口则到此为止（还原完成），
+        ///     否则继续把新双击的窗口放大（实现"双击放大、再双击还原"与"双击另一窗口切换"）。
+        /// 事件来自 CameraDisplayControl.OnDoubleClick，已在 UI 线程，无需回切。
+        /// </summary>
+        private void OnWindowDoubleClicked(object sender, EventArgs e)
+        {
+            var w = sender as CameraDisplayControl;
+            if (w == null) return;
+
+            var cur = _fullScreenWindow;
+            if (cur != null)
+            {
+                RestoreFullScreenWindow();          // 先把已有全屏窗口移回 grid 原单元格
+                if (ReferenceEquals(w, cur)) return; // 双击的正是全屏窗口 → 仅还原即可
+            }
+            EnterFullScreenWindow(w);               // 否则把（新）双击的窗口放大到全屏
+        }
+
+        /// <summary>
+        /// 把指定显示窗口放大到全屏（V1.12.15）：
+        /// 用一个无边框、置顶、覆盖整屏（含任务栏）的独立 Form 承载该窗口，Dock=Fill 铺满。
+        /// 【为什么用独立窗体而非主窗体内覆盖层】直接搬动 Dock 控件到主窗体覆盖层会与
+        ///   标题栏/底部栏的 Dock 布局冲突（Fill 抢占剩余空间次序难控）；独立无边框窗体
+        ///   布局最简单，且是 TopLevel 顶层窗口天然盖在一切之上。
+        /// 【为什么要移动控件实例而非复制图片】检测完成刷新图片走的是 `_windowControls[窗口编号]`
+        ///   SetImage（见 OnInspectionFinished），全屏时若复制图片，主流程刷新不生效、画面停住；
+        ///   移动同一实例则全屏窗口里的画面照常随检测实时刷新。
+        /// 【还原依据】进入全屏前记录该窗口在 grid 里的原单元格（_fullScreenCell），
+        ///   还原时按它 Add 回原位，restore 后布局与放大前完全一致。
+        /// </summary>
+        private void EnterFullScreenWindow(CameraDisplayControl w)
+        {
+            if (_fullScreenForm != null || w == null) return; // 异常防护：已在全屏则不做
+            LogHelper.Info($"窗口{ w.WindowIndex } 进入全屏");
+
+            // 记录原单元格（column,row），还原时用 GetCellPosition 一致的下标 Add 回原位。
+            var pos = gridCameraWindows.GetCellPosition(w);
+            _fullScreenCell = new TableLayoutPanelCellPosition(pos.Column, pos.Row);
+
+            // 全屏承载窗体：无边框、覆盖当前屏幕整屏（含任务栏）、置顶、不占任务栏。
+            _fullScreenForm = new Form
+            {
+                FormBorderStyle = FormBorderStyle.None,
+                StartPosition = FormStartPosition.Manual,
+                ShowInTaskbar = false,
+                TopMost = true,
+                BackColor = Color.Black
+            };
+            _fullScreenForm.Bounds = Screen.FromControl(this).Bounds; // 覆盖整屏含任务栏
+            _fullScreenForm.KeyPreview = true;
+            // Esc 兜底还原：无边框窗体没有关闭按钮，除双击外按 Esc 也能退出全屏。
+            _fullScreenForm.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) RestoreFullScreenWindow(); };
+            _fullScreenForm.Shown += (s, e) => _fullScreenForm.Focus(); // 聚焦到全屏窗体，保证 Esc 能收到
+
+            // 把窗口从 grid 移入全屏窗体：Dock=Fill 保持，正好铺满整屏。
+            _fullScreenWindow = w;
+            gridCameraWindows.Controls.Remove(w);
+            w.Dock = DockStyle.Fill;
+            w.Margin = new Padding(0); // 全屏吞掉 grid 的 3px 间距
+            _fullScreenForm.Controls.Add(w);
+            _fullScreenForm.Show();
+        }
+
+        /// <summary>
+        /// 全屏还原（V1.12.15，UI 线程）：把挂在全屏窗体的窗口移回 grid 原单元格并释放全屏窗体。
+        /// 幂等：无全屏窗口时直接返回（BuildWindowGrid/FormClosing 可在任意时机安全调用）。
+        /// </summary>
+        private void RestoreFullScreenWindow()
+        {
+            var form = _fullScreenForm;
+            var w = _fullScreenWindow;
+            var cell = _fullScreenCell;
+            _fullScreenForm = null;
+            _fullScreenWindow = null;
+            _fullScreenCell = null;
+
+            // 先关掉全屏窗体（把窗口从它身上摘下来，避免 Dispose 时连带销毁窗口）。
+            if (form != null)
+            {
+                form.Controls.Remove(w);
+                form.Close();
+                form.Dispose();
+            }
+
+            // 把窗口放回 grid 原单元格，恢复 Fill + 间距，形态与放大前一致。
+            if (w != null && gridCameraWindows != null && !gridCameraWindows.IsDisposed)
+            {
+                w.Dock = DockStyle.Fill;
+                w.Margin = new Padding(3);
+                if (cell != null)
+                    gridCameraWindows.Controls.Add(w, cell.Value.Column, cell.Value.Row);
+                else
+                    gridCameraWindows.Controls.Add(w);
+                w.BringToFront();
+            }
+        }
+
+        /// <summary>
+        /// 事件订阅总入口（仅构造调用一次）：
+        ///   - 运行时业务事件（检测完成/状态变化/异常/设备连接状态）→ SubscribeRuntimeEvents，
+        ///     构造与"设置保存热更"都会调用（旧服务已释放，新服务重新订阅，可重入）；
+        ///   - 窗体生命周期事件（FormClosing 释放服务）只挂一次。lambda 内引用的是字段
+        ///     （_monitor/_coordinator/_plc/_cameras），热更替换服务后自动指向新实例，无需解绑重挂。
+        /// </summary>
+        private void SubscribeEvents()
+        {
+            SubscribeRuntimeEvents();
+
+            // 窗口大小变化时重排标题栏（V1.9.9）：相机灯多时右侧 Dock 区很宽，
+            // 窗口缩窄会让左侧字段挤进灯区；Resize 时重新按"当前可用宽度"压缩/恢复字段。
+            Resize += (s, e) => RelayoutTitleBar();
+
+            // V2.15.0 国际化：语言切换 → 主界面全量刷新文本（切语言入口在设置窗体，
+            // 事件在 UI 线程触发；保险起见 InvokeRequired 判断回 UI 线程）。
+            I18n.LanguageChanged += (s, e) =>
+            {
+                if (IsDisposed) return;
+                if (InvokeRequired) { BeginInvoke(new Action(ApplyLanguage)); return; }
+                ApplyLanguage();
+            };
+
+            // V2.16.2 深色模式：主题切换 → 主界面全量重刷配色（切主题入口就在标题栏，
+            // 事件在 UI 线程触发；保险起见 InvokeRequired 判断回 UI 线程，与语言事件同策略）。
+            AppTheme.ThemeChanged += (s, e) =>
+            {
+                if (IsDisposed) return;
+                if (InvokeRequired) { BeginInvoke(new Action(ApplyTheme)); return; }
+                ApplyTheme();
+            };
+
+            FormClosing += (s, e) =>
+            {
+                // 若正有窗口全屏放大（挂在独立全屏窗体上），先关掉并移回，防止顶级窗体残留导致
+                // 进程退出不了（V1.12.15）。
+                RestoreFullScreenWindow();
+
+                // 清理服务。任何一步异常都不能中断关窗，否则程序会卡在关闭流程（进程退出不了）。
+                // 关窗顺序：先停心跳/编排，再断设备；各服务 Dispose 均已限时抢锁 + 锁外强断网，
+                // 这里再做一层兜底 catch，保证即使个别服务释放出问题，窗口也能正常关闭退出。
+                try { _monitor?.Dispose(); }
+                catch (Exception ex) { LogHelper.Warn("关闭：监控器释放异常 " + ex.Message); }
+                try { _coordinator?.Dispose(); }
+                catch (Exception ex) { LogHelper.Warn("关闭：协调器释放异常 " + ex.Message); }
+                try { _plc?.Dispose(); }
+                catch (Exception ex) { LogHelper.Warn("关闭：PLC 释放异常 " + ex.Message); }
+                // V2.15.19：MES 上传服务归主窗体所有，关闭时显式释放（协调器不代关）
+                try { _mes?.Dispose(); }
+                catch (Exception ex) { LogHelper.Warn("关闭：MES 服务释放异常 " + ex.Message); }
+                foreach (var sc in _scanners)
+                {
+                    try { sc?.Dispose(); }
+                    catch (Exception ex) { LogHelper.Warn("关闭：扫码枪释放异常 " + ex.Message); }
+                }
+                foreach (var cam in _cameras)
+                {
+                    try { cam?.Dispose(); }
+                    catch (Exception ex) { LogHelper.Warn("关闭：相机释放异常 " + ex.Message); }
+                }
+                // V2.13.6：ImageStore 归主窗体所有，关闭时显式释放（协调器不再代关）。
+                try { _imageStore?.Dispose(); }
+                catch (Exception ex) { LogHelper.Warn("关闭：图像存储释放异常 " + ex.Message); }
+                LogHelper.Info("程序关闭，服务已释放");
+            };
+        }
+
+        /// <summary>
+        /// 订阅"运行时"业务事件（构造与热更都会调用）：
+        /// 检测完成 / 状态变化 / 异常提醒 / PLC与各相机连接状态指示灯 / 扫码条码。
+        /// 旧服务实例在热更时已 Dispose，这里只对当前字段引用的新服务订阅，不会叠加。
+        /// </summary>
+        private void SubscribeRuntimeEvents()
+        {
+            // 协调器业务事件（检测完成/状态变化/异常）单独订阅；主界面切型号重建协调器时
+            // 只需重挂这三个（见 SwitchModel），不重挂 PLC/相机/扫码枪灯事件（会叠加）。
+            SubscribeCoordinatorEvents();
+
+            // 扫码枪（V1.8.1 多台）：每台扫到的条码都更新当前产品序列号（进 {SN} 目录与标题栏）
+            foreach (var sc in _scanners)
+            {
+                sc.SerialNumberScanned += OnSerialScanned;
+                // 【V2.14.32 弹窗提醒】扫码枪读码失败（推 ERROR 等错误文本）→ 弹窗提醒操作员
+                // 检查扫码枪或人工补录。与协调器的"快速 NG"各自独立：本订阅只管 UI 提醒。
+                sc.ScanFailed += OnScannerFailPrompt;
+                sc.Open(); // 串口打开失败 / TCP 连不上都不影响主流程，后台持续重连
+            }
+            // 扫码枪连接状态灯（V1.12.6）：订阅每台扫码枪的连接状态变化，聚合刷新标题栏右上角
+            // "● 扫码枪"圆点灯颜色（样式与 PLC/相机灯一致：绿=已连接、红=未连接；全部启用的
+            // 都已连接才绿，任一未连接即红）。事件在工作线程触发，RefreshScannerStatus 内部
+            // Invoke 回 UI 线程。
+            foreach (var sc in _scanners)
+                sc.ConnectionChanged += (s, c) => RefreshScannerStatus();
+            RefreshScannerStatus(); // 初始上色（构造/热更后立即按当前连接状态刷新一次）
+
+            // 连接状态指示灯（V1.10.0 双模式）：
+            //   ≤2台：每台一个灯，断连变红、重连回绿（UpdateDeviceStatus）；
+            //   ≥3台：每台灯不存在（_lblCamStatuses 为 null），改为刷新"总状态标签+下拉圆点"。
+            // PLC 灯（V1.12.11 起三态，见 UpdatePlcStatus）：监听就绪 + 主站连入 + 监听失败 三态区分。
+            _plc.ConnectionChanged += (s, c) => UpdatePlcStatus();
+            _plc.MasterConnectionChanged += (s, c) => UpdatePlcStatus();
+            UpdatePlcStatus(); // 初始按当前状态上色（构造/热更后立即反映真实三态）
+            for (int i = 0; i < _cameras.Count; i++)
+            {
+                int idx = i; // 闭包锁定下标，避免循环变量被所有事件共享
+                _cameras[i].ConnectionChanged += (s, c) =>
+                {
+                    if (_lblCamStatuses != null && idx < _lblCamStatuses.Length && _lblCamStatuses[idx] != null)
+                        UpdateDeviceStatus(_lblCamStatuses[idx], c);   // ≤2台：更新对应灯
+                    RefreshCameraAggregateStatus();                    // ≥3台：刷新聚合（≤2台时内部直接返回）
+                };
+            }
+
+            _monitor?.Start();
+        }
+
+        /// <summary>
+        /// 订阅协调器的"运行时"业务事件（构造热更与主界面切型号 SwitchModel 都会调用）：
+        /// 检测完成 / 状态变化 / 异常提醒。旧协调器在重建前已 Dispose，这里只对当前字段引用的
+        /// 新实例订阅，不会叠加（注意：只挂协调器事件，不挂 PLC/相机/扫码枪灯事件，
+        /// 那些事件的主窗订阅只在构造/热更挂一次，重复重挂会叠加出双倍刷新）。
+        /// </summary>
+        private void SubscribeCoordinatorEvents()
+        {
+            _coordinator.InspectionFinished += OnInspectionFinished;
+            _coordinator.DisplayImageAvailable += OnDisplayImageAvailable;   // V2.14.49 图片迟到补发
+            _coordinator.RoundStarted += OnRoundStarted;
+            _coordinator.StateChanged += OnStateChanged;
+            _coordinator.ErrorRaised += msg => LogHelper.Warn("界面收到错误：" + msg);
+        }
+
+        /// <summary>
+        /// 新一轮开始（V2.14.11）：收到 PLC 扫码请求（40001=1），本轮生产启动。
+        /// 两个动作，都代表"换新检测件、上一轮数据作废"：
+        ///   ① 清空所有窗口的图片显示——新的一轮第一步就是扫码，上一轮的图片已过时；
+        ///      提前清掉，等到新一轮相机判定返回后再逐窗口 SetImage 新图，避免新旧两轮画面混在一起。
+        ///   ② 徽标重置为 OK（V2.14.47 新增）——与图片清空同一逻辑：上一轮的 NG 红色徽标
+        ///      属于旧工件，扫码=新检测件，徽标一并复位为默认绿 OK，等新一轮相机判定返回后
+        ///      再随结果变色，避免"旧件的 NG 红框"残留误导操作员以为新件有问题。
+        ///   ③ 标题栏计数清零（V2.14.28 新增）——扫码=新的检测件到位，当前工件重新开始统计，
+        ///      _total/_ok/_ng 归零，之后每次相机检测完成再重新累加（见 UpdateCountsTitle）。
+        /// 事件来自协调整轮询后台线程，统一 BeginInvoke 回 UI 线程再遍历窗口。
+        /// </summary>
+        private void OnRoundStarted()
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(OnRoundStarted));
+                return;
+            }
+            foreach (var w in _windowControls.Values)
+            {
+                try
+                {
+                    w?.SetImage(null);          // 图片清空回深灰空态（徽标显隐只随开关，不清）
+                    w?.SetOkNgStatus(true);     // 徽标重置为绿 OK（上一轮判定随旧件一起作废）
+                }
+                catch { }
+            }
+            _total = 0;   // 扫码=新检测件：总数/OK/NG 全部清零，重新统计当前工件检测点
+            _ok = 0;
+            _ng = 0;
+            RefreshTitle();
+        }
+
+        /// <summary>
+        /// 扫到一条条码：更新当前产品序列号并刷新标题栏（V1.8.0 接入）。
+        /// 事件来自扫码枪工作线程，统一 Invoke 回 UI 线程。
+        /// </summary>
+        private void OnSerialScanned(object sender, string code)
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<object, string>(OnSerialScanned), sender, code);
+                return;
+            }
+            _coordinator.LatestSerialNumber = code;
+            if (lblSerial != null) lblSerial.Text = code;
+            LogHelper.Info("当前产品序列号：" + code);
+        }
+
+        /// <summary>
+        /// 扫码枪"读码失败"弹窗提醒（V2.14.32，ScanFailed 事件，扫码枪工作线程触发）。
+        /// 收码层已按 IgnoreScanTexts 把 ERROR 等错误文本过滤不当 SN，协调器也已把扫码结果写 2
+        /// 通知 PLC（V2.14.30/33：PLC 拿到 2 会死等人工补录，直到上位机把 40004 覆盖成 1 才继续）；
+        /// 这里专职"人看的提醒"：弹 ScannerFailForm 提示操作员检查扫码枪或点【人工补录】
+        /// 直接手动输入本条序列号接手处理。
+        ///
+        /// 【节流防轰炸】扫码枪持续失败会连发事件，若每次都弹窗会打断生产。用
+        /// _lastScannerFailPromptUtc 记录上次真实弹窗时刻，30 秒内重复失败只在日志体现、
+        /// 不再弹窗——给操作员留出处理时间，又不会因持续故障刷屏。
+        /// 【今日不再提醒（V2.14.32 增强）】操作员在弹窗勾选"今日不再提醒"后，_scannerFailMuteDate
+        /// 记录当天日期，当日后续失败一律不弹窗（业务 NG 判定、日志照旧），次日自动恢复。
+        /// 屏蔽与否与 30 秒节流是两级：今日已屏蔽 → 全部跳过；否则再按节流窗口判断。
+        /// 【线程安全】事件来自后台线程，先 BeginInvoke 切回 UI 线程再弹模态窗（红线：UI 禁 IO、
+        /// 后台线程禁碰 UI 控件）。模态弹窗只在 UI 线程排队，后台协调器/扫码枪不受阻塞。
+        /// </summary>
+        private void OnScannerFailPrompt(object sender, string text)
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<object, string>(OnScannerFailPrompt), sender, text);
+                return;
+            }
+
+            // 今日已勾选"不再提醒" → 当天后续失败只记日志、不再弹窗（业务判定与日志照常，次日恢复）
+            if (_scannerFailMuteDate == DateTime.Today)
+            {
+                LogHelper.Warn("扫码枪读码失败（今日已设置不再提醒，跳过弹窗，业务照常）：" + text);
+                return;
+            }
+
+            // 节流：距上次真实弹窗不足 30 秒 → 只记日志、不打扰（防持续失败刷屏）
+            if ((DateTime.UtcNow - _lastScannerFailPromptUtc) < ScannerFailPromptThrottle) return;
+            _lastScannerFailPromptUtc = DateTime.UtcNow;
+            LogHelper.Warn("扫码枪读码失败，弹窗提醒操作员检查（结果已写 2，PLC 死等人工补录）：" + text);
+
+            // 弹提醒窗：点【人工补录】→ 顺手打开手动录入对话框（复用现有补录流程），
+            // 点【稍后处理】→ 仅提醒、暂不补录（V2.14.33：PLC 死等 2，操作员稍后经主界面
+            // 【人工补录】按钮 btnManualSerial 补录，协调器把 40004 从 2 覆盖成 1 流程才继续）；
+            // 关闭后若勾选【今日不再提醒】→ 记录当天日期，当日后续失败不再弹窗（跨弹窗实例全局生效）。
+            using (var dlg = new ScannerFailForm(text, _scanners))
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                    PromptManualSerial();
+                if (dlg.MuteToday)
+                {
+                    _scannerFailMuteDate = DateTime.Today;
+                    LogHelper.Info("操作员勾选扫码枪异常弹窗【今日不再提醒】——当日后续扫码枪失败不再弹窗（业务判定与日志照常），次日自动恢复");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 刷新一个设备连接状态标签（后台线程事件触发，BeginInvoke 切回 UI 线程）。
+        /// 颜色约定：绿=已连接，红=未连接（与现场 OK/NG 的绿红习惯一致）。
+        /// </summary>
+        private void UpdateDeviceStatus(Label lbl, bool connected)
+        {
+            if (IsDisposed || lbl == null) return;
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<Label, bool>(UpdateDeviceStatus), lbl, connected);
+                return;
+            }
+            lbl.ForeColor = connected ? Color.FromArgb(46, 158, 107) // 绿
+                                      : Color.FromArgb(229, 72, 77);  // 红
+        }
+
+        /// <summary>
+        /// 刷新标题栏"● PLC"连接灯（V1.12.11 起三态，对应从站模式的三种真实状态）：
+        ///   红 = 监听失败/未启动（IsConnected=false）：上位机从站 502 都没起来，
+        ///        检查端口是否被占用、是否绑定错误、Windows 防火墙是否放行入站；
+        ///   黄 = 监听就绪但主站未连入（IsConnected && !HasMasterConnected）：等在等汇川主站来连，
+        ///        说明 PLC 侧还没建立 TCP 会话——检查 PLC 主站程序是否运行、连的 IP/端口是否为本机 502；
+        ///   绿 = 主站已连入（IsConnected && HasMasterConnected）：PLC 主站已 TCP 连上本机 502，通讯建立。
+        /// 颜色与现场 OK/NG 习惯一致：绿=正常、红=故障，新增黄色=中间态（等待主站）。
+        /// 同时把状态含义挂到悬停气泡上，现场鼠标放上去即可看到原因与排查方向。
+        /// </summary>
+        private void UpdatePlcStatus()
+        {
+            if (IsDisposed || lblPlcStatus == null) return;
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(UpdatePlcStatus));
+                return;
+            }
+
+            string tipText;
+            if (_plc.IsConnected)
+            {
+                if (_plc.HasMasterConnected)
+                {
+                    lblPlcStatus.ForeColor = Color.FromArgb(46, 158, 107);   // 绿：主站已连入
+                    tipText = $"PLC 主站已连入（{_plc.IpLabel}），通讯正常";
+                }
+                else
+                {
+                    lblPlcStatus.ForeColor = Color.FromArgb(240, 173, 78);   // 黄：监听就绪、等待主站
+                    tipText = $"从站监听就绪，等待 PLC 主站连入 {_plc.IpLabel}\n检查：PLC 主站程序是否运行、是否指向本机 502 端口";
+                }
+            }
+            else
+            {
+                lblPlcStatus.ForeColor = Color.FromArgb(229, 72, 77);        // 红：监听失败
+                tipText = $"PLC 从站监听未就绪（{_plc.IpLabel}）\n检查：端口占用 / 绑定 IP / 防火墙放行 502";
+            }
+            _plcTip = _plcTip ?? new ToolTip();
+            _plcTip.SetToolTip(lblPlcStatus, tipText);
+        }
+
+        /// <summary>
+        /// 刷新标题栏右上角"● 扫码枪"状态灯颜色（V1.12.6，颜色显示逻辑与 PLC/相机灯完全一致）：
+        ///   文本固定"● 扫码枪"，只切颜色——已连接=绿(46,158,107)、未连接/断开=红(229,72,77)，
+        ///   与 UpdateDeviceStatus（PLC/相机灯统一上色）同色值；
+        ///   连接失败同样触发变红（V1.12.6 起 ScannerTcpService.TryConnect 失败也触发
+        ///   ConnectionChanged(false)，对齐 PLC/相机"连不上就红"，此前扫码枪一直连不上时灯不变化）。
+        /// 【多台聚合规则】对齐相机 ≥3 台的聚合语义：**只要有一台"启用"的扫码枪未连接就变红**，
+        /// 全部启用扫码枪都已连接才变绿；禁用（Enabled=false）不参与判定；
+        /// **没有任何启用的扫码枪时隐藏本灯（V2.15.11 去灰）**——没有枪就没有状态可表示，
+        /// 灯直接不显示（Visible=false 不占 Dock 空间），绝不拿灰色冒充"无设备"。
+        /// 【数据源】_scanners[i] 与 _config.Scanners[i] 下标一一对应（BuildServices 按配置
+        /// 顺序创建实例，绝不跳过），"启用与否"以配置为准——因为 Enabled=false 的实例 Open()
+        /// 直接返回 false 不建连，IsOpen 恒 false，若不加过滤会误报红灯。
+        /// 【线程】事件来自扫码枪工作线程，统一 BeginInvoke 回 UI 线程。
+        /// </summary>
+        private void RefreshScannerStatus()
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(RefreshScannerStatus));
+                return;
+            }
+
+            var configs = _config.Scanners ?? new List<ScanConfig>();
+            bool connected = true; // 先假设全部已连接
+            bool anyEnabled = false;
+            for (int i = 0; i < _scanners.Count; i++)
+            {
+                bool enabled = i < configs.Count && configs[i].Enabled;
+                if (!enabled) continue; // 禁用的扫码枪不参与聚合判定
+                anyEnabled = true;
+                if (!_scanners[i].IsOpen) { connected = false; break; } // 任一启用未连接 → 红
+            }
+            if (!anyEnabled)
+            {
+                // 没有启用的扫码枪：隐藏灯（无设备不显示，勿用灰色/其它颜色冒充状态）
+                lblScannerStatus.Visible = false;
+                return;
+            }
+            lblScannerStatus.Visible = true;
+
+            lblScannerStatus.ForeColor = connected ? Color.FromArgb(46, 158, 107) // 绿=已连接
+                                                    : Color.FromArgb(229, 72, 77);  // 红=未连接
+        }
+
+        /// <summary>
+        /// 一次检测完成：在界面线程刷新对应窗口图片+OK/NG徽标，并更新统计。
+        /// 事件可能从工作线程抛出，统一 Invoke 回界面线程。
+        ///
+        /// 【V2.13.2 显示提速，两层配合，图片"到窗口"不再滞后】
+        ///   ① 协调器（ProductionCoordinator.DoCameraShot）在 FTP 模式 jpeg 一到位就**提前从源文件
+        ///      加载内存缩略图**塞进 WindowData.PreviewImage 随事件带过来——显示不等"jpeg+iv4p
+        ///      归档复制 + 删 FTP 源"全部完成（iv4p 复制可能因文件在写而 400ms×3 重试，是旧链路最大
+        ///      的隐性延迟）；UI 收到直接赋值，不做任何磁盘 IO。
+        ///   ② 若 PreviewImage 为 null（非 FTP 取图 / 提前加载失败 / 源文件半截）——回退：后台
+        ///      Task 读盘+解码+降采样（LoadThumbnailSafe）完成后把小图带回 UI 赋值。解码/缩放开销
+        ///      完全移出界面线程（较旧版"UI 线程全尺寸解码"已不卡界面）。
+        ///   计数/标题等轻量更新与图片加载分开投递（图片加载不得拖慢写回 PLC 结果的协调器线程）。
+        /// </summary>
+        private void OnInspectionFinished(WindowData data, int windowIndex)
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired)
+            {
+                // ① 计数更新立刻回 UI（纯状态刷新，即刻反映到标题栏）
+                BeginInvoke(new Action<WindowData>(UpdateCountsTitle), data);
+
+                if (data.PreviewImage != null)
+                {
+                    // 协调器已提前加载好的内存缩略图：直接转交 UI（无磁盘 IO，最快路径）
+                    BeginInvoke(new Action<WindowData, int, Image>(ApplyResultImage), data, windowIndex, data.PreviewImage);
+                    return;
+                }
+
+                // ② 回退路径：图片读盘/解码/降采样放后台 Task，完成后小图回 UI 赋值。
+                //    【V2.14.49 半截文件防丢图】协调器预览图提前加载失败（jpeg 半截）时回退到这里，
+                //    但 FTP 源文件归档后立即被删、回退大概率救不回——**真正补救由协调器归档后后台
+                //    补发（OnDisplayImageAvailable）负责**：它读完整归档副本、可靠且不阻塞节拍。
+                //    这里的 200ms 重试只是"删源前文件恰好写完"的快速路径，救不回也无妨（补发兜底）。
+                string path = data.ImagePath;
+                Task.Factory.StartNew(() =>
+                {
+                    Image thumb = (!string.IsNullOrEmpty(path) && File.Exists(path))
+                        ? ProductionCoordinator.LoadThumbnailSafe(path)
+                        : null;
+                    if (thumb == null && !string.IsNullOrEmpty(path))
+                    {
+                        // 源 jpeg 可能半截/正在写：短等后重试一次。LoadThumbnailSafe 内部对
+                        // 文件不存在/占用/解码失败一律容错返回 null，文件已被删则自然拿到 null。
+                        System.Threading.Thread.Sleep(200);
+                        thumb = ProductionCoordinator.LoadThumbnailSafe(path);
+                    }
+                    if (IsDisposed)
+                    {
+                        // 窗体已关：无窗口可显示，立即释放缩略图防 GDI+ 句柄泄漏
+                        thumb?.Dispose();
+                        return;
+                    }
+                    try
+                    {
+                        BeginInvoke(new Action<WindowData, int, Image>(ApplyResultImage), data, windowIndex, thumb);
+                    }
+                    catch
+                    {
+                        // 关窗竞态：BeginInvoke 抛异常（句柄已销毁等），原地释放缩略图防泄漏
+                        thumb?.Dispose();
+                    }
+                });
+                return;
+            }
+
+            // 罕见：直接在 UI 线程调用（测试/harness 直连）：优先用事件带的内存图，否则同步缩略图。
+            UpdateCountsTitle(data);
+            Image img = data.PreviewImage
+                ?? (!string.IsNullOrEmpty(data.ImagePath) && File.Exists(data.ImagePath)
+                    ? ProductionCoordinator.LoadThumbnailSafe(data.ImagePath)
+                    : null);
+            ApplyResultImage(data, windowIndex, img);
+        }
+
+        /// <summary>
+        /// 检测计数+标题栏刷新（V2.13.2 拆出）：只做轻量 UI 状态更新，供检测完成事件
+        /// 的 UI 回调使用（图片刷新见 ApplyResultImage，两者独立分工，计数不依赖图片加载结果）。
+        /// </summary>
+        private void UpdateCountsTitle(WindowData data)
+        {
+            if (IsDisposed) return;
+            _total++;
+            if (data.IsOk) _ok++; else _ng++;
+            RefreshTitle();
+        }
+
+        /// <summary>
+        /// 把后台加载好的缩略图赋给对应窗口（V2.13.2 拆出，UI 线程执行）：
+        /// 按窗口编号查字典（禁用的窗口不建控件，事件异常路径直接忽略）；
+        /// 窗口已消失（禁用/切型号重建）时不落控件、原地 Dispose 缩略图，防句柄泄漏。
+        /// </summary>
+        private void ApplyResultImage(WindowData data, int windowIndex, Image thumb)
+        {
+            if (IsDisposed) { thumb?.Dispose(); return; }
+            if (_windowControls.TryGetValue(windowIndex, out var w))
+            {
+                w.SetImage(thumb);
+                w.SetOkNgStatus(data.IsOk);
+            }
+            else
+            {
+                thumb?.Dispose(); // 窗口已重建：释放刚加载的缩略图，防句柄泄漏
+            }
+        }
+
+        /// <summary>
+        /// 图片"迟到补发"（V2.14.49）：协调器预览图提前加载失败（jpeg 半截）时，归档完成后在后台
+        /// 读完整归档副本解码并补发本事件。只更新对应窗口图片与徽标、【不重复计数】——计数已在
+        /// OnInspectionFinished 处理过，本事件只补图片。thumb 由协调器后台线程创建、经 BeginInvoke
+        /// 转交 UI 线程后赋给窗口（SetImage 内部先 Dispose 旧图再接管新图）；窗口已消失（禁用/切型号
+        /// 重建）时原地 Dispose 防句柄泄漏。收到时窗口可能已显示过回退图，覆盖赋值幂等无害。
+        /// </summary>
+        private void OnDisplayImageAvailable(int windowIndex, Image thumb, bool isOk)
+        {
+            if (IsDisposed) { thumb?.Dispose(); return; }
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new Action<int, Image, bool>(OnDisplayImageAvailable), windowIndex, thumb, isOk); }
+                catch { thumb?.Dispose(); }   // 关窗竞态：句柄已销毁，原地释放
+                return;
+            }
+            if (_windowControls.TryGetValue(windowIndex, out var w))
+            {
+                w.SetImage(thumb);
+                w.SetOkNgStatus(isOk);
+            }
+            else
+            {
+                thumb?.Dispose();   // 窗口已重建：释放补发的缩略图，防句柄泄漏
+            }
+        }
+
+        /// <summary>
+        /// 流程状态文本刷新（工作线程抛出，需回 UI 线程）。
+        /// 每次流程状态更新都恢复默认深蓝灰色文字——型号切换成功的"绿色提示"只在切换成功
+        /// 的瞬间显示，随后流程推进（如"等待PLC主站到位"）会恢复常规颜色。
+        /// </summary>
+        private void OnStateChanged(string text)
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired) { BeginInvoke(new Action<string>(OnStateChanged), text); return; }
+            lblStatus.ForeColor = AppTheme.TextPrimary; // 恢复默认文字色（V2.16.2 起跟随主题，深色下不再写死深蓝灰）
+            lblStatus.Text = I18n.T("状态", "Status") + ": " + text;
+        }
+
+        /// <summary>刷新标题栏统计与产品型号（型号由下拉框自持显示，无需在这里刷）。</summary>
+        private void RefreshTitle()
+        {
+            lblTotal.Text = I18n.T("总数", "Total") + ": " + _total;
+            lblOk.Text = "OK: " + _ok;
+            lblNg.Text = "NG: " + _ng;
+        }
+
+        /// <summary>
+        /// 主界面全量语言刷新（V2.15.0 国际化）：切换语言后重设所有静态/动态 UI 文本并重排标题栏。
+        /// 调用时机：① 构造末尾（按配置语言初始化）；② I18n.LanguageChanged 事件（切语言实时生效）；
+        /// ③ ApplyRuntimeConfig 热更末尾（重建后控件文本复位）。仅 UI 线程调用。
+        /// 运行时文本（计数/状态栏）也在这里重取；协调器状态经 CurrentStateUiText 取当前语言文案。
+        /// </summary>
+        private void ApplyLanguage()
+        {
+            if (IsDisposed) return;
+
+            // ① 标题栏静态文本（OK/NG/PLC 等专有名词不翻译，保持现场习惯）
+            lblProductPrefix.Text = I18n.T(
+                string.IsNullOrWhiteSpace(_config.Display.ProductModelPrefix) ? "产品型号" : _config.Display.ProductModelPrefix,
+                "Model") + ":";
+            lblSerialTitle.Text = I18n.T("序列号:", "Serial:");
+            btnSettings.Text = I18n.T("系统设置", "Settings");
+            // 语言切换按钮文本 = 目标语言名（点击后界面切到该语言），语言名本身不翻译、自解释：
+            // 中文界面显示 "English"（点一下变英文）、英文界面显示 "中文"（点一下变中文）。
+            btnToggleLanguage.Text = (I18n.Language == "en-US") ? "中文" : "English";
+            _langTip = _langTip ?? new ToolTip();
+            _langTip.SetToolTip(btnToggleLanguage, I18n.T("点击切换界面语言（立即生效并保存）",
+                "Click to switch UI language (applies & saves immediately)"));
+            // 主题切换按钮文本 = 目标主题名（与语言按钮同策略，自解释），见 RefreshThemeButtonText。
+            // 【V2.16.3】抽成独立方法：切语言（ApplyLanguage）与切主题（ApplyTheme）两条路径都要刷，
+            // 此前只在 ApplyLanguage 里设，切主题走 ThemeChanged→ApplyTheme 不经过这里，文本永远不变。
+            RefreshThemeButtonText();
+            btnManualSerial.Text = I18n.T("人工补录", "Manual");
+            lblScannerStatus.Text = I18n.T("● 扫码枪", "● Scanner");
+            // V2.16.5 品牌更名：中文界面标题"光阑视界"、英文界面"IrisVision"
+            // （exe 文件名 IrisVision.exe 与程序集名保持不变，只改显示名）。
+            this.Text = I18n.T("光阑视界", "IrisVision");
+            if (_serialTip != null)
+                _serialTip.SetToolTip(btnManualSerial, I18n.T("手动输入/修改当前序列号", "Enter / modify current serial number"));
+
+            // ② 相机灯文本（≤2 台独立灯 / ≥3 台下拉列表）
+            if (_lblCamStatuses != null)
+                for (int i = 0; i < _lblCamStatuses.Length; i++)
+                    if (_lblCamStatuses[i] != null)
+                    {
+                        // V2.15.15：重设文本同样要限长（此前语言切换/热更用未截断的 CamDisplayName
+                        // 覆盖，把创建时的截断名顶回完整名，"截短没生效"的根因）；ToolTip 同语言刷新。
+                        _lblCamStatuses[i].Text = $"● {TruncateIndicatorText(CamDisplayName(i), 10)}";
+                        _camTip = _camTip ?? new ToolTip();
+                        _camTip.SetToolTip(_lblCamStatuses[i], CamLightTipText(i));
+                    }
+
+            // ③ 计数与状态栏（运行时文本）
+            RefreshTitle();
+            RefreshCameraAggregateStatus(); // ≥3台下拉：重建项文本（含语言）+ 排序 + 悬停明细 + 宽度
+            if (_coordinator != null)
+            {
+                string st = _coordinator.CurrentStateUiText;
+                if (!string.IsNullOrEmpty(st))
+                {
+                    lblStatus.ForeColor = AppTheme.TextPrimary; // V2.16.2 跟随主题
+                    lblStatus.Text = I18n.T("状态", "Status") + ": " + st;
+                }
+            }
+
+            // ④ 窗口矩阵各格的悬停提示（双击放大/还原）
+            foreach (var w in _windowControls.Values)
+                try { w?.ApplyLanguage(); } catch { }
+
+            // ⑤ PLC 灯悬停提示（语言变化后重新生成，见 UpdatePlcStatus）
+            UpdatePlcStatus();
+
+            // ⑥ V2.15.1 用户要求：切换语言时标题栏控件位置【保持不变】——
+            //    不再调 RelayoutTitleBar()（此前英文文案更长会按 PreferredWidth 重排，
+            //    导致系统设置/语言/人工补录等按钮与字段位置移动）。
+            //    标题栏排布只在窗体 Resize 时重算（见 Resize 事件挂接处）。
+        }
+
+        /// <summary>
+        /// 刷新主题切换按钮的文本与悬停（V2.16.3 从 ApplyLanguage 抽出独立）：
+        /// 文本 = 目标主题名（与语言按钮同策略，自解释）——浅色界面显示"深色/Dark"
+        /// （点一下变深）、深色界面显示"浅色/Light"（点一下变浅）。
+        /// 【为什么必须独立】切语言（ApplyLanguage）与切主题（ApplyTheme）都会改变这个按钮
+        /// 该显示什么：切语言换中英文案、切主题换深浅目标。V2.16.2 只在 ApplyLanguage 里设，
+        /// 切主题走 ThemeChanged→ApplyTheme 不经过，文本永远停在旧值（"固定为浅色"bug 根因）。
+        /// 独立后两处都调，绝不漂移。注意 AppTheme.ApplyTo 不碰按钮文本内容（只保白字），
+        /// 所以在 ApplyTo 前后调都安全，本方法放在 ApplyTheme 末尾调用。
+        /// </summary>
+        private void RefreshThemeButtonText()
+        {
+            if (IsDisposed || btnToggleTheme == null) return;
+            btnToggleTheme.Text = AppTheme.IsDark ? I18n.T("浅色", "Light") : I18n.T("深色", "Dark");
+            _themeTip = _themeTip ?? new ToolTip();
+            _themeTip.SetToolTip(btnToggleTheme, I18n.T("点击切换深色/浅色主题（立即生效并保存）",
+                "Click to switch dark/light theme (applies & saves immediately)"));
+        }
+
+        /// <summary>
+        /// 主界面全量主题刷新（V2.16.2 深色模式；V2.16.3 补刷主题按钮文本）：按当前 AppTheme 重刷整窗配色。
+        /// 调用时机：① 构造末尾（按配置主题初始化）；② AppTheme.ThemeChanged 事件（点主题按钮实时生效）；
+        /// ③ ApplyRuntimeConfig 热更末尾（重建后新控件复位）。仅 UI 线程调用。
+        /// 通用上色走 AppTheme.ApplyTo（递归整树，语义色自动保留），本方法只补"层级色"：
+        /// 通用规则把 Panel/TableLayoutPanel 一律刷成 Surface（白/深灰），而主界面历史底
+        /// （窗体/矩阵/滚动宿主）是 Background（淡蓝 240,245,250）、标题栏/状态栏是 TitleBar，
+        /// 浅色下必须恢复这两级，否则矩阵会从淡蓝变成纯白、与历史外观不一致。
+        /// </summary>
+        private void ApplyTheme()
+        {
+            if (IsDisposed) return;
+            AppTheme.ApplyTo(this);
+
+            // V2.16.3：切主题后按钮文本必须同步翻转（目标主题名），否则文本永远停在旧值。
+            RefreshThemeButtonText();
+
+            // 层级色恢复（浅色像素级对齐历史，通用规则覆盖不到这么细）。
+            this.BackColor = AppTheme.Background;
+            if (pnlTitleBar != null) pnlTitleBar.BackColor = AppTheme.TitleBar;
+            if (pnlStatusBar != null) pnlStatusBar.BackColor = AppTheme.TitleBar;
+            if (gridCameraWindows != null) gridCameraWindows.BackColor = AppTheme.Background;
+            if (pnlWindowScroll != null) pnlWindowScroll.BackColor = AppTheme.Background;
+            // ≥3台相机下拉容器：与标题栏同色保持"隐形"（构造时即此策略，见 BuildCameraStatusLights）。
+            if (_pnlCamOverview != null && pnlTitleBar != null)
+                _pnlCamOverview.BackColor = pnlTitleBar.BackColor;
+
+            // 状态栏默认文字跟随主题（深蓝灰→浅灰）；绿色的"型号切换完成"提示是语义色、保留。
+            if (lblStatus != null
+                && lblStatus.ForeColor.ToArgb() == Color.FromArgb(52, 73, 94).ToArgb())
+                lblStatus.ForeColor = AppTheme.TextPrimary;
+
+            // 各显示窗口跟随主题（空态卡底/编号标签，图片与徽标不动）。
+            foreach (var w in _windowControls.Values)
+                try { w?.ApplyTheme(); } catch { }
+        }
+
+        /// <summary>
+        /// 配置保存后的热生效入口（V1.6.0，免重启）：停掉旧服务层，用新配置全量重建。
+        /// 服务连接是惰性的（EnsureConnected 才建连），重建后由后台心跳/到位轮询按新 IP 自动重连，
+        /// 等效于"按新配置断开重连"；界面（标题栏字段/相机灯/OK-NG 色块、窗口矩阵）同步按新配置重建。
+        ///
+        /// 【线程安全】本方法在 UI 线程执行，但只做"停服务/建对象/摆控件"，不发任何网络请求，
+        /// 不违反"UI 线程禁网络 IO"铁律；真正的连接动作发生在后台心跳线程。
+        /// 各服务 Dispose 均有"限时抢锁 + 锁外强断网"兜底，即使后台连接任务正忙也不会阻塞界面。
+        ///
+        /// 【为什么全量重建而非局部热更】PLC/相机寄存器、FTP 目录、窗口行列、相机台数等配置
+        /// 相互牵连（coordinator 持有相机列表与窗口总数、ImageStore 持有 FTP 监听），局部替换易留
+        /// 旧引用；全量重建逻辑简单且不易出错，副作用仅是"保存后设备短暂断连、几秒内自动连回"，
+        /// 对现场可接受。
+        /// </summary>
+        private void ApplyRuntimeConfig()
+        {
+            // ① 保留下一个流程要用的状态（新 coordinator 实例会重建，这些状态属于主窗体）
+            string serial = _coordinator?.LatestSerialNumber ?? "";
+
+            // ② 停旧服务：关窗顺序同 FormClosing，先停心跳/编排，再断设备
+            try { _monitor?.Dispose(); }
+            catch (Exception ex) { LogHelper.Warn("热更：监控器释放异常 " + ex.Message); }
+            try { _coordinator?.Dispose(); }
+            catch (Exception ex) { LogHelper.Warn("热更：协调器释放异常 " + ex.Message); }
+            try { _plc?.Dispose(); }
+            catch (Exception ex) { LogHelper.Warn("热更：PLC 释放异常 " + ex.Message); }
+            // V2.15.19：MES 服务随热更重建（BuildServices 用新 sn 段配置 new 新实例），旧实例先释放
+            try { _mes?.Dispose(); }
+            catch (Exception ex) { LogHelper.Warn("热更：MES 服务释放异常 " + ex.Message); }
+            foreach (var sc in _scanners)
+            { try { sc?.Dispose(); } catch (Exception ex) { LogHelper.Warn("热更：扫码枪释放异常 " + ex.Message); } }
+            foreach (var cam in _cameras ?? new List<KeyenceIV4Camera>())
+            { try { cam?.Dispose(); } catch (Exception ex) { LogHelper.Warn("热更：相机释放异常 " + ex.Message); } }
+            // V2.13.6：ImageStore 归主窗体所有（协调器不再代关），热更重建前必须显式释放旧的，
+            // 否则旧 FileSystemWatcher 会一直监听旧目录（句柄泄漏 + 事件发给已废弃的信号）。
+            try { _imageStore?.Dispose(); }
+            catch (Exception ex) { LogHelper.Warn("热更：图像存储释放异常 " + ex.Message); }
+
+            // ③ 用新配置重建服务层（BuildServices 内部全部读取 _config 的最新值）
+            BuildServices();
+            _coordinator.LatestSerialNumber = serial;
+
+            // ④ 重建界面与重新订阅：标题栏（相机灯/色块）→ 型号下拉候选刷新 → 窗口矩阵 → 运行时事件 → 启动流程
+            InitTitleBarFields();
+            InitModelCombo();      // 热更后：按新配置型号/候选刷新标题栏下拉
+            BuildWindowGrid();
+            SubscribeRuntimeEvents();
+            _coordinator.Start();
+            RelayoutTitleBar();
+            RefreshTitle();
+            ApplyLanguage();   // V2.15.0 国际化：热更后按新语言统一刷新界面文本
+            ApplyTheme();      // V2.16.2 深色模式：热更重建后新控件按当前主题上色
+
+            LogHelper.Info("配置已保存并热生效（服务层已按新配置重建）");
+        }
+
+        /// <summary>
+        /// 打开系统设置：保存后写盘并热生效（V1.6.0 起免重启）。
+        /// 【V1.9.0 管理员登录】每次点击先校验账号（SecurityConfig.AdminEnabled=true 时，
+        /// 弹 LoginForm 登录，只有验证通过才放行），防止现场操作员随意改关键配置。
+        /// 【V1.12.0 双账号分流】LoginForm 校验通过后按角色（login.Role）决定打开哪个界面：
+        ///   - LoginRole.Admin → 系统设置窗体 SettingsForm（改配置，原行为）；
+        ///   - LoginRole.Developer → 开发者模式窗体 DeveloperModeForm（原名 DevTestForm，相机/PLC 通讯验证 + 账号管理）。
+        /// 开发者账号进入功能测试后不写盘、不改配置，且复用主窗体已建好的 PLC/相机连接。
+        /// </summary>
+        private void OpenSettings()
+        {
+            // 登录校验（V1.9.0）：启用时每次点都要求登录，无"记住登录状态"。
+            // 传整个 _config：LoginForm 里不仅能登录，还能修改管理员密码（改后直接写盘）。
+            if (_config.Security.AdminEnabled)
+            {
+                using (var login = new LoginForm(_config))
+                {
+                    if (login.ShowDialog(this) != DialogResult.OK)
+                        return; // 取消/连续失败：不进任何界面
+
+                    // 开发者账号 → 开发者模式窗体（原名 DevTestForm，V2.15.10 更名）：复用主窗体已有连接，不新建；
+                    // V2.15.10 追加整个 _config 供"账号管理"区改密码写盘（SecurityConfig + ConfigStore.Save）
+                    if (login.Role == LoginRole.Developer)
+                    {
+                        using (var test = new DeveloperModeForm(_plc, _cameras, _scanners, _config.Scanners,
+                            _imageStore, _config.Cameras, _coordinator?.LatestSerialNumber ?? "", _config))
+                            test.ShowDialog(this);
+                        return; // 开发者模式窗体关闭后不触发保存/热更（除账号管理区外不产生配置改动）
+                    }
+                    // 其余（Admin）继续走系统设置
+                }
+            }
+
+            // V2.10.1：把主窗体标题栏型号下拉的"当前选中值"传给设置窗体，作为它的"当前型号"快照。
+            // 不传 _config.ProductModel 的原因：标题栏下拉在配置型号为空时会默认选第一个候选，
+            // 但 _config.ProductModel 仍是空，设置页直接读配置会得到空型号（V2.14.24 起用于
+            // SettingsForm._currentModel 的初始化、自适应铺排计算与 WindowPointForm 打开时的初选型号）。
+            // V2.12.x：配置对话框（SettingsForm→WindowPointForm）里切型号【不实时影响主界面】——
+            // 只更新设置窗体内的 _currentModel（OnSave 时写 _cfg.ProductModel），用户点【保存】后
+            // 本方法下面的 ApplyRuntimeConfig 才刷新标题栏型号下拉 + 窗口矩阵 + 协调器（见 ApplyRuntimeConfig）。
+            using (var dlg = new SettingsForm(_config, cmbModel.SelectedItem?.ToString()))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                ConfigStore.Save(_config);
+                ApplyRuntimeConfig();   // 保存即生效：停旧服务、按新配置重建服务层与界面
+                // V2.14.3：保存后静默热更，不再弹"配置已保存并即时生效"提示
+                // （现场操作时弹窗打断刷新观察；界面矩阵/标题栏/状态自行刷新即可感知，成败看日志）。
+            }
+        }
+    }
+}

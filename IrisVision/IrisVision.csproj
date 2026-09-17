@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</ProjectGuid>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>IrisVision</RootNamespace>
+    <AssemblyName>IrisVision</AssemblyName>
+    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <Deterministic>true</Deterministic>
+    <LangVersion>7.3</LangVersion>
+    <!-- 软件主图标（V2.16.5 光阑视界 IrisVision）：exe 文件图标 / 资源管理器 /
+         桌面快捷方式 / 任务栏（运行中 + 固定）的图标全部从这里来，单一来源。
+         源图 Resources\app.png（1600px），app.ico 含 16~256 共 7 层多尺寸：
+         小图标（任务栏/标题栏 16×16）用独立小尺寸层，不拿 256 缩放，保证清晰不糊。
+         注意：只改文件名/路径要同步改 Utils\AppIcon.cs 的注释与桌面快捷方式脚本。 -->
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Deployment" />
+    <!-- DPAPI（ProtectedData）：登录对话框"记住密码"用，加密落盘到 %LOCALAPPDATA%（框架自带程序集） -->
+    <Reference Include="System.Security" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xml" />
+    <!-- 串口扫码枪 -->
+    <Reference Include="System.IO.Ports" />
+    <!-- MES 上传（V2.15.19）：HttpClient 走框架自带 System.Net.Http 程序集，离线可编译 -->
+    <Reference Include="System.Net.Http" />
+    <!-- 本地引用的第三方库（libs 目录，离线可编译；版本以 packages.config 为准） -->
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>libs\Newtonsoft.Json.dll</HintPath>
+      <!-- NuGet: Newtonsoft.Json 13.0.4 -->
+    </Reference>
+    <Reference Include="NModbus">
+      <HintPath>libs\NModbus.dll</HintPath>
+      <!-- NuGet: NModbus 3.0.83（git 2023 fork，命名空间 NModbus，工厂方法 CreateMaster） -->
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="Views\MainForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <!-- MainForm 的 Designer 分部文件：静态控件（标题栏/产品型号下拉/设置按钮/连接灯/状态栏/窗口矩阵）
+         由 Visual Studio 窗体设计器可视化维护；动态控件（相机灯/窗口矩阵内容）仍在 MainForm.cs 运行时生成 -->
+    <Compile Include="Views\MainForm.Designer.cs">
+      <DependentUpon>MainForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Views\SettingsForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <!-- SettingsForm 的 Designer 分部文件：静态布局控件（PLC/窗口/图片模板/相机表格/按钮）由
+         Visual Studio 窗体设计器可视化维护；数据填充与保存逻辑仍在 SettingsForm.cs -->
+    <Compile Include="Views\SettingsForm.Designer.cs">
+      <DependentUpon>SettingsForm.cs</DependentUpon>
+    </Compile>
+    <!-- LoginForm：管理员登录对话框（V1.9.0，控制系统设置使用权限，SHA-256 校验） -->
+    <Compile Include="Views\LoginForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Views\LoginForm.Designer.cs">
+      <DependentUpon>LoginForm.cs</DependentUpon>
+    </Compile>
+    <!-- DirTreeEditForm：图片存储目录结构可视化配置对话框（逐级编辑目录名/规则 + 文件名规则 + 实时预览） -->
+    <Compile Include="Views\DirTreeEditForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Views\DirTreeEditForm.Designer.cs">
+      <DependentUpon>DirTreeEditForm.cs</DependentUpon>
+    </Compile>
+    <!-- WindowPointForm：窗口→存图点位映射的可视化配置对话框（格子矩阵：编辑点位/交换位置/恢复默认） -->
+    <Compile Include="Views\WindowPointForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Views\WindowPointForm.Designer.cs">
+      <DependentUpon>WindowPointForm.cs</DependentUpon>
+    </Compile>
+    <!-- DeveloperModeForm：开发者模式窗体（原名 DevTestForm；V1.12.0 起开发者账号 dev 登录进入，
+         PLC/相机通讯手动验证 + V2.15.10 账号管理） -->
+    <Compile Include="Views\DeveloperModeForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Views\DeveloperModeForm.Designer.cs">
+      <DependentUpon>DeveloperModeForm.cs</DependentUpon>
+    </Compile>
+    <!-- SerialInputForm：手动输入序列号对话框（V2.14.6 恢复；V2.14.7 改 Designer 分部文件，可用设计器微调 UI） -->
+    <Compile Include="Views\SerialInputForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Views\SerialInputForm.Designer.cs">
+      <DependentUpon>SerialInputForm.cs</DependentUpon>
+    </Compile>
+    <!-- ScannerFailForm：扫码枪异常提醒对话框（V2.14.32，读码失败 ERROR 文本→弹窗提醒检查扫码枪或人工补录） -->
+    <Compile Include="Views\ScannerFailForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Views\ScannerFailForm.Designer.cs">
+      <DependentUpon>ScannerFailForm.cs</DependentUpon>
+    </Compile>
+    <!-- ModelIndexEditForm：产品型号配置对话框（V2.14.14，表格维护型号↔PLC序号映射，取代旧型号序号框） -->
+    <Compile Include="Views\ModelIndexEditForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Views\ModelIndexEditForm.Designer.cs">
+      <DependentUpon>ModelIndexEditForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Controls\CameraDisplayControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Controls\OkNgBadge.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Models\AppConfig.cs" />
+    <Compile Include="Models\WindowData.cs" />
+    <Compile Include="Services\PlcService.cs" />
+    <Compile Include="Services\KeyenceIV4Camera.cs" />
+    <Compile Include="Services\ImageStore.cs" />
+    <Compile Include="Services\ScannerService.cs" />
+    <Compile Include="Services\ScannerTcpService.cs" />
+    <Compile Include="Services\ProductionCoordinator.cs" />
+    <Compile Include="Services\MesService.cs" />
+    <Compile Include="Services\ConnectionMonitor.cs" />
+    <Compile Include="Utils\ConfigStore.cs" />
+    <Compile Include="Utils\AppIcon.cs" />
+    <Compile Include="Utils\AppTheme.cs" />
+    <Compile Include="Utils\I18n.cs" />
+    <Compile Include="Utils\LogHelper.cs" />
+    <Compile Include="Utils\PlaceholderLocalizer.cs" />
+    <Compile Include="Utils\SecurityUtil.cs" />
+    <Compile Include="Utils\TcpKeepAlive.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="App.config" />
+    <!-- 图标资源：app.ico（编译进 exe 的主图标）+ app.png（制 ico 的源图，留档备改）；
+         只做 None（进方案管理器可见），不复制到输出目录（图标已打进 exe 本体）。 -->
+    <None Include="Resources\app.ico" />
+    <None Include="Resources\app.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Views\DeveloperModeForm.resx">
+      <DependentUpon>DeveloperModeForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Views\MainForm.resx">
+      <DependentUpon>MainForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Views\SettingsForm.resx">
+      <DependentUpon>SettingsForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Views\WindowPointForm.resx">
+      <DependentUpon>WindowPointForm.cs</DependentUpon>
+    </EmbeddedResource>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

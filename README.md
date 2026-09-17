@@ -1,7 +1,8 @@
 # 光阑视界 IrisVision
 
 > 软件中文名**光阑视界**、英文名 **IrisVision**（V2.16.5 起；主窗体标题与程序集显示名均为此名）。
-> 工程名与 exe 文件名保持 `CommandCenter` / `CommandCenter.exe` 不变，已有部署与脚本零改动。
+> 工程名 / exe 文件名 / 命名空间 / 单实例互斥名统一为 `IrisVision` / `IrisVision.exe`
+> （V2.16.9 起彻底更名，此前叫 CommandCenter；项目未上线，不兼容旧名）。
 
 产线相机检测上位机（Windows 桌面程序，.NET Framework 4.7.2 WinForms）：
 **PLC 说"扫码"，它扫条码；PLC 说"几号点位拍照"，它派相机拍；每张图一个 OK/NG，
@@ -32,7 +33,7 @@ PLC 写 40002/40003=点位号（拍照请求）
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ 上位机 CommandCenter（本程序）                              │
+│ 上位机 IrisVision（本程序）                              │
 │                                                            │
 │  ScannerService ──┐                                        │
 │  (扫码枪读SN)      │                                        │
@@ -58,7 +59,7 @@ PLC 写 40002/40003=点位号（拍照请求）
 | 相机 | 基恩士 IV4 系列（TCP 无协议） | 发指令触发拍照、读 OK/NG；图片走 **FTP 推图**（jpeg + iv4p 双文件归档） |
 | 扫码枪 | 基恩士 SR 系列（TCP 无协议 / 串口） | 默认 TCP，上位机连上后发 `LON` 开始读码 |
 | 配置序列化 | Newtonsoft.Json | `Config/appconfig.json`，小驼峰命名 |
-| 依赖部署 | 第三方 DLL 拷在 `CommandCenter/libs/` | csproj 直接引用，**离线可编译，不依赖 NuGet** |
+| 依赖部署 | 第三方 DLL 拷在 `IrisVision/libs/` | csproj 直接引用，**离线可编译，不依赖 NuGet** |
 
 ## 软件架构
 
@@ -143,7 +144,7 @@ PLC 写 40001=1（扫码请求）
 ## 目录结构
 
 ```
-CommandCenter/
+IrisVision/
 ├── Views/          界面窗体（MainForm / SettingsForm / LoginForm / DeveloperModeForm /
 │                   WindowPointForm / DirTreeEditForm / SerialInputForm…）
 │                   ※ 静态布局在 *.Designer.cs 里可视化维护；动态部分（窗口矩阵、状态灯）
@@ -162,33 +163,33 @@ CommandCenter/
 
 ```powershell
 & "D:\Program Files\Microsoft Visual Studio\18\Enterprise\MSBuild\Current\Bin\MSBuild.exe" `
-  CommandCenter/CommandCenter.csproj /p:Configuration=Debug /p:Platform=AnyCPU /t:Build /nologo /v:m /m
+  IrisVision/IrisVision.csproj /p:Configuration=Debug /p:Platform=AnyCPU /t:Build /nologo /v:m /m
 ```
 
-产物：`CommandCenter\bin\Debug\CommandCenter.exe`，启动后等几秒进程存活即冒烟通过。
+产物：`IrisVision\bin\Debug\IrisVision.exe`，启动后等几秒进程存活即冒烟通过。
 
 ### 自动化验证（V2.15.18，改动后必跑）
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\scripts\run-all.ps1"
+powershell -ExecutionPolicy Bypass -File ".opencode\skills\irisvision-test\scripts\run-all.ps1"
 ```
 
 一条命令跑完三层验证：**构建 → 137 条回归用例（离线可跑，覆盖 SN/型号寄存器打包、PLC 从站读写、
 配置兼容、扫码过滤、窗口布局、程序映射、密码安全、I18n）→ 两轮进程冒烟**；任一失败非零退出。
-新增可测功能/修 bug 后，对应用例必须同步沉淀进该 skill（见 `.opencode/skills/commandcenter-test/SKILL.md`）。
+新增可测功能/修 bug 后，对应用例必须同步沉淀进该 skill（见 `.opencode/skills/irisvision-test/SKILL.md`）。
 
 ## 发布（代码混淆，V2.14.31；自动打包 zip，V2.16.0）
 
 现场部署用**混淆版**，防止反编译拿到类名/方法名/设备 IP/寄存器号/相机指令等业务细节：
 
 ```powershell
-& ".\CommandCenter\build-obfuscated.ps1"
+& ".\IrisVision\build-obfuscated.ps1"
 ```
 
 - 流程：Release 构建 → Obfuscar 混淆 → 补第三方 dll + config → 启动保活冒烟 → **自动打包上传 zip**（版本号取最近 git tag）。
 - 产物：
-  - 上传包 `CommandCenter\bin\CommandCenter_{版本号}_obfuscated.zip`（含 exe + 两第三方 dll + config + Mapping.txt，已排除运行时 Logs），**直接上传/解压部署**；
-  - 混淆目录 `CommandCenter\bin\Obfuscated\`，整个目录拷去现场亦可运行。
+  - 上传包 `IrisVision\bin\IrisVision_{版本号}_obfuscated.zip`（含 exe + 两第三方 dll + config + Mapping.txt，已排除运行时 Logs），**直接上传/解压部署**；
+  - 混淆目录 `IrisVision\bin\Obfuscated\`，整个目录拷去现场亦可运行。
 - 混淆只改名字/字符串（类名变 A.a 乱码、字符串运行时解密），**不改功能**；`Models` 配置模型除外——
   属性名必须保留（`appconfig.json` 字段名依赖它），保证现场旧配置可无缝升级。
 - 混淆版 PDB 失配、无法断点调试；现场/开发排查问题请用 Debug 版 + `Logs/` 日志。
@@ -197,14 +198,14 @@ powershell -ExecutionPolicy Bypass -File ".opencode\skills\commandcenter-test\sc
 
 ### 软件图标与桌面快捷方式（V2.16.5）
 
-- 图标唯一来源 `CommandCenter/Resources/app.ico`（由 `app.png` 源图重制的 16~256 七层多尺寸），
+- 图标唯一来源 `IrisVision/Resources/app.ico`（由 `app.png` 源图重制的 16~256 七层多尺寸），
   经 csproj `<ApplicationIcon>` 编译进 exe——exe 文件图标、资源管理器、桌面快捷方式、
   任务栏（运行中 + 固定）四处自动取它；9 个窗体标题栏图标统一走 `Utils/AppIcon.cs`
   取自身 exe 内嵌图标（现场部署不需多拷资源文件）。
 - 桌面快捷方式一键创建（名"光阑视界 IrisVision"，图标取目标 exe 内嵌图标）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File ".\CommandCenter\tools\Create-DesktopShortcut.ps1"
+powershell -ExecutionPolicy Bypass -File ".\IrisVision\tools\Create-DesktopShortcut.ps1"
 ```
 
 默认按 混淆版→Release→Debug 自动找 exe，也可用 `-ExePath` 显式指定现场部署路径。
@@ -454,7 +455,7 @@ E:\Images\                        ← saveRootDir（存图根目录）
 | `adminEnabled` | true | 点"系统设置"是否要登录（生产建议开，防误改配置） |
 | `adminUser` / `adminPasswordHash` | admin / admin123 的哈希 | 管理员，密码**只存 SHA-256 哈希、不存明文** |
 | `devEnabled` / `devUser` / `devPasswordHash` | true / dev / dev123 的哈希 | 开发者，登录进**开发者模式窗体**（原名功能测试：通讯验证 + 账号管理） |
-| 记住密码 | — | 勾选后用 Windows DPAPI 加密存 `%LOCALAPPDATA%\CommandCenter\`（绑定本机用户，拷走无效）；管理员/开发者记录**互斥**，登录任一方会清掉另一方 |
+| 记住密码 | — | 勾选后用 Windows DPAPI 加密存 `%LOCALAPPDATA%\IrisVision\`（绑定本机用户，拷走无效）；管理员/开发者记录**互斥**，登录任一方会清掉另一方 |
 
 管理员密码在**登录对话框**里改（验证原密码 → 新密码两次一致且 ≥6 位 → 保存）；开发者密码不提供在线
 修改（改哈希需用工具算好写配置）。
@@ -463,7 +464,7 @@ E:\Images\                        ← saveRootDir（存图根目录）
 
 | 文档 | 用途 |
 | --- | --- |
-| `docs/CommandCenter.md` | **主文档**：用户操作手册、系统总览与设备清单、扫码枪/相机/PLC 通讯详情与寄存器定义、计数结果流转、IP 参数速查、版本演进 |
+| `docs/IrisVision.md` | **主文档**：用户操作手册、系统总览与设备清单、扫码枪/相机/PLC 通讯详情与寄存器定义、计数结果流转、IP 参数速查、版本演进 |
 | `docs/光阑视界操作员手册.md(+pdf)` | **现场操作员版培训手册（V2.16.6 三份制）**：开机、看界面、生产流程、报警处置、点检与禁忌，大白话、每步配图 |
 | `docs/光阑视界客户技术手册.md(+pdf)` | **客户技术工艺版（V2.16.6）**：系统组成、账号权限、换型、点位程序配置、存图、MES 联调自助闭环、排障 |
 | `docs/光阑视界内部手册.md(+pdf)` | **内部版（V2.16.6）**：权限矩阵（含开发者账号）、账号全流程、工艺知识、技术实现篇、交付清单 |
@@ -472,4 +473,4 @@ E:\Images\                        ← saveRootDir（存图根目录）
 | `docs/上位机通讯封装范式.md` | 通讯架构技术总结（连接/心跳/重连/UI 解耦范式，跨项目可复用） |
 
 > 代码约定（给接手的开发者）：文件 UTF-8；配置 `Config/*.json`、`Logs/`、`bin/`、`obj/` 不入库；
-> 改动后构建验证；通讯/握手/映射类改动必须同步 `docs/CommandCenter.md` 并记录 `CHANGELOG.md`。
+> 改动后构建验证；通讯/握手/映射类改动必须同步 `docs/IrisVision.md` 并记录 `CHANGELOG.md`。
